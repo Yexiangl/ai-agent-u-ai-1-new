@@ -30,7 +30,8 @@ import {
 import { listModels, type ChatMessage } from "@/lib/api";
 import { DEFAULT_CONFIG, DEFAULT_MEMORY_FILES, type AppConfig } from "@/lib/config";
 import { clearConfig, loadConfig, saveConfig } from "@/lib/storage";
-import { checkHermes, checkHermesApiServer, getHermesHelp, hermesChatCompletion, readHermesModelConfig, type HermesApiServerStatus, type HermesModelConfig, type HermesStatus } from "@/lib/hermes";
+import { checkHermes, checkHermesApiServer, getHermesHelp, hermesChatCompletion, readHermesModelConfig, type HermesApiServerStatus, type HermesChatChunk, type HermesChatDone, type HermesChatError, type HermesModelConfig, type HermesStatus, type HermesStreamDiagnostics, type HermesToolProgress } from "@/lib/hermes";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { cn, getErrorMessage, maskKey } from "@/lib/utils";
 import { skills, skillCategories } from "@/data/skills";
 import { tutorials } from "@/data/tutorials";
@@ -46,11 +47,46 @@ import { Textarea } from "@/components/ui/textarea";
 
 type RouteId = "home" | "chat" | "engines" | "models" | "skills" | "memory" | "tasks" | "usage" | "security" | "tutorials" | "about";
 type UiChatMessage = ChatMessage & {
+  requestId?: string;
   source?: "Hermes Agent";
   elapsedMs?: number;
   usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } | null;
   modelName?: string;
   sessionId?: string | null;
+  reasoningContent?: string;
+  toolEvents?: string[];
+};
+
+const DEBUG_STREAM = true;
+
+type FrontStreamDiagnostics = {
+  requestId: string;
+  listenRegistered: boolean;
+  currentRequestId: string | null;
+  frontChunkReceivedCount: number;
+  frontChunkAppliedCount: number;
+  doneReceivedCount: number;
+  errorReceivedCount: number;
+  toolProgressReceivedCount: number;
+  filteredEventCount: number;
+  missingAssistantPlaceholderCount: number;
+  doneReceived: boolean;
+  rust: Record<string, unknown>;
+};
+
+const initialFrontStreamDiagnostics: FrontStreamDiagnostics = {
+  requestId: "",
+  listenRegistered: false,
+  currentRequestId: null,
+  frontChunkReceivedCount: 0,
+  frontChunkAppliedCount: 0,
+  doneReceivedCount: 0,
+  errorReceivedCount: 0,
+  toolProgressReceivedCount: 0,
+  filteredEventCount: 0,
+  missingAssistantPlaceholderCount: 0,
+  doneReceived: false,
+  rust: {}
 };
 
 const navItems = [
@@ -66,11 +102,6 @@ const navItems = [
   { id: "tutorials", label: "教程", icon: BookOpen },
   { id: "about", label: "关于", icon: KeyRound }
 ] as const;
-
-const taskMock = [
-  { name: "每日线索总结", frequency: "每天 09:00", model: "kimi-k2.6", channel: "本地记录", status: "成功" },
-  { name: "价格表检查", frequency: "每周一", model: "deepseek-v4-pro", channel: "暂无推送", status: "待执行" }
-];
 
 function App() {
   const [active, setActive] = useState<RouteId>("home");
@@ -196,7 +227,6 @@ function App() {
             </select>
             <div className="min-w-0">
             <h1 className="text-lg font-semibold">{current.label}</h1>
-            <p className="text-xs text-muted-foreground">U 盘交付版 · 云端模型服务 · 本地配置管理</p>
             </div>
           </div>
           <Button variant="outline" size="icon" onClick={() => setDark(!dark)} title="切换深色模式">
@@ -326,7 +356,7 @@ function HomePage({ config, setActive, hermesCli, hermesApi, hermesModelConfig }
         <div className="relative flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h2 className="text-2xl font-bold tracking-tight">AI Agent 工作台</h2>
-            <p className="mt-1 text-sm text-white/80">连接本地 Hermes Agent，管理你的 Skills、记忆和任务。</p>
+
           </div>
           <Badge className="self-start border-white/30 bg-white/20 text-white">
             {hermesApi ? (agentConnected ? <CheckCircle2 className="mr-1 h-3 w-3" /> : <Moon className="mr-1 h-3 w-3" />) : <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
@@ -669,6 +699,8 @@ function ModelConfigPage({ config, updateConfig, hermesCli, hermesModelConfig, s
   );
 }
 
+type ChatPhase = "ready" | "sending" | "thinking" | "running" | "done" | "error";
+
 function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, initialDraft, onDraftConsumed }: { config: AppConfig; hermesCli: HermesStatus | null; hermesApi: HermesApiServerStatus | null; refreshHermesApi: () => Promise<HermesApiServerStatus>; setActive: (id: RouteId) => void; initialDraft: string; onDraftConsumed: () => void }) {
   const [input, setInput] = useState(initialDraft);
   const [messages, setMessages] = useState<UiChatMessage[]>([]);
@@ -682,8 +714,22 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
   const [confirmClear, setConfirmClear] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [lastElapsed, setLastElapsed] = useState<number | null>(null);
+  const [phase, setPhase] = useState<ChatPhase>("ready");
+  const [elapsedLive, setElapsedLive] = useState(0);
+  const [streamDiagnostics, setStreamDiagnostics] = useState<FrontStreamDiagnostics>(initialFrontStreamDiagnostics);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
+  const activeRequestRef = useRef<string | null>(null);
+  const unlistenRef = useRef<UnlistenFn[]>([]);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    const stored = unlistenRef.current;
+    return () => {
+      stored.forEach((fn) => fn());
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     if (!initialDraft) return;
@@ -718,6 +764,10 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
     setModeMessage("");
     setSessionId(null);
     setLastElapsed(null);
+    setPhase("ready");
+    setElapsedLive(0);
+    setStreamDiagnostics(initialFrontStreamDiagnostics);
+    if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
     setInput("");
   }, []);
 
@@ -742,10 +792,25 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
     setErrorDetail(null);
     setShowErrorDetail(false);
     setLoading(true);
-    const nextMessages: UiChatMessage[] = [...messages, { role: "user", content: input.trim() }];
+    setPhase("sending");
+    setElapsedLive(0);
+
+    const startedAt = Date.now();
+    const timer = setInterval(() => {
+      setElapsedLive(Math.round((Date.now() - startedAt) / 1000));
+    }, 1000);
+    timerRef.current = timer;
+
+    const userMessage: UiChatMessage = { role: "user", content: input.trim() };
+    const nextMessages: UiChatMessage[] = [...messages, userMessage];
     setMessages(nextMessages);
     setInput("");
     autoResize(inputRef.current);
+
+    const requestId = crypto.randomUUID();
+    activeRequestRef.current = requestId;
+    setStreamDiagnostics({ ...initialFrontStreamDiagnostics, requestId, currentRequestId: requestId });
+
     const enabledSkillSummary = skills
       .filter((skill) => config.enabledSkills.includes(skill.id))
       .map((skill) => `${skill.name}：${skill.description}`)
@@ -760,38 +825,172 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
       },
       ...nextMessages.map(({ role, content }) => ({ role, content }))
     ];
+
+    const cleanupListeners = () => {
+      unlistenRef.current.forEach((fn) => fn());
+      unlistenRef.current = [];
+    };
+    cleanupListeners();
+
+    const placeholder: UiChatMessage = {
+      requestId,
+      role: "assistant",
+      source: "Hermes Agent",
+      content: "",
+      modelName: hermesModelName
+    };
+    setMessages([...nextMessages, placeholder]);
+
     try {
-      const latestHermesApi = hermesApi?.running ? hermesApi : await refreshHermesApi();
-      if (latestHermesApi?.running && latestHermesApi.baseUrl) {
-        const result = await hermesChatCompletion(hermesModelName, agentMessages);
-        if (result.success) {
-          setModeMessage("Hermes Agent：已连接本机 API Server");
-          setLastElapsed(result.elapsedMs ?? null);
-          if (result.sessionId) setSessionId(result.sessionId);
-          setMessages([...nextMessages, {
-            role: "assistant",
-            source: "Hermes Agent",
-            content: result.content || "Hermes 没有返回内容",
-            elapsedMs: result.elapsedMs,
-            usage: result.rawUsage ?? null,
-            modelName: result.model,
-            sessionId: result.sessionId ?? null
-          }]);
-        } else {
-          setError("Hermes 请求失败，请检查本地对话服务或 Hermes 模型供应配置。");
-          setErrorDetail(`请求目标：Hermes 对话服务\nURL：${result.url ?? "http://127.0.0.1:8642/v1/chat/completions"}\n模型：${hermesModelName}\nHTTP 状态：${result.status ?? "error"}\n错误：${result.error ?? "未知错误"}`);
+      const unlistenChunk = await listen<HermesChatChunk>("hermes-chat-chunk", (event) => {
+        setStreamDiagnostics((prev) => ({ ...prev, frontChunkReceivedCount: prev.frontChunkReceivedCount + 1, currentRequestId: activeRequestRef.current }));
+        if (DEBUG_STREAM) console.debug("[stream-debug] front chunk", { requestId: event.payload.requestId, expectedRequestId: requestId, type: event.payload.type, length: event.payload.content?.length ?? 0 });
+        if (event.payload.requestId !== requestId) {
+          if (DEBUG_STREAM) console.debug("[stream-debug] front chunk filtered", { requestId: event.payload.requestId, expectedRequestId: requestId });
+          setStreamDiagnostics((prev) => ({ ...prev, filteredEventCount: prev.filteredEventCount + 1 }));
+          return;
         }
+        if (event.payload.type === "content") {
+          setPhase("running");
+        }
+        setMessages((prev) => {
+          const updated = [...prev];
+          const idx = updated.findIndex((message) => message.role === "assistant" && message.requestId === requestId);
+          if (idx < 0) {
+            setStreamDiagnostics((diag) => ({ ...diag, missingAssistantPlaceholderCount: diag.missingAssistantPlaceholderCount + 1 }));
+            if (DEBUG_STREAM) console.debug("[stream-debug] front chunk missing assistant", { requestId });
+            return prev;
+          }
+          const last = updated[idx];
+          if (event.payload.type === "reasoning") {
+            const current = last.reasoningContent || "";
+            updated[idx] = { ...last, reasoningContent: current + (event.payload.content || "") };
+          } else {
+            updated[idx] = { ...last, content: (last.content || "") + (event.payload.content || "") };
+          }
+          setStreamDiagnostics((diag) => ({ ...diag, frontChunkAppliedCount: diag.frontChunkAppliedCount + 1 }));
+          return updated;
+        });
+      });
+      unlistenRef.current.push(unlistenChunk);
+
+      const unlistenTool = await listen<HermesToolProgress>("hermes-tool-progress", (event) => {
+        setStreamDiagnostics((prev) => ({ ...prev, toolProgressReceivedCount: prev.toolProgressReceivedCount + 1, currentRequestId: activeRequestRef.current }));
+        if (DEBUG_STREAM) console.debug("[stream-debug] front tool", { requestId: event.payload.requestId, expectedRequestId: requestId, length: event.payload.data?.length ?? 0 });
+        if (event.payload.requestId !== requestId) {
+          setStreamDiagnostics((prev) => ({ ...prev, filteredEventCount: prev.filteredEventCount + 1 }));
+          return;
+        }
+        setMessages((prev) => {
+          const updated = [...prev];
+          const idx = updated.findIndex((message) => message.role === "assistant" && message.requestId === requestId);
+          if (idx < 0) {
+            setStreamDiagnostics((diag) => ({ ...diag, missingAssistantPlaceholderCount: diag.missingAssistantPlaceholderCount + 1 }));
+            return prev;
+          }
+          const last = updated[idx];
+          const current = last.toolEvents || [];
+          updated[idx] = { ...last, toolEvents: [...current, event.payload.data] };
+          return updated;
+        });
+      });
+      unlistenRef.current.push(unlistenTool);
+
+      const unlistenStreamDiagnostics = await listen<HermesStreamDiagnostics>("hermes-stream-diagnostics", (event) => {
+        if (event.payload.requestId !== requestId) {
+          setStreamDiagnostics((prev) => ({ ...prev, filteredEventCount: prev.filteredEventCount + 1 }));
+          return;
+        }
+        if (DEBUG_STREAM) console.debug("[stream-debug] front rust diagnostics", event.payload.diagnostics);
+        setStreamDiagnostics((prev) => ({ ...prev, rust: { ...prev.rust, ...event.payload.diagnostics }, currentRequestId: activeRequestRef.current }));
+      });
+      unlistenRef.current.push(unlistenStreamDiagnostics);
+
+      const unlistenDone = await listen<HermesChatDone>("hermes-chat-done", (event) => {
+        setStreamDiagnostics((prev) => ({ ...prev, doneReceivedCount: prev.doneReceivedCount + 1, doneReceived: true, currentRequestId: activeRequestRef.current, rust: { ...prev.rust, ...(event.payload.diagnostics || {}) } }));
+        if (DEBUG_STREAM) console.debug("[stream-debug] front done", { requestId: event.payload.requestId, expectedRequestId: requestId, contentLength: event.payload.content?.length ?? 0, reasoningLength: event.payload.reasoningContent?.length ?? 0, diagnostics: event.payload.diagnostics });
+        if (event.payload.requestId !== requestId) {
+          setStreamDiagnostics((prev) => ({ ...prev, filteredEventCount: prev.filteredEventCount + 1 }));
+          return;
+        }
+        if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+        setMessages((prev) => {
+          const updated = [...prev];
+          const idx = updated.findIndex((message) => message.role === "assistant" && message.requestId === requestId);
+          if (idx >= 0) {
+            const last = updated[idx];
+            updated[idx] = {
+              ...last,
+              content: last.content || event.payload.content || "模型只返回了推理内容，未返回正式回答",
+              reasoningContent: last.reasoningContent || event.payload.reasoningContent,
+              modelName: event.payload.model,
+              usage: event.payload.rawUsage ?? null,
+              sessionId: event.payload.sessionId,
+              elapsedMs: event.payload.elapsedMs
+            };
+          } else {
+            setStreamDiagnostics((diag) => ({ ...diag, missingAssistantPlaceholderCount: diag.missingAssistantPlaceholderCount + 1 }));
+          }
+          return updated;
+        });
+        setLastElapsed(event.payload.elapsedMs);
+        if (event.payload.sessionId) setSessionId(event.payload.sessionId);
+        setModeMessage("");
+        setPhase("done");
         setLoading(false);
+        activeRequestRef.current = null;
+        cleanupListeners();
+      });
+      unlistenRef.current.push(unlistenDone);
+
+      const unlistenErr = await listen<HermesChatError>("hermes-chat-error", (event) => {
+        setStreamDiagnostics((prev) => ({ ...prev, errorReceivedCount: prev.errorReceivedCount + 1, currentRequestId: activeRequestRef.current }));
+        if (event.payload.requestId !== requestId) {
+          setStreamDiagnostics((prev) => ({ ...prev, filteredEventCount: prev.filteredEventCount + 1 }));
+          return;
+        }
+        if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+        setError("Hermes 请求失败，请检查本地对话服务或 Hermes 模型供应配置。");
+        setErrorDetail(`请求目标：Hermes 对话服务\nURL：${event.payload.url ?? "http://127.0.0.1:8642/v1/chat/completions"}\nHTTP 状态：${event.payload.status ?? "error"}\n错误：${event.payload.error}`);
+        setPhase("error");
+        setLoading(false);
+        activeRequestRef.current = null;
+        cleanupListeners();
+      });
+      unlistenRef.current.push(unlistenErr);
+      setStreamDiagnostics((prev) => ({ ...prev, listenRegistered: true, currentRequestId: activeRequestRef.current }));
+      if (DEBUG_STREAM) console.debug("[stream-debug] front listeners registered", { requestId });
+
+      const latestHermesApi = hermesApi?.running ? hermesApi : await refreshHermesApi();
+      if (!latestHermesApi?.running || !latestHermesApi.baseUrl) {
+        if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+        setError("Hermes 本地对话服务未运行。请先前往 Hermes 管理页启动或配置 Hermes。");
+        setErrorDetail(`请求目标：Hermes 对话服务\nURL：http://127.0.0.1:8642/v1/chat/completions\n模型：${hermesModelName}\nHTTP 状态：unavailable\n错误：Hermes API Server 未运行`);
+        setPhase("error");
+        setLoading(false);
+        activeRequestRef.current = null;
+        cleanupListeners();
         return;
       }
 
-      setError("Hermes 本地对话服务未运行。请先前往 Hermes 管理页启动或配置 Hermes。");
-      setErrorDetail(`请求目标：Hermes 对话服务\nURL：${latestHermesApi?.baseUrl || "http://127.0.0.1:8642/v1/chat/completions"}\n模型：${hermesModelName}\nHTTP 状态：unavailable\n错误：Hermes API Server 未运行`);
-    } catch (error) {
-      setError(`请求异常：${getErrorMessage(error)}`);
-      setErrorDetail(`请求目标：Hermes 对话服务\nURL：http://127.0.0.1:8642/v1/chat/completions\n模型：${hermesModelName}\nHTTP 状态：error\n错误：${getErrorMessage(error)}`);
+      setPhase("thinking");
+      const result = await hermesChatCompletion(requestId, hermesModelName, agentMessages);
+      if (!result.success) {
+        if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+        setError(result.error || "请求提交失败");
+        setPhase("error");
+        setLoading(false);
+        activeRequestRef.current = null;
+        cleanupListeners();
+      }
+    } catch (err) {
+      if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+      setError(`请求异常：${getErrorMessage(err)}`);
+      setPhase("error");
+      setLoading(false);
+      activeRequestRef.current = null;
+      cleanupListeners();
     }
-    setLoading(false);
   };
 
   const regenLast = () => {
@@ -831,27 +1030,57 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className={cn("rounded-xl border p-3 text-sm", hermesConnected ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400" : hermesInstalled ? "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400" : "border-rose-500/30 bg-rose-500/10 text-rose-700 dark:text-rose-400")}>
-            <div>{hermesConnected ? "当前模式：Hermes Agent" : disabledReason}</div>
-            <div className="mt-1 text-xs opacity-80 space-y-0.5">
-              <div>Hermes 状态：{hermesConnected ? "已连接" : hermesInstalled ? "本地对话服务未运行" : "未安装"} · 模型：{hermesModelName}</div>
-              <div>hermes-agent 是 Hermes 本地对话接口，实际推理模型由 Hermes 模型供应配置决定。</div>
-              {lastElapsed != null && <div>最近请求耗时：{lastElapsed}ms</div>}
-              {sessionId && <div>会话 ID：{sessionId}</div>}
+          <div className={cn("rounded-xl border p-3 text-sm", phase === "error" ? "border-rose-500/30 bg-rose-500/10 text-rose-700 dark:text-rose-400" : hermesConnected ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400" : hermesInstalled ? "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400" : "border-rose-500/30 bg-rose-500/10 text-rose-700 dark:text-rose-400")}>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <span className="flex items-center gap-1.5">
+                <span className={cn("h-2 w-2 rounded-full", hermesConnected ? "bg-emerald-500" : hermesInstalled ? "bg-amber-500" : "bg-rose-500")} />
+                {hermesConnected ? "Hermes 已连接" : hermesInstalled ? "对话服务未运行" : "Hermes 未安装"}
+              </span>
+              {hermesConnected && phase !== "ready" && (
+                <>
+                  <span className="text-muted-foreground">·</span>
+                  <PhaseBadge phase={phase} />
+                </>
+              )}
             </div>
-            {modeMessage && <div className="mt-1 text-xs opacity-80">{modeMessage}</div>}
-            {!hermesConnected && <Button className="mt-3" variant="outline" size="sm" onClick={() => setActive("engines")}>前往 Hermes 管理</Button>}
+            <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-muted-foreground">
+              <span>接口：{hermesModelName}</span>
+              <span>实际推理模型由 Hermes 模型供应配置决定</span>
+            </div>
+            {(phase === "sending" || phase === "thinking" || phase === "running") && (
+              <div className="mt-1.5 flex items-center gap-2 text-xs">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                <span>已耗时 {elapsedLive}s</span>
+              </div>
+            )}
+            {phase === "done" && <div className="mt-1.5 text-xs text-muted-foreground">本轮完成 · 耗时 {lastElapsed != null ? `${lastElapsed}ms` : `${elapsedLive}s`}</div>}
+            {phase === "error" && <div className="mt-1.5 text-xs">请求出错</div>}
+            {!hermesConnected && <Button className="mt-2" variant="outline" size="sm" onClick={() => setActive("engines")}>前往 Hermes 管理</Button>}
           </div>
           <div className="max-h-[58vh] min-h-[420px] space-y-3 overflow-y-auto rounded-xl border bg-muted/30 p-4">
             {messages.length === 0 && <div className="text-sm text-muted-foreground">输入问题后发送，模型回复会显示在这里。Enter 发送，Shift + Enter 换行。</div>}
-            {messages.map((message, index) => (
+            {messages.map((message, index) => {
+              const isLastAssistant = message.role === "assistant" && index === messages.length - 1;
+              const isPlaceholder = isLastAssistant && loading;
+              const showPlaceholderText = isPlaceholder && !message.content;
+              return (
               <div key={index} className={cn("group rounded-xl border p-3 text-sm", message.role === "user" ? "ml-auto max-w-[80%] border-primary/20 bg-primary/5" : "mr-auto max-w-[80%]")}>
                 <div className="mb-1 flex items-center gap-2 text-[11px] text-muted-foreground">
                   <span>{message.role === "user" ? "你" : message.source || "Agent"}</span>
                   {message.role === "assistant" && message.modelName && <span>· 模型：{message.modelName}</span>}
-                  {message.role === "assistant" && message.elapsedMs != null && <span>· {message.elapsedMs}ms</span>}
+                  {message.role === "assistant" && message.elapsedMs != null && !isPlaceholder && <span>· {message.elapsedMs}ms</span>}
                 </div>
-                <div className="whitespace-pre-wrap">{message.content}</div>
+                {message.role === "assistant" && (
+                  <ReasoningBlock content={message.reasoningContent || ""} isPlaceholder={isPlaceholder} phase={isPlaceholder ? phase : "done"} />
+                )}
+                {message.role === "assistant" && (
+                  <ToolsBlock toolEvents={message.toolEvents} />
+                )}
+                {showPlaceholderText ? (
+                  <PlaceholderText phase={phase} elapsedLive={elapsedLive} />
+                ) : (
+                  <div className="whitespace-pre-wrap">{message.content || ""}</div>
+                )}
                 {message.role === "assistant" && message.usage && (
                   <div className="mt-2 flex gap-3 text-[10px] text-muted-foreground/70">
                     {message.usage.prompt_tokens != null && <span>输入 {message.usage.prompt_tokens}</span>}
@@ -859,13 +1088,16 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
                     {message.usage.total_tokens != null && <span>合计 {message.usage.total_tokens} tokens</span>}
                   </div>
                 )}
+                {message.role === "assistant" && message.sessionId && !isPlaceholder && (
+                  <div className="mt-1.5 text-[10px] text-muted-foreground/60">会话 ID：{message.sessionId}</div>
+                )}
                 {message.role === "assistant" && (
                   <div className="mt-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                     <Button variant="ghost" size="sm" onClick={() => navigator.clipboard.writeText(message.content)}><Copy className="h-3 w-3" />复制</Button>
                   </div>
                 )}
               </div>
-            ))}
+            );})}
             {loading && <div className="text-sm text-muted-foreground"><Loader2 className="mr-2 inline h-4 w-4 animate-spin" />请求中...</div>}
             <div ref={endRef} />
           </div>
@@ -915,7 +1147,34 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
           <Metric label="模型供应 Token" value={maskKey(config.apiKey)} tone={config.apiKey ? "success" : "warning"} />
           <div className="rounded-xl border bg-muted/30 p-3 text-xs text-muted-foreground">hermes-agent 是 Hermes 本地对话接口，实际推理模型由 Hermes 模型供应配置决定。</div>
           <Button variant="ghost" size="sm" onClick={() => setShowAdvanced(!showAdvanced)}>{showAdvanced ? "收起高级选项" : "展开高级选项"}</Button>
-          {showAdvanced && <div className="rounded-xl border bg-muted/30 p-3 text-xs text-muted-foreground">Agent 对话固定通过本机 Hermes API Server 请求 `hermes-agent`。</div>}
+          {showAdvanced && (
+            <div className="rounded-xl border bg-muted/30 p-3 text-xs text-muted-foreground space-y-2">
+              <div>Agent 对话固定通过本机 Hermes API Server 请求 `hermes-agent`。</div>
+              {DEBUG_STREAM && (
+                <div className="space-y-1">
+                  <div className="font-medium text-foreground">流式诊断</div>
+                  <StreamDebugRow label="requestId" value={streamDiagnostics.requestId || "-"} />
+                  <StreamDebugRow label="listenRegistered" value={String(streamDiagnostics.listenRegistered)} />
+                  <StreamDebugRow label="currentRequestId" value={streamDiagnostics.currentRequestId || "-"} />
+                  <StreamDebugRow label="contentType" value={String(streamDiagnostics.rust.contentType ?? "-")} />
+                  <StreamDebugRow label="transferEncoding" value={String(streamDiagnostics.rust.transferEncoding ?? "-")} />
+                  <StreamDebugRow label="firstByteMs" value={String(streamDiagnostics.rust.firstByteMs ?? "-")} />
+                  <StreamDebugRow label="bytesChunkCount" value={String(streamDiagnostics.rust.bytesChunkCount ?? 0)} />
+                  <StreamDebugRow label="sseEventCount" value={String(streamDiagnostics.rust.sseEventCount ?? 0)} />
+                  <StreamDebugRow label="contentChunkCount" value={String(streamDiagnostics.rust.contentChunkCount ?? 0)} />
+                  <StreamDebugRow label="reasoningChunkCount" value={String(streamDiagnostics.rust.reasoningChunkCount ?? 0)} />
+                  <StreamDebugRow label="toolEventCount" value={String(streamDiagnostics.rust.toolEventCount ?? 0)} />
+                  <StreamDebugRow label="frontChunkReceivedCount" value={String(streamDiagnostics.frontChunkReceivedCount)} />
+                  <StreamDebugRow label="frontChunkAppliedCount" value={String(streamDiagnostics.frontChunkAppliedCount)} />
+                  <StreamDebugRow label="filteredEventCount" value={String(streamDiagnostics.filteredEventCount)} />
+                  <StreamDebugRow label="missingAssistantPlaceholderCount" value={String(streamDiagnostics.missingAssistantPlaceholderCount)} />
+                  <StreamDebugRow label="doneReceived" value={String(streamDiagnostics.doneReceived)} />
+                  <StreamDebugRow label="isSse" value={String(streamDiagnostics.rust.isSse ?? "-")} />
+                  <StreamDebugRow label="fallbackToNonStreamJson" value={String(streamDiagnostics.rust.fallbackToNonStreamJson ?? "-")} />
+                </div>
+              )}
+            </div>
+          )}
           <Button variant="outline" onClick={() => { setMessages([]); setError(""); }}><Trash2 className="h-4 w-4" />清空对话</Button>
           <Button variant="outline" onClick={() => setActive("engines")}>前往 Hermes 管理</Button>
         </CardContent>
@@ -989,12 +1248,9 @@ function TasksPage({ config, updateConfig }: { config: AppConfig; updateConfig: 
     updateConfig({ ...config, tasks: [...config.tasks, { id: crypto.randomUUID(), name, frequency: "每天 09:00", prompt: "", model: "hermes-agent", channel: "本地记录", enabled: true }] });
     setName("");
   };
-  return <div className="space-y-4"><Card><CardHeader><CardTitle>新建任务 UI</CardTitle><CardDescription>当前只保存配置，不执行后台定时任务。</CardDescription></CardHeader><CardContent className="flex gap-2"><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="任务名称" /><Button onClick={addTask}><Save className="h-4 w-4" />保存任务</Button></CardContent></Card><Card><CardHeader><CardTitle>任务列表</CardTitle></CardHeader><CardContent className="overflow-x-auto"><Table><thead><tr><Th>任务名称</Th><Th>频率</Th><Th>模型</Th><Th>渠道</Th><Th>状态</Th></tr></thead><tbody>{[...taskMock, ...config.tasks.map((t) => ({ name: t.name, frequency: t.frequency, model: t.model, channel: t.channel, status: t.enabled ? "启用" : "暂停" }))].map((task) => <tr key={`${task.name}-${task.frequency}`}><Td>{task.name}</Td><Td>{task.frequency}</Td><Td>{task.model}</Td><Td>{task.channel}</Td><Td><Badge tone={task.status === "成功" ? "success" : "info"}>{task.status}</Badge></Td></tr>)}</tbody></Table></CardContent></Card></div>;
+  return <div className="space-y-4"><Card><CardHeader><CardTitle>新建任务 UI</CardTitle><CardDescription>当前只保存配置，不执行后台定时任务。</CardDescription></CardHeader><CardContent className="flex gap-2"><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="任务名称" /><Button onClick={addTask}><Save className="h-4 w-4" />保存任务</Button></CardContent></Card><Card><CardHeader><CardTitle>任务列表</CardTitle></CardHeader><CardContent className="overflow-x-auto"><Table><thead><tr><Th>任务名称</Th><Th>频率</Th><Th>模型</Th><Th>渠道</Th><Th>状态</Th></tr></thead><tbody>{config.tasks.map((t) => ({ name: t.name, frequency: t.frequency, model: t.model, channel: t.channel, status: t.enabled ? "启用" : "暂停" })).map((task) => <tr key={`${task.name}-${task.frequency}`}><Td>{task.name}</Td><Td>{task.frequency}</Td><Td>{task.model}</Td><Td>{task.channel}</Td><Td><Badge tone={task.status === "成功" ? "success" : "info"}>{task.status}</Badge></Td></tr>)}</tbody></Table></CardContent></Card></div>;
 }
 
-function DreamPage({ config }: { config: AppConfig }) {
-  return <div className="space-y-4"><Card accent="#6366F1"><CardHeader><CardTitle>梦境模式</CardTitle><CardDescription>低峰时段由 Hermes Agent 自动整理对话摘要、记忆文件和任务建议。当前阶段仅为 UI 占位，不执行后台任务。</CardDescription></CardHeader><CardContent className="grid gap-3 md:grid-cols-3"><Metric label="当前引擎" value="Hermes Agent" tone="info" /><Metric label="记忆文件" value={`${Object.keys(config.memoryFiles).length} 个`} tone="info" /><Metric label="状态" value="待开放" tone="muted" /></CardContent></Card><Card><CardHeader><CardTitle>最近运行 mock</CardTitle></CardHeader><CardContent className="space-y-2 text-sm text-muted-foreground"><div className="rounded-xl border bg-muted/30 p-3">03:20 整理业务记忆摘要（mock）</div><div className="rounded-xl border bg-muted/30 p-3">03:22 生成 Skills 使用建议（mock）</div></CardContent></Card></div>;
-}
 
 function UsagePage() {
   return <div className="space-y-4"><div className="grid gap-4 md:grid-cols-4"><Metric label="今日调用次数" value={String(usageStats.callsToday)} tone="info" /><Metric label="估算 Token" value={usageStats.estimatedTokens} tone="info" /><Metric label="常用模型" value={usageStats.commonModel} tone="success" /><Metric label="错误次数" value={String(usageStats.errors)} tone="danger" /></div><Card><CardHeader><CardTitle>最近调用记录</CardTitle></CardHeader><CardContent className="overflow-x-auto"><Table><thead><tr><Th>时间</Th><Th>模型</Th><Th>Token</Th><Th>状态</Th></tr></thead><tbody>{usageStats.logs.map((log) => <tr key={`${log.time}-${log.model}`}><Td>{log.time}</Td><Td>{log.model}</Td><Td>{log.tokens}</Td><Td><Badge tone={log.status === "成功" ? "success" : "danger"}>{log.status}</Badge></Td></tr>)}</tbody></Table></CardContent></Card></div>;
@@ -1007,15 +1263,107 @@ function SecurityPage({ config, updateConfig }: { config: AppConfig; updateConfi
 }
 
 function TutorialsPage({ config }: { config: AppConfig }) {
-  return <div className="grid gap-4 xl:grid-cols-2">{tutorials.map((tutorial) => <Card key={tutorial.title}><CardHeader><CardTitle>{tutorial.title}</CardTitle><CardDescription>Base URL：{config.baseUrl}</CardDescription></CardHeader><CardContent className="space-y-3 text-sm">{tutorial.steps.map((step, index) => <div key={step} className="flex gap-3"><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-primary text-xs text-primary-foreground">{index + 1}</span><p className="text-muted-foreground">{step}</p></div>)}</CardContent></Card>)}<Card><CardHeader><CardTitle>售后联系方式</CardTitle></CardHeader><CardContent className="text-sm text-muted-foreground">请在交付前替换为你的微信、邮箱或客服二维码说明。</CardContent></Card></div>;
+  return <div className="grid gap-4 xl:grid-cols-2">{tutorials.map((tutorial) => <Card key={tutorial.title}><CardHeader><CardTitle>{tutorial.title}</CardTitle></CardHeader><CardContent className="space-y-3 text-sm">{tutorial.steps.map((step, index) => <div key={step} className="flex gap-3"><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-primary text-xs text-primary-foreground">{index + 1}</span><p className="text-muted-foreground">{step}</p></div>)}</CardContent></Card>)}<Card><CardHeader><CardTitle>售后联系方式</CardTitle></CardHeader><CardContent className="text-sm text-muted-foreground">请在交付前替换为你的微信、邮箱或客服二维码说明。</CardContent></Card></div>;
 }
 
 function AboutPage() {
-  return <div className="space-y-4"><Card><CardHeader><CardTitle>AI Agent 工作台 U盘版</CardTitle><CardDescription>AI Agent Workspace v0.1.1</CardDescription></CardHeader><CardContent className="grid gap-3 text-sm"><Metric label="Agent 服务" value="本机 Hermes API Server" tone="info" /><Metric label="对话模型" value="hermes-agent" tone="success" /><Metric label="技术支持" value="请替换为售后联系方式占位" tone="muted" /></CardContent></Card><Card><CardHeader><CardTitle>使用步骤</CardTitle><CardDescription>购买 U盘会赠送初始额度，用完后可联系续费。</CardDescription></CardHeader><CardContent className="space-y-3 text-sm text-muted-foreground">{["插入 U盘", "打开 AI Agent Workspace", "在 Hermes 管理页确认 Hermes 状态", "在模型供应页配置专属模型供应 Token", "开始和 Hermes Agent 对话"].map((step, index) => <div key={step} className="flex gap-3"><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-primary text-xs text-primary-foreground">{index + 1}</span>{step}</div>)}</CardContent></Card></div>;
+  return <div className="space-y-4"><Card><CardHeader><CardTitle>AI Agent 工作台 U盘版</CardTitle><CardDescription>AI Agent Workspace v0.1.1</CardDescription></CardHeader><CardContent className="grid gap-3 text-sm"><Metric label="Agent 服务" value="本机 Hermes API Server" tone="info" /><Metric label="对话模型" value="hermes-agent" tone="success" /></CardContent></Card><Card><CardHeader><CardTitle>使用步骤</CardTitle><CardDescription>购买 U盘会赠送初始额度，用完后可联系续费。</CardDescription></CardHeader><CardContent className="space-y-3 text-sm text-muted-foreground">{["插入 U盘", "打开 AI Agent Workspace", "在 Hermes 管理页确认 Hermes 状态", "在模型供应页配置专属模型供应 Token", "开始和 Hermes Agent 对话"].map((step, index) => <div key={step} className="flex gap-3"><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-primary text-xs text-primary-foreground">{index + 1}</span>{step}</div>)}</CardContent></Card></div>;
+}
+
+function PhaseBadge({ phase }: { phase: ChatPhase }) {
+  const map: Record<ChatPhase, { label: string; tone: "success" | "info" | "warning" | "danger" | "muted" }> = {
+    ready: { label: "就绪", tone: "muted" },
+    sending: { label: "发送中", tone: "info" },
+    thinking: { label: "思考中", tone: "warning" },
+    running: { label: "生成中", tone: "info" },
+    done: { label: "完成", tone: "success" },
+    error: { label: "出错", tone: "danger" }
+  };
+  const { label, tone } = map[phase];
+  return <Badge tone={tone}>{label}</Badge>;
+}
+
+function PlaceholderText({ phase, elapsedLive }: { phase: ChatPhase; elapsedLive: number }) {
+  if (elapsedLive < 1) return <div className="text-muted-foreground animate-pulse">Hermes 正在发送请求…</div>;
+  if (elapsedLive < 8) return <div className="text-muted-foreground">Hermes 正在思考… <span className="text-[11px]">已等待 {elapsedLive}s</span></div>;
+  if (elapsedLive < 20) return <div className="text-amber-600 dark:text-amber-400">Hermes 正在调用模型或工具，请稍等… <span className="text-[11px]">已等待 {elapsedLive}s</span></div>;
+  return <div className="text-amber-600 dark:text-amber-400">复杂任务可能需要更久，窗口未卡死。 <span className="text-[11px]">已等待 {elapsedLive}s</span></div>;
+}
+
+function ReasoningBlock({ content, isPlaceholder, phase }: { content: string; isPlaceholder?: boolean; phase?: ChatPhase }) {
+  const [open, setOpen] = useState(false);
+  const hasContent = content.length > 0;
+
+  if (isPlaceholder && !hasContent) {
+    return (
+      <div className="mb-2">
+        <button
+          onClick={() => setOpen(!open)}
+          className="flex items-center gap-1 text-[11px] text-purple-600 dark:text-purple-400 hover:underline"
+        >
+          {open ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+          推理过程 / 思考状态
+        </button>
+        {open && (
+          <div className="mt-1 max-h-48 overflow-y-auto rounded-lg border border-purple-500/20 bg-purple-500/5 p-2 text-xs text-muted-foreground space-y-0.5">
+            <div>· 已发送到 Hermes</div>
+            <div>· 正在等待 Hermes 响应</div>
+            {phase === "running" && <div>· 已收到第一个内容片段</div>}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (!hasContent && !isPlaceholder) return null;
+
+  return (
+    <div className="mb-2">
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex items-center gap-1 text-[11px] text-purple-600 dark:text-purple-400 hover:underline"
+      >
+        {open ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+        推理过程
+      </button>
+      {open && (
+        <div className="mt-1 max-h-48 overflow-y-auto rounded-lg border border-purple-500/20 bg-purple-500/5 p-2 text-xs whitespace-pre-wrap text-muted-foreground">
+          {content}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ToolsBlock({ toolEvents }: { toolEvents?: string[] }) {
+  const [open, setOpen] = useState(false);
+  const hasEvents = toolEvents && toolEvents.length > 0;
+  return (
+    <div className="mb-2">
+      <button
+        onClick={() => setOpen(!open)}
+        className={cn("flex items-center gap-1 text-[11px] hover:underline", hasEvents ? "text-indigo-600 dark:text-indigo-400" : "text-muted-foreground")}
+      >
+        {open ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+        工具与技能执行{hasEvents ? ` (${toolEvents!.length})` : ""}
+      </button>
+      {open && (
+        <div className="mt-1 max-h-48 overflow-y-auto rounded-lg border border-indigo-500/20 bg-indigo-500/5 p-2 text-xs text-muted-foreground space-y-1">
+          {hasEvents
+            ? toolEvents!.map((evt, i) => <div key={i} className="whitespace-pre-wrap">{evt}</div>)
+            : <div>暂无工具调用记录。</div>}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return <label className="grid gap-2 text-sm"><span className="font-medium">{label}</span>{children}</label>;
+}
+
+function StreamDebugRow({ label, value }: { label: string; value: string }) {
+  return <div className="grid grid-cols-[170px_1fr] gap-2"><span>{label}</span><span className="break-all text-foreground">{value}</span></div>;
 }
 
 function Metric({ label, value, tone }: { label: string; value: string; tone: "success" | "info" | "warning" | "danger" | "muted" }) {

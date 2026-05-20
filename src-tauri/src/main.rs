@@ -5,7 +5,8 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tauri::Manager;
+use futures_util::StreamExt;
+use tauri::{Emitter, Manager};
 
 fn config_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let dir = app.path().app_data_dir().map_err(|error| error.to_string())?;
@@ -288,95 +289,380 @@ fn check_hermes_api_server() -> Result<serde_json::Value, String> {
     }))
 }
 
-#[tauri::command]
-fn hermes_chat_completion(model: String, messages: serde_json::Value) -> Result<serde_json::Value, String> {
-    let started = std::time::Instant::now();
-    let timeout = Duration::from_secs(60);
-    let addr: SocketAddr = "127.0.0.1:8642".parse::<SocketAddr>().map_err(|error: std::net::AddrParseError| error.to_string())?;
+fn emit_hermes_error(app: &tauri::AppHandle, request_id: &str, error: &str) {
+    let _ = app.emit("hermes-chat-error", serde_json::json!({
+        "requestId": request_id,
+        "error": error,
+        "url": "http://127.0.0.1:8642/v1/chat/completions",
+        "model": null,
+        "status": null,
+        "body": null
+    }));
+}
 
-    let mut stream = TcpStream::connect_timeout(&addr, timeout).map_err(|error| {
-        format!("无法连接 Hermes API Server (127.0.0.1:8642): {}", error)
-    })?;
-    stream.set_read_timeout(Some(timeout)).map_err(|error| error.to_string())?;
-    stream.set_write_timeout(Some(timeout)).map_err(|error| error.to_string())?;
+fn emit_hermes_error_full(app: &tauri::AppHandle, request_id: &str, error: &str, status: u16, body: &str) {
+    let _ = app.emit("hermes-chat-error", serde_json::json!({
+        "requestId": request_id,
+        "error": error,
+        "url": "http://127.0.0.1:8642/v1/chat/completions",
+        "model": null,
+        "status": status,
+        "body": body
+    }));
+}
 
-    let body = serde_json::json!({
-        "model": model,
-        "messages": messages
-    });
-    let body_str = serde_json::to_string(&body).map_err(|error| error.to_string())?;
+struct SseEvent {
+    event: String,
+    data: String,
+}
 
-    let request = format!(
-        "POST /v1/chat/completions HTTP/1.1\r\nHost: 127.0.0.1:8642\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-        body_str.len(),
-        body_str
-    );
-
-    stream.write_all(request.as_bytes()).map_err(|error| format!("发送请求失败: {}", error))?;
-
-    let mut response = String::new();
-    stream.read_to_string(&mut response).map_err(|error| format!("读取响应失败: {}", error))?;
-
-    let elapsed_ms = started.elapsed().as_millis() as u64;
-
-    let mut parts = response.splitn(2, "\r\n\r\n");
-    let headers = parts.next().unwrap_or_default();
-    let body = parts.next().unwrap_or_default();
-
-    let status_line = headers.lines().next().unwrap_or("HTTP/1.1 0 Unknown");
-    let status_code: u16 = status_line
-        .split_whitespace()
-        .nth(1)
-        .and_then(|code| code.parse().ok())
-        .unwrap_or(0);
-
-    let session_id = headers
-        .lines()
-        .find_map(|line| {
-            let lower = line.to_lowercase();
-            if lower.starts_with("x-hermes-session-id:") {
-                line.split_once(':').map(|(_, value)| value.trim().to_string())
-            } else {
-                None
-            }
-        });
-
-    if status_code != 200 {
-        let body_summary = body.chars().take(500).collect::<String>();
-        return Ok(serde_json::json!({
-            "success": false,
-            "url": "http://127.0.0.1:8642/v1/chat/completions",
-            "model": model,
-            "status": status_code,
-            "body": body_summary,
-            "error": format!("HTTP {}: Hermes API Server 返回错误", status_code),
-            "elapsedMs": elapsed_ms
-        }));
+fn preview_text(input: &str) -> String {
+    let mut out = input.replace('\r', "\\r").replace('\n', "\\n");
+    for needle in ["authorization", "api_key", "apikey", "token", "secret", "password"] {
+        out = out.replace(needle, "[redacted-key]");
+        out = out.replace(&needle.to_uppercase(), "[REDACTED-KEY]");
     }
+    out.chars().take(300).collect()
+}
 
-    let json: serde_json::Value = serde_json::from_str(body).map_err(|error| {
-        let body_summary = body.chars().take(500).collect::<String>();
-        format!("JSON 解析失败: {}. 响应正文: {}", error, body_summary)
-    })?;
+fn emit_stream_diagnostics(app: &tauri::AppHandle, request_id: &str, diagnostics: serde_json::Value) {
+    let _ = app.emit("hermes-stream-diagnostics", serde_json::json!({
+        "requestId": request_id,
+        "diagnostics": diagnostics
+    }));
+}
 
-    let content = json
-        .get("choices")
-        .and_then(|choices| choices.get(0))
-        .and_then(|choice| choice.get("message"))
-        .and_then(|message| message.get("content"))
-        .and_then(|content| content.as_str())
-        .unwrap_or("")
-        .to_string();
+fn parse_sse_line(line: &str, current_event: &mut SseEvent) -> Option<SseEvent> {
+    if let Some(data) = line.strip_prefix("data: ") {
+        if !current_event.data.is_empty() {
+            current_event.data.push('\n');
+        }
+        current_event.data.push_str(data);
+        return None;
+    }
+    if let Some(evt) = line.strip_prefix("event: ") {
+        current_event.event = evt.trim().to_string();
+        return None;
+    }
+    if line.is_empty() || line == "\r" {
+        if current_event.data.is_empty() && current_event.event == "message" {
+            return None;
+        }
+        let completed = SseEvent {
+            event: std::mem::take(&mut current_event.event),
+            data: std::mem::take(&mut current_event.data),
+        };
+        current_event.event = "message".to_string();
+        return Some(completed);
+    }
+    None
+}
 
-    let usage = json.get("usage").cloned();
+#[tauri::command]
+fn hermes_chat_completion(app: tauri::AppHandle, request_id: String, model: String, messages: serde_json::Value) -> Result<serde_json::Value, String> {
+    let rid = request_id.clone();
+    let mdl = model.clone();
+
+    tauri::async_runtime::spawn(async move {
+        let started = std::time::Instant::now();
+        let url = "http://127.0.0.1:8642/v1/chat/completions";
+        let client = match reqwest::Client::builder().timeout(Duration::from_secs(120)).build() {
+            Ok(client) => client,
+            Err(e) => {
+                emit_hermes_error(&app, &rid, &format!("创建 HTTP client 失败: {}", e));
+                return;
+            }
+        };
+
+        let request_body = serde_json::json!({
+            "model": mdl,
+            "messages": messages,
+            "stream": true
+        });
+        println!("[stream-debug] request requestId={} url={} model={} stream={}", rid, url, request_body.get("model").and_then(|v| v.as_str()).unwrap_or(""), request_body.get("stream").and_then(|v| v.as_bool()).unwrap_or(false));
+
+        let response = match client
+            .post(url)
+            .header("Accept", "text/event-stream")
+            .json(&request_body)
+            .send()
+            .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                emit_hermes_error(&app, &rid, &format!("无法连接 Hermes API Server: {}", e));
+                return;
+            }
+        };
+
+        let status_code = response.status().as_u16();
+        let content_type = response
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_lowercase();
+        let transfer_encoding = response
+            .headers()
+            .get("transfer-encoding")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_lowercase();
+        let session_id = response
+            .headers()
+            .get("x-hermes-session-id")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string());
+
+        let is_sse = content_type.contains("text/event-stream");
+        println!("[stream-debug] response requestId={} status={} contentType={} transferEncoding={} isSse={}", rid, status_code, content_type, transfer_encoding, is_sse);
+        emit_stream_diagnostics(&app, &rid, serde_json::json!({
+            "url": url,
+            "model": mdl,
+            "streamRequested": true,
+            "status": status_code,
+            "contentType": content_type,
+            "transferEncoding": transfer_encoding,
+            "isSse": is_sse,
+            "fallbackToNonStreamJson": false
+        }));
+
+        if status_code != 200 {
+            let body_text = response.text().await.unwrap_or_default();
+            let body_summary: String = body_text.chars().take(500).collect();
+            emit_hermes_error_full(&app, &rid, &format!("HTTP {}: Hermes API Server 返回错误", status_code), status_code, &body_summary);
+            return;
+        }
+
+        if !is_sse {
+            emit_stream_diagnostics(&app, &rid, serde_json::json!({
+                "url": url,
+                "model": mdl,
+                "streamRequested": true,
+                "status": status_code,
+                "contentType": content_type,
+                "transferEncoding": transfer_encoding,
+                "isSse": false,
+                "fallbackToNonStreamJson": true
+            }));
+            match response.json::<serde_json::Value>().await {
+                Ok(json) => {
+                    let message = json
+                        .get("choices").and_then(|c| c.get(0))
+                        .and_then(|c| c.get("message"));
+                    let content = message
+                        .and_then(|m| m.get("content")).and_then(|c| c.as_str()).unwrap_or("").to_string();
+                    let reasoning_content = message
+                        .and_then(|m| m.get("reasoning_content")).and_then(|r| r.as_str()).unwrap_or("").to_string();
+                    let usage = json.get("usage").cloned();
+                    let elapsed_ms = started.elapsed().as_millis() as u64;
+                    if !content.is_empty() {
+                        let _ = app.emit("hermes-chat-chunk", serde_json::json!({
+                            "requestId": rid, "content": content, "type": "content"
+                        }));
+                    }
+                    if !reasoning_content.is_empty() {
+                        let _ = app.emit("hermes-chat-chunk", serde_json::json!({
+                            "requestId": rid, "content": reasoning_content, "reasoningContent": reasoning_content, "type": "reasoning"
+                        }));
+                    }
+                    let _ = app.emit("hermes-chat-done", serde_json::json!({
+                        "requestId": rid,
+                        "content": content,
+                        "reasoningContent": reasoning_content,
+                        "model": mdl,
+                        "rawUsage": usage,
+                        "sessionId": session_id,
+                        "elapsedMs": elapsed_ms,
+                        "diagnostics": {
+                            "contentType": content_type,
+                            "transferEncoding": transfer_encoding,
+                            "isSse": false,
+                            "fallbackToNonStreamJson": true,
+                            "firstByteMs": null,
+                            "bytesChunkCount": 0,
+                            "sseEventCount": 0,
+                            "dataLineCount": 0,
+                            "chunkCount": if !content.is_empty() || !reasoning_content.is_empty() { 1 } else { 0 },
+                            "contentChunkCount": if !content.is_empty() { 1 } else { 0 },
+                            "reasoningChunkCount": if !reasoning_content.is_empty() { 1 } else { 0 },
+                            "toolEventCount": 0,
+                            "emptyDeltaCount": 0,
+                            "parseErrorCount": 0,
+                            "receivedDone": true
+                        }
+                    }));
+                }
+                Err(e) => {
+                    emit_hermes_error(&app, &rid, &format!("JSON 解析失败: {}", e));
+                }
+            }
+            return;
+        }
+
+        let mut content_accumulated = String::new();
+        let mut reasoning_accumulated = String::new();
+        let mut usage_info: Option<serde_json::Value> = None;
+        let mut chunk_count: u64 = 0;
+        let mut bytes_chunk_count: u64 = 0;
+        let mut sse_event_count: u64 = 0;
+        let mut data_line_count: u64 = 0;
+        let mut content_chunk_count: u64 = 0;
+        let mut reasoning_chunk_count: u64 = 0;
+        let mut tool_event_count: u64 = 0;
+        let mut empty_delta_count: u64 = 0;
+        let mut parse_error_count: u64 = 0;
+        let mut has_done = false;
+        let mut first_byte_ms: Option<u64> = None;
+        let mut last_byte_at = started;
+        let mut line_buffer = String::new();
+        let mut current_event = SseEvent { event: "message".to_string(), data: String::new() };
+        let mut stream = response.bytes_stream();
+
+        while let Some(item) = stream.next().await {
+            let bytes = match item {
+                Ok(bytes) => bytes,
+                Err(e) => {
+                    emit_hermes_error(&app, &rid, &format!("读取流式响应失败: {}", e));
+                    return;
+                }
+            };
+            let now = std::time::Instant::now();
+            let elapsed_ms = started.elapsed().as_millis() as u64;
+            let interval_ms = now.duration_since(last_byte_at).as_millis() as u64;
+            last_byte_at = now;
+            bytes_chunk_count += 1;
+            if first_byte_ms.is_none() {
+                first_byte_ms = Some(elapsed_ms);
+            }
+            let chunk_text = String::from_utf8_lossy(&bytes);
+            let preview = if bytes_chunk_count <= 5 { preview_text(&chunk_text) } else { String::new() };
+            println!("[stream-debug] bytes requestId={} bytesChunk={} len={} elapsedMs={} intervalMs={} preview={}", rid, bytes_chunk_count, bytes.len(), elapsed_ms, interval_ms, preview);
+            emit_stream_diagnostics(&app, &rid, serde_json::json!({
+                "url": url,
+                "model": mdl,
+                "streamRequested": true,
+                "status": status_code,
+                "contentType": content_type,
+                "transferEncoding": transfer_encoding,
+                "isSse": true,
+                "fallbackToNonStreamJson": false,
+                "firstByteMs": first_byte_ms,
+                "bytesChunkCount": bytes_chunk_count,
+                "lastBytesChunkLength": bytes.len(),
+                "lastBytesIntervalMs": interval_ms,
+                "sseEventCount": sse_event_count,
+                "dataLineCount": data_line_count,
+                "chunkCount": chunk_count,
+                "contentChunkCount": content_chunk_count,
+                "reasoningChunkCount": reasoning_chunk_count,
+                "toolEventCount": tool_event_count,
+                "emptyDeltaCount": empty_delta_count,
+                "parseErrorCount": parse_error_count,
+                "receivedDone": has_done
+            }));
+
+            line_buffer.push_str(&chunk_text);
+            while let Some(newline_idx) = line_buffer.find('\n') {
+                let mut line = line_buffer[..newline_idx].to_string();
+                if line.ends_with('\r') {
+                    line.pop();
+                }
+                line_buffer = line_buffer[newline_idx + 1..].to_string();
+                if line.starts_with("data:") {
+                    data_line_count += 1;
+                }
+                let Some(completed) = parse_sse_line(&line, &mut current_event) else { continue; };
+                sse_event_count += 1;
+                if completed.data == "[DONE]" {
+                    has_done = true;
+                    println!("[stream-debug] sse done requestId={} elapsedMs={}", rid, started.elapsed().as_millis());
+                    continue;
+                }
+
+                if completed.event == "hermes.tool.progress" {
+                    tool_event_count += 1;
+                    let emit_result = app.emit("hermes-tool-progress", serde_json::json!({
+                        "requestId": rid,
+                        "event": completed.event,
+                        "data": completed.data
+                    }));
+                    println!("[stream-debug] emit eventName=hermes-tool-progress requestId={} type=tool contentLength={} ok={} elapsedMs={}", rid, completed.data.len(), emit_result.is_ok(), started.elapsed().as_millis());
+                    continue;
+                }
+
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&completed.data) {
+                    let delta_opt = json.get("choices").and_then(|c| c.get(0)).and_then(|c| c.get("delta"));
+                    if let Some(delta) = delta_opt {
+                        let content = delta.get("content").and_then(|v| v.as_str()).unwrap_or("");
+                        let reasoning = delta.get("reasoning_content").and_then(|v| v.as_str()).unwrap_or("");
+                        if content.is_empty() && reasoning.is_empty() {
+                            empty_delta_count += 1;
+                        }
+                        if !content.is_empty() {
+                            chunk_count += 1;
+                            content_chunk_count += 1;
+                            content_accumulated.push_str(content);
+                            let emit_result = app.emit("hermes-chat-chunk", serde_json::json!({
+                                "requestId": rid, "content": content, "type": "content"
+                            }));
+                            println!("[stream-debug] emit eventName=hermes-chat-chunk requestId={} type=content contentLength={} ok={} elapsedMs={}", rid, content.len(), emit_result.is_ok(), started.elapsed().as_millis());
+                        }
+                        if !reasoning.is_empty() {
+                            chunk_count += 1;
+                            reasoning_chunk_count += 1;
+                            reasoning_accumulated.push_str(reasoning);
+                            let emit_result = app.emit("hermes-chat-chunk", serde_json::json!({
+                                "requestId": rid, "content": reasoning, "reasoningContent": reasoning, "type": "reasoning"
+                            }));
+                            println!("[stream-debug] emit eventName=hermes-chat-chunk requestId={} type=reasoning contentLength={} ok={} elapsedMs={}", rid, reasoning.len(), emit_result.is_ok(), started.elapsed().as_millis());
+                        }
+                    }
+                    if let Some(obj) = json.get("usage") {
+                        usage_info = Some(obj.clone());
+                    }
+                } else {
+                    parse_error_count += 1;
+                    println!("[stream-debug] sse parseError requestId={} event={} dataPreview={}", rid, completed.event, preview_text(&completed.data));
+                }
+            }
+        }
+
+        let elapsed_ms = started.elapsed().as_millis() as u64;
+        let diagnostics = serde_json::json!({
+            "contentType": content_type,
+            "transferEncoding": transfer_encoding,
+            "isSse": true,
+            "fallbackToNonStreamJson": false,
+            "firstByteMs": first_byte_ms,
+            "bytesChunkCount": bytes_chunk_count,
+            "sseEventCount": sse_event_count,
+            "dataLineCount": data_line_count,
+            "chunkCount": chunk_count,
+            "contentChunkCount": content_chunk_count,
+            "reasoningChunkCount": reasoning_chunk_count,
+            "toolEventCount": tool_event_count,
+            "emptyDeltaCount": empty_delta_count,
+            "parseErrorCount": parse_error_count,
+            "receivedDone": has_done
+        });
+        let emit_done_result = app.emit("hermes-chat-done", serde_json::json!({
+            "requestId": rid,
+            "content": content_accumulated,
+            "reasoningContent": reasoning_accumulated,
+            "model": mdl,
+            "rawUsage": usage_info,
+            "sessionId": session_id,
+            "elapsedMs": elapsed_ms,
+            "diagnostics": diagnostics
+        }));
+        println!("[stream-debug] emit eventName=hermes-chat-done requestId={} finalContentLength={} finalReasoningLength={} ok={} diagnostics={}", rid, content_accumulated.len(), reasoning_accumulated.len(), emit_done_result.is_ok(), diagnostics);
+    });
 
     Ok(serde_json::json!({
         "success": true,
-        "content": content,
-        "model": model,
-        "rawUsage": usage,
-        "sessionId": session_id,
-        "elapsedMs": elapsed_ms
+        "accepted": true,
+        "requestId": request_id
     }))
 }
 

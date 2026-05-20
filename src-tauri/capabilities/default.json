@@ -1,0 +1,10 @@
+{
+  "identifier": "default",
+  "description": "Default capabilities for AI Agent Workspace",
+  "windows": ["main"],
+  "permissions": [
+    "core:event:default",
+    "core:event:allow-listen",
+    "core:event:allow-emit"
+  ]
+}
