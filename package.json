@@ -1,0 +1,37 @@
+{
+  "name": "ai-agent-workspace",
+  "version": "0.1.1",
+  "private": true,
+  "scripts": {
+    "dev": "tauri dev",
+    "web:dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "tauri:build": "tauri build",
+    "tauri:build:mac": "tauri build",
+    "tauri:build:windows": "tauri build --target x86_64-pc-windows-msvc"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.8.0",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.511.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "recharts": "^2.15.3",
+    "tailwind-merge": "^3.3.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.21",
+    "@types/react": "^19.0.12",
+    "@types/react-dom": "^19.0.4",
+    "@vitejs/plugin-react": "^5.0.0",
+    "@tauri-apps/cli": "^2.8.4",
+    "autoprefixer": "^10.4.21",
+    "eslint": "^9.27.0",
+    "postcss": "^8.5.3",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.8.3",
+    "vite": "^7.0.0"
+  }
+}

@@ -1,0 +1,153 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id             String     @id @default(cuid())
+  name           String
+  email          String     @unique
+  passwordHash   String?
+  role           Role       @default(CUSTOMER)
+  plan           Plan       @relation(fields: [planId], references: [id])
+  planId         String
+  activationCode String?    @unique
+  quotaCents     Int        @default(0)
+  dailyLimitCents Int       @default(0)
+  status         UserStatus @default(ACTIVE)
+  createdAt      DateTime   @default(now())
+  apiKeys        ApiKey[]
+  auditLogs      AuditLog[]
+  usageLogs      UsageLog[]
+  memoryFiles    MemoryFile[]
+  tasks          ScheduledTask[]
+}
+
+model Plan {
+  id          String @id @default(cuid())
+  name        String @unique
+  quotaCents  Int
+  userLimit   Int    @default(1)
+  features    String
+  users       User[]
+}
+
+model ApiKey {
+  id        String   @id @default(cuid())
+  name      String
+  maskedKey String
+  hash      String
+  enabled   Boolean  @default(true)
+  user      User     @relation(fields: [userId], references: [id])
+  userId    String
+  createdAt DateTime @default(now())
+}
+
+model Engine {
+  id           String       @id @default(cuid())
+  name         String       @unique
+  status       EngineStatus @default(PENDING)
+  defaultModel String
+  uptimeText   String?
+  lastLog      String?
+  updatedAt    DateTime     @updatedAt
+}
+
+model ModelChannel {
+  id          String  @id @default(cuid())
+  provider    String
+  modelName   String  @unique
+  baseUrl     String
+  purpose     String
+  enabled     Boolean @default(true)
+  unitPrice   Float   @default(0)
+}
+
+model MemoryFile {
+  id        String   @id @default(cuid())
+  filename  String
+  content   String
+  user      User     @relation(fields: [userId], references: [id])
+  userId    String
+  updatedAt DateTime @updatedAt
+}
+
+model Skill {
+  id          String    @id @default(cuid())
+  name        String    @unique
+  category    String
+  riskLevel   RiskLevel @default(LOW)
+  permissions String
+  installed   Boolean   @default(false)
+}
+
+model Plugin {
+  id          String  @id @default(cuid())
+  name        String  @unique
+  permissions String
+  enabled     Boolean @default(false)
+}
+
+model ScheduledTask {
+  id        String   @id @default(cuid())
+  name      String
+  frequency String
+  prompt    String
+  model     String
+  channel   String
+  enabled   Boolean  @default(true)
+  lastStatus String?
+  nextRunAt DateTime?
+  user      User     @relation(fields: [userId], references: [id])
+  userId    String
+}
+
+model UsageLog {
+  id        String   @id @default(cuid())
+  user      User     @relation(fields: [userId], references: [id])
+  userId    String
+  provider  String
+  model     String
+  tokens    Int
+  costCents Int
+  status    String
+  createdAt DateTime @default(now())
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  user      User     @relation(fields: [userId], references: [id])
+  userId    String
+  action    String
+  detail    String
+  ip        String?
+  createdAt DateTime @default(now())
+}
+
+enum Role {
+  CUSTOMER
+  ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  EXPIRED
+}
+
+enum EngineStatus {
+  RUNNING
+  DEGRADED
+  PENDING
+  STOPPED
+}
+
+enum RiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+}
