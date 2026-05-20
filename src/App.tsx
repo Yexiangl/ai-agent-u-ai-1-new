@@ -709,6 +709,7 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
   const [errorDetail, setErrorDetail] = useState<string | null>(null);
   const [showErrorDetail, setShowErrorDetail] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [showStreamDiagnostics, setShowStreamDiagnostics] = useState(false);
   const [modeMessage, setModeMessage] = useState("");
   const [isComposing, setIsComposing] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
@@ -719,14 +720,18 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
   const [streamDiagnostics, setStreamDiagnostics] = useState<FrontStreamDiagnostics>(initialFrontStreamDiagnostics);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
+  const messagesRef = useRef<UiChatMessage[]>([]);
   const activeRequestRef = useRef<string | null>(null);
   const unlistenRef = useRef<UnlistenFn[]>([]);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
-    const stored = unlistenRef.current;
+    messagesRef.current = messages;
+  }, [messages]);
+
+  useEffect(() => {
     return () => {
-      stored.forEach((fn) => fn());
+      unlistenRef.current.forEach((fn) => fn());
       if (timerRef.current) clearInterval(timerRef.current);
     };
   }, []);
@@ -767,6 +772,7 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
     setPhase("ready");
     setElapsedLive(0);
     setStreamDiagnostics(initialFrontStreamDiagnostics);
+    setShowStreamDiagnostics(false);
     if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
     setInput("");
   }, []);
@@ -839,7 +845,9 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
       content: "",
       modelName: hermesModelName
     };
-    setMessages([...nextMessages, placeholder]);
+    const messagesWithPlaceholder = [...nextMessages, placeholder];
+    messagesRef.current = messagesWithPlaceholder;
+    setMessages(messagesWithPlaceholder);
 
     try {
       const unlistenChunk = await listen<HermesChatChunk>("hermes-chat-chunk", (event) => {
@@ -853,12 +861,15 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
         if (event.payload.type === "content") {
           setPhase("running");
         }
+        const hasAssistant = messagesRef.current.some((message) => message.role === "assistant" && message.requestId === requestId);
+        setStreamDiagnostics((diag) => hasAssistant
+          ? { ...diag, frontChunkAppliedCount: diag.frontChunkAppliedCount + 1 }
+          : { ...diag, missingAssistantPlaceholderCount: diag.missingAssistantPlaceholderCount + 1 });
+        if (!hasAssistant && DEBUG_STREAM) console.debug("[stream-debug] front chunk missing assistant", { requestId });
         setMessages((prev) => {
           const updated = [...prev];
           const idx = updated.findIndex((message) => message.role === "assistant" && message.requestId === requestId);
           if (idx < 0) {
-            setStreamDiagnostics((diag) => ({ ...diag, missingAssistantPlaceholderCount: diag.missingAssistantPlaceholderCount + 1 }));
-            if (DEBUG_STREAM) console.debug("[stream-debug] front chunk missing assistant", { requestId });
             return prev;
           }
           const last = updated[idx];
@@ -868,7 +879,6 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
           } else {
             updated[idx] = { ...last, content: (last.content || "") + (event.payload.content || "") };
           }
-          setStreamDiagnostics((diag) => ({ ...diag, frontChunkAppliedCount: diag.frontChunkAppliedCount + 1 }));
           return updated;
         });
       });
@@ -881,11 +891,12 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
           setStreamDiagnostics((prev) => ({ ...prev, filteredEventCount: prev.filteredEventCount + 1 }));
           return;
         }
+        const hasAssistant = messagesRef.current.some((message) => message.role === "assistant" && message.requestId === requestId);
+        if (!hasAssistant) setStreamDiagnostics((diag) => ({ ...diag, missingAssistantPlaceholderCount: diag.missingAssistantPlaceholderCount + 1 }));
         setMessages((prev) => {
           const updated = [...prev];
           const idx = updated.findIndex((message) => message.role === "assistant" && message.requestId === requestId);
           if (idx < 0) {
-            setStreamDiagnostics((diag) => ({ ...diag, missingAssistantPlaceholderCount: diag.missingAssistantPlaceholderCount + 1 }));
             return prev;
           }
           const last = updated[idx];
@@ -914,6 +925,8 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
           return;
         }
         if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+        const hasAssistant = messagesRef.current.some((message) => message.role === "assistant" && message.requestId === requestId);
+        if (!hasAssistant) setStreamDiagnostics((diag) => ({ ...diag, missingAssistantPlaceholderCount: diag.missingAssistantPlaceholderCount + 1 }));
         setMessages((prev) => {
           const updated = [...prev];
           const idx = updated.findIndex((message) => message.role === "assistant" && message.requestId === requestId);
@@ -928,8 +941,6 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
               sessionId: event.payload.sessionId,
               elapsedMs: event.payload.elapsedMs
             };
-          } else {
-            setStreamDiagnostics((diag) => ({ ...diag, missingAssistantPlaceholderCount: diag.missingAssistantPlaceholderCount + 1 }));
           }
           return updated;
         });
@@ -1043,10 +1054,6 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
                 </>
               )}
             </div>
-            <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-muted-foreground">
-              <span>接口：{hermesModelName}</span>
-              <span>实际推理模型由 Hermes 模型供应配置决定</span>
-            </div>
             {(phase === "sending" || phase === "thinking" || phase === "running") && (
               <div className="mt-1.5 flex items-center gap-2 text-xs">
                 <Loader2 className="h-3 w-3 animate-spin" />
@@ -1151,26 +1158,12 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
             <div className="rounded-xl border bg-muted/30 p-3 text-xs text-muted-foreground space-y-2">
               <div>Agent 对话固定通过本机 Hermes API Server 请求 `hermes-agent`。</div>
               {DEBUG_STREAM && (
-                <div className="space-y-1">
-                  <div className="font-medium text-foreground">流式诊断</div>
-                  <StreamDebugRow label="requestId" value={streamDiagnostics.requestId || "-"} />
-                  <StreamDebugRow label="listenRegistered" value={String(streamDiagnostics.listenRegistered)} />
-                  <StreamDebugRow label="currentRequestId" value={streamDiagnostics.currentRequestId || "-"} />
-                  <StreamDebugRow label="contentType" value={String(streamDiagnostics.rust.contentType ?? "-")} />
-                  <StreamDebugRow label="transferEncoding" value={String(streamDiagnostics.rust.transferEncoding ?? "-")} />
-                  <StreamDebugRow label="firstByteMs" value={String(streamDiagnostics.rust.firstByteMs ?? "-")} />
-                  <StreamDebugRow label="bytesChunkCount" value={String(streamDiagnostics.rust.bytesChunkCount ?? 0)} />
-                  <StreamDebugRow label="sseEventCount" value={String(streamDiagnostics.rust.sseEventCount ?? 0)} />
-                  <StreamDebugRow label="contentChunkCount" value={String(streamDiagnostics.rust.contentChunkCount ?? 0)} />
-                  <StreamDebugRow label="reasoningChunkCount" value={String(streamDiagnostics.rust.reasoningChunkCount ?? 0)} />
-                  <StreamDebugRow label="toolEventCount" value={String(streamDiagnostics.rust.toolEventCount ?? 0)} />
-                  <StreamDebugRow label="frontChunkReceivedCount" value={String(streamDiagnostics.frontChunkReceivedCount)} />
-                  <StreamDebugRow label="frontChunkAppliedCount" value={String(streamDiagnostics.frontChunkAppliedCount)} />
-                  <StreamDebugRow label="filteredEventCount" value={String(streamDiagnostics.filteredEventCount)} />
-                  <StreamDebugRow label="missingAssistantPlaceholderCount" value={String(streamDiagnostics.missingAssistantPlaceholderCount)} />
-                  <StreamDebugRow label="doneReceived" value={String(streamDiagnostics.doneReceived)} />
-                  <StreamDebugRow label="isSse" value={String(streamDiagnostics.rust.isSse ?? "-")} />
-                  <StreamDebugRow label="fallbackToNonStreamJson" value={String(streamDiagnostics.rust.fallbackToNonStreamJson ?? "-")} />
+                <div>
+                  <Button variant="ghost" size="sm" onClick={() => setShowStreamDiagnostics(!showStreamDiagnostics)}>
+                    {showStreamDiagnostics ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                    高级信息 / 流式诊断
+                  </Button>
+                  {showStreamDiagnostics && <StreamDiagnosticsPanel diagnostics={streamDiagnostics} />}
                 </div>
               )}
             </div>
@@ -1364,6 +1357,31 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 function StreamDebugRow({ label, value }: { label: string; value: string }) {
   return <div className="grid grid-cols-[170px_1fr] gap-2"><span>{label}</span><span className="break-all text-foreground">{value}</span></div>;
+}
+
+function StreamDiagnosticsPanel({ diagnostics }: { diagnostics: FrontStreamDiagnostics }) {
+  return (
+    <div className="mt-2 space-y-1 rounded-lg border bg-background/60 p-2">
+      <StreamDebugRow label="requestId" value={diagnostics.requestId || "-"} />
+      <StreamDebugRow label="listenRegistered" value={String(diagnostics.listenRegistered)} />
+      <StreamDebugRow label="currentRequestId" value={diagnostics.currentRequestId || "-"} />
+      <StreamDebugRow label="contentType" value={String(diagnostics.rust.contentType ?? "-")} />
+      <StreamDebugRow label="transferEncoding" value={String(diagnostics.rust.transferEncoding ?? "-")} />
+      <StreamDebugRow label="firstByteMs" value={String(diagnostics.rust.firstByteMs ?? "-")} />
+      <StreamDebugRow label="bytesChunkCount" value={String(diagnostics.rust.bytesChunkCount ?? 0)} />
+      <StreamDebugRow label="sseEventCount" value={String(diagnostics.rust.sseEventCount ?? 0)} />
+      <StreamDebugRow label="contentChunkCount" value={String(diagnostics.rust.contentChunkCount ?? 0)} />
+      <StreamDebugRow label="reasoningChunkCount" value={String(diagnostics.rust.reasoningChunkCount ?? 0)} />
+      <StreamDebugRow label="toolEventCount" value={String(diagnostics.rust.toolEventCount ?? 0)} />
+      <StreamDebugRow label="frontChunkReceivedCount" value={String(diagnostics.frontChunkReceivedCount)} />
+      <StreamDebugRow label="frontChunkAppliedCount" value={String(diagnostics.frontChunkAppliedCount)} />
+      <StreamDebugRow label="filteredEventCount" value={String(diagnostics.filteredEventCount)} />
+      <StreamDebugRow label="missingAssistantPlaceholderCount" value={String(diagnostics.missingAssistantPlaceholderCount)} />
+      <StreamDebugRow label="doneReceived" value={String(diagnostics.doneReceived)} />
+      <StreamDebugRow label="isSse" value={String(diagnostics.rust.isSse ?? "-")} />
+      <StreamDebugRow label="fallbackToNonStreamJson" value={String(diagnostics.rust.fallbackToNonStreamJson ?? "-")} />
+    </div>
+  );
 }
 
 function Metric({ label, value, tone }: { label: string; value: string; tone: "success" | "info" | "warning" | "danger" | "muted" }) {
