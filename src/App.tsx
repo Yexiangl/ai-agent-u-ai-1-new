@@ -1,4 +1,4 @@
-import { type KeyboardEvent, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import { type KeyboardEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Bot,
   BookOpen,
@@ -2159,42 +2159,43 @@ function UsagePage() {
 
   useEffect(() => { load(); }, [load]);
 
-  const allMessages = sessions.flatMap((session) => session.messages);
-  const assistantMsgs = allMessages.filter((message) => message.role === "assistant");
-  const userMsgs = allMessages.filter((message) => message.role === "user");
-  const totalTokens = assistantMsgs.reduce((sum, message) => sum + (message.usage?.total_tokens ?? 0), 0);
-  const promptTokens = assistantMsgs.reduce((sum, message) => sum + (message.usage?.prompt_tokens ?? 0), 0);
-  const completionTokens = assistantMsgs.reduce((sum, message) => sum + (message.usage?.completion_tokens ?? 0), 0);
+  const stats = useMemo(() => {
+    const allMessages = sessions.flatMap((session) => session.messages);
+    const assistantMsgs = allMessages.filter((message) => message.role === "assistant");
+    const userMsgs = allMessages.filter((message) => message.role === "user");
+    const totalTokens = assistantMsgs.reduce((sum, message) => sum + (message.usage?.total_tokens ?? 0), 0);
+    const promptTokens = assistantMsgs.reduce((sum, message) => sum + (message.usage?.prompt_tokens ?? 0), 0);
+    const completionTokens = assistantMsgs.reduce((sum, message) => sum + (message.usage?.completion_tokens ?? 0), 0);
+    const avgTokens = assistantMsgs.length > 0 ? Math.round(totalTokens / assistantMsgs.length) : 0;
 
-  const now = Date.now();
-  const dayMs = 86400000;
-  const todayTokens = assistantMsgs
-    .filter((message) => (message as any).createdAt && now - new Date((message as any).createdAt).getTime() < dayMs)
-    .reduce((sum, message) => sum + (message.usage?.total_tokens ?? 0), 0);
-  const weekTokens = assistantMsgs
-    .filter((message) => (message as any).createdAt && now - new Date((message as any).createdAt).getTime() < 7 * dayMs)
-    .reduce((sum, message) => sum + (message.usage?.total_tokens ?? 0), 0);
-  const monthTokens = assistantMsgs
-    .filter((message) => (message as any).createdAt && now - new Date((message as any).createdAt).getTime() < 30 * dayMs)
-    .reduce((sum, message) => sum + (message.usage?.total_tokens ?? 0), 0);
+    const now = Date.now();
+    const dayMs = 86400000;
+    const sessionsToday = sessions.filter((session) => now - Number(session.updatedAt) * 1000 < dayMs);
+    const sessionsWeek = sessions.filter((session) => now - Number(session.updatedAt) * 1000 < 7 * dayMs);
+    const sessionsMonth = sessions.filter((session) => now - Number(session.updatedAt) * 1000 < 30 * dayMs);
+    const todayTokens = sessionsToday.flatMap((session) => session.messages).filter((message) => message.role === "assistant").reduce((sum, message) => sum + (message.usage?.total_tokens ?? 0), 0);
+    const weekTokens = sessionsWeek.flatMap((session) => session.messages).filter((message) => message.role === "assistant").reduce((sum, message) => sum + (message.usage?.total_tokens ?? 0), 0);
+    const monthTokens = sessionsMonth.flatMap((session) => session.messages).filter((message) => message.role === "assistant").reduce((sum, message) => sum + (message.usage?.total_tokens ?? 0), 0);
 
-  const lastUse = sessions.length > 0
-    ? sessions.reduce((latest, session) => Math.max(latest, Number(session.updatedAt) * 1000), 0)
-    : 0;
-  const lastUseText = lastUse ? new Date(lastUse).toLocaleString() : "暂无";
+    const lastUse = sessions.length > 0 ? sessions.reduce((latest, session) => Math.max(latest, Number(session.updatedAt) * 1000), 0) : 0;
 
-  // Model breakdown
-  const modelMap = new Map<string, number>();
-  assistantMsgs.filter((message) => message.modelName).forEach((message) => {
-    const key = message.modelName || "未知";
-    modelMap.set(key, (modelMap.get(key) ?? 0) + (message.usage?.total_tokens ?? 0));
-  });
+    const modelMap = new Map<string, number>();
+    assistantMsgs.filter((message) => message.modelName).forEach((message) => {
+      modelMap.set(message.modelName!, (modelMap.get(message.modelName!) ?? 0) + (message.usage?.total_tokens ?? 0));
+    });
 
-  const sortedSessions = [...sessions].sort((a, b) => Number(b.updatedAt) - Number(a.updatedAt)).slice(0, 5);
+    const topSessions = [...sessions].sort((a, b) => Number(b.updatedAt) - Number(a.updatedAt)).slice(0, 5);
+
+    const fmtTokens = (n: number) => n > 10000 ? `${(n / 1000).toFixed(0)}K` : n > 1000 ? `${(n / 1000).toFixed(1)}K` : String(n);
+
+    return { sessions, allMessages, assistantMsgs, userMsgs, totalTokens, promptTokens, completionTokens, avgTokens, todayTokens, weekTokens, monthTokens, lastUse, modelMap, topSessions, fmtTokens };
+  }, [sessions]);
 
   if (loading) {
     return <div className="flex items-center justify-center py-16"><Loader2 className="h-6 w-6 animate-spin" /></div>;
   }
+
+  const { totalTokens, promptTokens, completionTokens, avgTokens, todayTokens, weekTokens, lastUse, modelMap, topSessions, fmtTokens } = stats;
 
   return (
     <div className="space-y-4">
@@ -2205,29 +2206,28 @@ function UsagePage() {
         </CardHeader>
       </Card>
 
-      {sessions.length === 0 ? (
+      {stats.sessions.length === 0 ? (
         <div className="rounded-xl border bg-muted/30 p-8 text-center text-sm text-muted-foreground">
           暂无使用数据，开始一次 Agent 对话后这里会自动统计。
         </div>
       ) : (
         <>
           <div className="grid gap-4 md:grid-cols-4">
-            <Metric label="总会话数" value={String(sessions.length)} tone="info" />
-            <Metric label="总消息数" value={String(allMessages.length)} tone="info" />
-            <Metric label="总 Token" value={totalTokens > 1000 ? `${(totalTokens / 1000).toFixed(1)}K` : String(totalTokens)} tone="success" />
-            <Metric label="最近使用" value={lastUseText} tone="info" />
+            <Metric label="总会话数" value={String(stats.sessions.length)} tone="info" />
+            <Metric label="总消息数" value={String(stats.allMessages.length)} tone="info" />
+            <Metric label="总 Token" value={fmtTokens(totalTokens)} tone="success" />
+            <Metric label="近 7 天" value={fmtTokens(weekTokens)} tone="info" />
           </div>
 
-          <div className="grid gap-4 md:grid-cols-3">
-            <Metric label="近 7 天 Token" value={weekTokens > 1000 ? `${(weekTokens / 1000).toFixed(1)}K` : String(weekTokens)} tone="info" />
-            <Metric label="输入 Token" value={promptTokens > 1000 ? `${(promptTokens / 1000).toFixed(1)}K` : String(promptTokens)} tone="info" />
-            <Metric label="输出 Token" value={completionTokens > 1000 ? `${(completionTokens / 1000).toFixed(1)}K` : String(completionTokens)} tone="info" />
+          <div className="grid gap-4 md:grid-cols-4">
+            <Metric label="今日 Token" value={fmtTokens(todayTokens)} tone="success" />
+            <Metric label="输入 Token" value={fmtTokens(promptTokens)} tone="info" />
+            <Metric label="输出 Token" value={fmtTokens(completionTokens)} tone="info" />
+            <Metric label="平均每次回复" value={fmtTokens(avgTokens)} tone="info" />
           </div>
 
           <Card>
-            <CardHeader>
-              <CardTitle>模型用量分布</CardTitle>
-            </CardHeader>
+            <CardHeader><CardTitle>模型用量分布</CardTitle></CardHeader>
             <CardContent>
               {modelMap.size === 0 ? (
                 <div className="text-sm text-muted-foreground">暂无模型用量数据。</div>
@@ -2236,7 +2236,7 @@ function UsagePage() {
                   {[...modelMap.entries()].sort((a, b) => b[1] - a[1]).map(([model, tokens]) => (
                     <div key={model} className="flex items-center justify-between rounded-xl border bg-muted/30 px-4 py-3">
                       <span className="font-medium">{model}</span>
-                      <span className="text-sm text-muted-foreground">{tokens > 1000 ? `${(tokens / 1000).toFixed(1)}K` : tokens} tokens</span>
+                      <span className="text-sm text-muted-foreground">{fmtTokens(tokens)} tokens</span>
                     </div>
                   ))}
                 </div>
@@ -2245,12 +2245,10 @@ function UsagePage() {
           </Card>
 
           <Card>
-            <CardHeader>
-              <CardTitle>最近会话</CardTitle>
-            </CardHeader>
+            <CardHeader><CardTitle>最近会话</CardTitle></CardHeader>
             <CardContent>
               <div className="space-y-2">
-                {sortedSessions.map((session) => (
+                {topSessions.map((session) => (
                   <div key={session.id} className="flex items-center justify-between rounded-xl border bg-muted/30 px-4 py-3">
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-sm font-medium">{session.title || "新对话"}</div>
@@ -2264,9 +2262,12 @@ function UsagePage() {
           </Card>
         </>
       )}
-      <div className="flex gap-2">
-        <Button variant="outline" size="sm" onClick={load} disabled={loading}><RefreshCcw className={cn("h-4 w-4", loading && "animate-spin")} />刷新统计</Button>
-      </div>
+
+      {lastUse > 0 && (
+        <div className="text-xs text-muted-foreground">最近一次使用：{new Date(lastUse).toLocaleString()}</div>
+      )}
+
+      <Button variant="outline" size="sm" onClick={load} disabled={loading}><RefreshCcw className={cn("h-4 w-4", loading && "animate-spin")} />刷新统计</Button>
     </div>
   );
 }
