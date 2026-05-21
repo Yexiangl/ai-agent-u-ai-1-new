@@ -1142,10 +1142,10 @@ fn apply_hermes_model_config(token: String, model: String) -> Result<serde_json:
 
     let base_url = "https://ai.f1class.icu/v1";
 
-    // 2. Locate hermes binary
+    // 2. Locate hermes binary (must be validated executable)
     let hermes_bin = which_hermes();
     if hermes_bin.is_none() {
-        return Err("未找到 hermes 程序，无法写入配置".to_string());
+        return Err("未找到可执行的 Hermes 程序，请确认 Hermes 已安装并可在终端执行 hermes。".to_string());
     }
     let hermes_bin = hermes_bin.unwrap();
 
@@ -1236,33 +1236,53 @@ fn apply_hermes_model_config(token: String, model: String) -> Result<serde_json:
 }
 
 fn which_hermes() -> Option<String> {
-    // Try ~/.hermes/hermes-agent (official install location)
-    if let Some(home) = home_dir() {
-        let local_bin = home.join(".hermes").join("hermes-agent");
-        if local_bin.exists() {
-            return Some(local_bin.display().to_string());
-        }
-    }
-    // Try common system locations
-    let candidates = [
-        "/usr/local/bin/hermes",
-        "/opt/homebrew/bin/hermes",
-    ];
-    for c in &candidates {
-        if std::path::Path::new(c).exists() {
-            return Some(c.to_string());
-        }
-    }
-    // Try PATH via which
+    // 1. Try PATH via `which hermes` (highest priority)
     if let Ok(output) = std::process::Command::new("which").arg("hermes").output() {
         if output.status.success() {
             let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if !path.is_empty() {
+            if !path.is_empty() && is_executable_hermes(&path) {
                 return Some(path);
             }
         }
     }
+    // 2. Try common user/system locations
+    let home_str = home_dir().map(|h| h.display().to_string()).unwrap_or_default();
+    let candidates: Vec<String> = vec![
+        format!("{}/.local/bin/hermes", home_str),
+        format!("{}/.cargo/bin/hermes", home_str),
+        "/opt/homebrew/bin/hermes".to_string(),
+        "/usr/local/bin/hermes".to_string(),
+        format!("{}/.hermes/hermes-agent", home_str), // last resort, often a directory
+    ];
+    for c in &candidates {
+        if is_executable_hermes(c) {
+            return Some(c.clone());
+        }
+    }
     None
+}
+
+/// Validates that a path is a real executable hermes CLI (not a directory).
+fn is_executable_hermes(path: &str) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    let p = std::path::Path::new(path);
+    // Must exist and be a file (not directory)
+    let meta = match p.metadata() {
+        Ok(m) => m,
+        Err(_) => return false,
+    };
+    if !meta.is_file() {
+        return false;
+    }
+    // Must have execute permission
+    if meta.permissions().mode() & 0o111 == 0 {
+        return false;
+    }
+    // Must successfully run --version
+    match std::process::Command::new(path).arg("--version").output() {
+        Ok(o) => o.status.success(),
+        Err(_) => false,
+    }
 }
 
 fn chrono_timestamp() -> String {
