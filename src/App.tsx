@@ -2202,7 +2202,7 @@ function UsagePage() {
       <Card>
         <CardHeader>
           <CardTitle>使用概况</CardTitle>
-          <CardDescription>本页统计来自本机历史会话，仅用于估算使用量。实际额度以模型供应服务后台为准。</CardDescription>
+          <CardDescription>本页统计来自本机历史会话，仅用于估算使用量。近期统计按会话最后更新时间估算，可能包含该会话内较早消息的 token。实际额度以模型供应服务后台为准。</CardDescription>
         </CardHeader>
       </Card>
 
