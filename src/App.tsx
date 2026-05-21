@@ -455,27 +455,33 @@ function App() {
 function Onboarding({ config, updateConfig, hermesCli, hermesApi }: { config: AppConfig; updateConfig: (next: AppConfig) => Promise<void>; hermesCli: HermesStatus | null; hermesApi: HermesApiServerStatus | null }) {
   const [draft, setDraft] = useState({ ...config, baseUrl: config.baseUrl || DEFAULT_CONFIG.baseUrl });
   const [showToken, setShowToken] = useState(false);
-  const [testing, setTesting] = useState(false);
+  const [applying, setApplying] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
   const hermesInstalled = hermesCli?.installed;
   const hermesRunning = hermesApi?.running;
 
-  const testAndEnter = async () => {
-    setTesting(true);
+  const providerMap: Record<string, string> = { "deepseek-v4-flash": "deepseek", "deepseek-v4-pro": "deepseek", "kimi-k2.6": "kimi-coding" };
+
+  const applyAndEnter = async () => {
+    setApplying(true);
     setResult(null);
     try {
       if (!draft.apiKey.trim()) throw new Error("请填写专属模型供应 Token");
+      // Test token first
       const modelsResult = await listModels(draft.baseUrl, draft.apiKey);
-      if (!modelsResult.ok) throw new Error(modelsResult.error || "连接测试失败");
-      const modelCount = modelsResult.data?.data?.length ?? 0;
-      const nextStatus = { ok: true, message: `连接成功，可用模型 ${modelCount} 个`, latencyMs: modelsResult.latencyMs, modelCount, testedAt: new Date().toISOString() };
-      await updateConfig({ ...draft, selectedEngine: "hermes", hasCompletedOnboarding: true, lastConnectionStatus: nextStatus });
-      setResult({ ok: true, message: nextStatus.message });
+      if (!modelsResult.ok) throw new Error(modelsResult.error || "Token 连接测试失败");
+      // Apply to Hermes if installed
+      if (hermesInstalled) {
+        try {
+          await applyHermesModelConfig(draft.apiKey, draft.defaultModel);
+        } catch { /* non-fatal: config write failed but we can still enter */ }
+      }
+      await updateConfig({ ...draft, selectedEngine: "hermes", hasCompletedOnboarding: true });
+      setResult({ ok: true, message: "配置完成，正在进入工作台…" });
     } catch (error) {
-      const message = getErrorMessage(error);
-      setResult({ ok: false, message });
+      setResult({ ok: false, message: getErrorMessage(error) });
     } finally {
-      setTesting(false);
+      setApplying(false);
     }
   };
 
@@ -487,7 +493,7 @@ function Onboarding({ config, updateConfig, hermesCli, hermesApi }: { config: Ap
             <Badge className="border-white/30 bg-white/20 text-white">U 盘交付版</Badge>
             <div>
               <h1 className="text-3xl font-bold tracking-tight">欢迎使用 AI Agent 工作台</h1>
-              <p className="mt-3 text-sm leading-6 text-white/80">你的个人 Hermes Agent 桌面助手。填写 Token、选择模型即可开始使用。</p>
+              <p className="mt-3 text-sm leading-6 text-white/80">你的个人 Hermes Agent 桌面助手。填写 Token、选择模型，即可开始使用。</p>
             </div>
             <div className="grid gap-3 text-sm text-white/85">
               <div className="rounded-xl bg-white/10 p-3">Hermes 是长期运行的个人 Agent，负责对话、记忆和工作流。</div>
@@ -499,7 +505,7 @@ function Onboarding({ config, updateConfig, hermesCli, hermesApi }: { config: Ap
         <Card>
           <CardHeader>
             <CardTitle>初始化配置</CardTitle>
-            <CardDescription>检测到本机 Hermes 后，填写 Token 和选择模型即可进入。</CardDescription>
+            <CardDescription>填写 Token、选择模型，点击应用即可完成配置。</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className={cn("rounded-xl border p-3 text-sm", hermesRunning ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400" : hermesInstalled ? "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400" : "border-rose-500/30 bg-rose-500/10 text-rose-700 dark:text-rose-400")}>
@@ -508,8 +514,8 @@ function Onboarding({ config, updateConfig, hermesCli, hermesApi }: { config: Ap
                 : hermesRunning
                 ? "Hermes 对话服务运行中，可以正常使用。"
                 : hermesInstalled
-                  ? "Hermes 已安装，但对话服务未运行。进入工作台后可在 Hermes 管理页检查。"
-                  : "未检测到 Hermes。进入工作台后可通过 Hermes 管理页安装。"}
+                  ? "Hermes 已安装，但对话服务未运行。配置完成后请启动 Hermes。"
+                  : "未检测到 Hermes。进入工作台后可通过 Hermes 管理页查看安装方式。"}
             </div>
             <Field label="专属模型供应 Token">
               <div className="flex gap-2">
@@ -517,15 +523,16 @@ function Onboarding({ config, updateConfig, hermesCli, hermesApi }: { config: Ap
                 <Button variant="outline" size="icon" onClick={() => setShowToken(!showToken)}>{showToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</Button>
               </div>
             </Field>
-            <Field label="选择模型">
+            <Field label="Hermes 使用模型">
               <select className="w-full rounded-xl border bg-background px-3 py-2 text-sm" value={draft.defaultModel} onChange={(e) => setDraft({ ...draft, defaultModel: e.target.value as typeof draft.defaultModel })}>
                 <option value="deepseek-v4-flash">deepseek-v4-flash（快速）</option>
                 <option value="deepseek-v4-pro">deepseek-v4-pro（高质量）</option>
                 <option value="kimi-k2.6">kimi-k2.6（长文本）</option>
               </select>
+              <p className="mt-1 text-xs text-muted-foreground">Provider：{providerMap[draft.defaultModel] || "custom"}</p>
             </Field>
             <div className="grid gap-2 sm:grid-cols-2">
-              <Button className="w-full" disabled={testing || !draft.apiKey.trim()} onClick={testAndEnter}>{testing && <Loader2 className="h-4 w-4 animate-spin" />}测试并进入</Button>
+              <Button className="w-full" disabled={applying || !draft.apiKey.trim()} onClick={applyAndEnter}>{applying && <Loader2 className="h-4 w-4 animate-spin" />}应用并进入</Button>
               <Button variant="outline" className="w-full" onClick={() => updateConfig({ ...draft, selectedEngine: "hermes", hasCompletedOnboarding: true })}>跳过，直接进入</Button>
             </div>
             {result && <div className={cn("rounded-xl border p-3 text-sm", result.ok ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400" : "border-rose-500/30 bg-rose-500/10 text-rose-700 dark:text-rose-400")}>{result.message}</div>}
