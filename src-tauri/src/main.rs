@@ -1,4 +1,5 @@
 use std::fs;
+use std::error::Error;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::path::PathBuf;
@@ -453,6 +454,73 @@ fn preview_text(input: &str) -> String {
     out.chars().take(300).collect()
 }
 
+fn error_source_chain(error: &dyn Error) -> String {
+    let mut parts = vec![error.to_string()];
+    let mut current = error.source();
+    while let Some(source) = current {
+        parts.push(source.to_string());
+        current = source.source();
+    }
+    parts.join(" <- ")
+}
+
+fn request_messages_summary(messages: &serde_json::Value) -> serde_json::Value {
+    let Some(items) = messages.as_array() else {
+        return serde_json::json!({
+            "messagesIsArray": false,
+            "messageCount": 0,
+            "totalContentChars": 0,
+            "hasSystemPrompt": false,
+            "hasAssistantHistory": false,
+            "emptyContentCount": 0,
+            "nonStringContentCount": 0,
+            "unexpectedFieldCount": 0,
+            "messages": []
+        });
+    };
+    let mut total_chars = 0usize;
+    let mut empty_content_count = 0usize;
+    let mut non_string_content_count = 0usize;
+    let mut unexpected_field_count = 0usize;
+    let mut has_system_prompt = false;
+    let mut has_assistant_history = false;
+    let mut summaries = Vec::new();
+    for (idx, item) in items.iter().enumerate() {
+        let role = item.get("role").and_then(|value| value.as_str()).unwrap_or("<missing>");
+        let content_value = item.get("content");
+        let content = content_value.and_then(|value| value.as_str());
+        if role == "system" { has_system_prompt = true; }
+        if role == "assistant" { has_assistant_history = true; }
+        if content_value.is_some() && content.is_none() { non_string_content_count += 1; }
+        let content = content.unwrap_or_default();
+        if content.is_empty() { empty_content_count += 1; }
+        total_chars += content.chars().count();
+        let unexpected_fields = item.as_object()
+            .map(|object| object.keys().filter(|key| key.as_str() != "role" && key.as_str() != "content").count())
+            .unwrap_or(0);
+        unexpected_field_count += unexpected_fields;
+        summaries.push(serde_json::json!({
+            "index": idx,
+            "role": role,
+            "contentChars": content.chars().count(),
+            "preview": preview_text(content).chars().take(60).collect::<String>(),
+            "unexpectedFields": unexpected_fields,
+            "contentIsString": content_value.map(|value| value.is_string()).unwrap_or(false)
+        }));
+    }
+    serde_json::json!({
+        "messagesIsArray": true,
+        "messageCount": items.len(),
+        "totalContentChars": total_chars,
+        "hasSystemPrompt": has_system_prompt,
+        "hasAssistantHistory": has_assistant_history,
+        "emptyContentCount": empty_content_count,
+        "nonStringContentCount": non_string_content_count,
+        "unexpectedFieldCount": unexpected_field_count,
+        "messages": summaries
+    })
+}
+
 fn emit_stream_diagnostics(app: &tauri::AppHandle, request_id: &str, diagnostics: serde_json::Value) {
     let _ = app.emit("hermes-stream-diagnostics", serde_json::json!({
         "requestId": request_id,
@@ -494,7 +562,9 @@ fn hermes_chat_completion(app: tauri::AppHandle, request_id: String, model: Stri
     tauri::async_runtime::spawn(async move {
         let started = std::time::Instant::now();
         let url = "http://127.0.0.1:8642/v1/chat/completions";
-        let client = match reqwest::Client::builder().timeout(Duration::from_secs(120)).build() {
+        let client = match reqwest::Client::builder()
+            .connect_timeout(Duration::from_secs(10))
+            .build() {
             Ok(client) => client,
             Err(e) => {
                 emit_hermes_error(&app, &rid, &format!("创建 HTTP client 失败: {}", e));
@@ -507,11 +577,13 @@ fn hermes_chat_completion(app: tauri::AppHandle, request_id: String, model: Stri
             "messages": messages,
             "stream": true
         });
-        println!("[stream-debug] request requestId={} url={} model={} stream={}", rid, url, request_body.get("model").and_then(|v| v.as_str()).unwrap_or(""), request_body.get("stream").and_then(|v| v.as_bool()).unwrap_or(false));
+        let request_summary = request_messages_summary(request_body.get("messages").unwrap_or(&serde_json::Value::Null));
+        println!("[stream-debug] request requestId={} url={} model={} stream={} timeout=connect-only messages={}", rid, url, request_body.get("model").and_then(|v| v.as_str()).unwrap_or(""), request_body.get("stream").and_then(|v| v.as_bool()).unwrap_or(false), request_summary);
 
         let response = match client
             .post(url)
             .header("Accept", "text/event-stream")
+            .header("Accept-Encoding", "identity")
             .json(&request_body)
             .send()
             .await
@@ -536,6 +608,18 @@ fn hermes_chat_completion(app: tauri::AppHandle, request_id: String, model: Stri
             .and_then(|v| v.to_str().ok())
             .unwrap_or("")
             .to_lowercase();
+        let content_encoding = response
+            .headers()
+            .get("content-encoding")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_lowercase();
+        let connection_header = response
+            .headers()
+            .get("connection")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_lowercase();
         let session_id = response
             .headers()
             .get("x-hermes-session-id")
@@ -543,14 +627,18 @@ fn hermes_chat_completion(app: tauri::AppHandle, request_id: String, model: Stri
             .map(|s| s.to_string());
 
         let is_sse = content_type.contains("text/event-stream");
-        println!("[stream-debug] response requestId={} status={} contentType={} transferEncoding={} isSse={}", rid, status_code, content_type, transfer_encoding, is_sse);
+        println!("[stream-debug] response requestId={} status={} contentType={} transferEncoding={} contentEncoding={} connection={} isSse={}", rid, status_code, content_type, transfer_encoding, content_encoding, connection_header, is_sse);
         emit_stream_diagnostics(&app, &rid, serde_json::json!({
             "url": url,
             "model": mdl,
             "streamRequested": true,
+            "requestSummary": request_summary.clone(),
+            "timeout": "connect_timeout=10s; no total response timeout",
             "status": status_code,
             "contentType": content_type,
             "transferEncoding": transfer_encoding,
+            "contentEncoding": content_encoding,
+            "connection": connection_header,
             "isSse": is_sse,
             "fallbackToNonStreamJson": false
         }));
@@ -651,7 +739,56 @@ fn hermes_chat_completion(app: tauri::AppHandle, request_id: String, model: Stri
             let bytes = match item {
                 Ok(bytes) => bytes,
                 Err(e) => {
-                    emit_hermes_error(&app, &rid, &format!("读取流式响应失败: {}", e));
+                    let error_display = e.to_string();
+                    let error_debug = format!("{:?}", e);
+                    let error_chain = error_source_chain(&e);
+                    println!("[stream-debug] stream read error requestId={} display={} debug={} sourceChain={}", rid, error_display, error_debug, error_chain);
+                    let diagnostics = serde_json::json!({
+                        "contentType": content_type,
+                        "transferEncoding": transfer_encoding,
+                        "contentEncoding": content_encoding,
+                        "connection": connection_header,
+                        "isSse": true,
+                        "fallbackToNonStreamJson": false,
+                        "firstByteMs": first_byte_ms,
+                        "bytesChunkCount": bytes_chunk_count,
+                        "sseEventCount": sse_event_count,
+                        "dataLineCount": data_line_count,
+                        "chunkCount": chunk_count,
+                        "contentChunkCount": content_chunk_count,
+                        "reasoningChunkCount": reasoning_chunk_count,
+                        "toolEventCount": tool_event_count,
+                        "emptyDeltaCount": empty_delta_count,
+                        "parseErrorCount": parse_error_count,
+                        "receivedDone": false,
+                        "streamReadError": true,
+                        "streamError": error_display,
+                        "streamErrorDebug": error_debug,
+                        "streamErrorSourceChain": error_chain,
+                        "partial": !content_accumulated.is_empty() || !reasoning_accumulated.is_empty() || tool_event_count > 0
+                    });
+                    if !content_accumulated.is_empty() || !reasoning_accumulated.is_empty() || tool_event_count > 0 {
+                        let warning = if content_accumulated.is_empty() && reasoning_accumulated.is_empty() {
+                            "工具执行后流式连接提前结束，未收到正式回复"
+                        } else {
+                            "流式连接提前结束，已保留已生成内容"
+                        };
+                        let _ = app.emit("hermes-chat-done", serde_json::json!({
+                            "requestId": rid,
+                            "content": content_accumulated,
+                            "reasoningContent": reasoning_accumulated,
+                            "model": mdl,
+                            "rawUsage": usage_info,
+                            "sessionId": session_id,
+                            "elapsedMs": started.elapsed().as_millis() as u64,
+                            "partial": true,
+                            "warning": warning,
+                            "streamError": diagnostics.get("streamError").cloned().unwrap_or(serde_json::Value::Null),
+                            "diagnostics": diagnostics
+                        }));
+                    } else {
+                        emit_hermes_error(&app, &rid, &format!("读取流式响应失败: {}", diagnostics.get("streamError").and_then(|v| v.as_str()).unwrap_or("unknown")));
+                    }
                     return;
                 }
             };
@@ -673,6 +810,8 @@ fn hermes_chat_completion(app: tauri::AppHandle, request_id: String, model: Stri
                 "status": status_code,
                 "contentType": content_type,
                 "transferEncoding": transfer_encoding,
+                "contentEncoding": content_encoding,
+                "connection": connection_header,
                 "isSse": true,
                 "fallbackToNonStreamJson": false,
                 "firstByteMs": first_byte_ms,
@@ -687,7 +826,9 @@ fn hermes_chat_completion(app: tauri::AppHandle, request_id: String, model: Stri
                 "toolEventCount": tool_event_count,
                 "emptyDeltaCount": empty_delta_count,
                 "parseErrorCount": parse_error_count,
-                "receivedDone": has_done
+                "receivedDone": has_done,
+                "streamReadError": false,
+                "partial": false
             }));
 
             line_buffer.push_str(&chunk_text);
@@ -760,6 +901,8 @@ fn hermes_chat_completion(app: tauri::AppHandle, request_id: String, model: Stri
         let diagnostics = serde_json::json!({
             "contentType": content_type,
             "transferEncoding": transfer_encoding,
+            "contentEncoding": content_encoding,
+            "connection": connection_header,
             "isSse": true,
             "fallbackToNonStreamJson": false,
             "firstByteMs": first_byte_ms,
@@ -772,7 +915,9 @@ fn hermes_chat_completion(app: tauri::AppHandle, request_id: String, model: Stri
             "toolEventCount": tool_event_count,
             "emptyDeltaCount": empty_delta_count,
             "parseErrorCount": parse_error_count,
-            "receivedDone": has_done
+            "receivedDone": has_done,
+            "streamReadError": false,
+            "partial": false
         });
         let emit_done_result = app.emit("hermes-chat-done", serde_json::json!({
             "requestId": rid,
@@ -981,9 +1126,157 @@ fn read_hermes_native_memory() -> Result<serde_json::Value, String> {
     }))
 }
 
+#[tauri::command]
+fn apply_hermes_model_config(token: String, model: String) -> Result<serde_json::Value, String> {
+    // 1. Whitelist validation
+    let provider = match model.as_str() {
+        "deepseek-v4-flash" => "deepseek",
+        "deepseek-v4-pro" => "deepseek",
+        "kimi-k2.6" => "kimi-coding",
+        _ => return Err(format!("模型 {} 不在白名单内", model)),
+    };
+
+    if token.trim().is_empty() {
+        return Err("Token 不能为空".to_string());
+    }
+
+    let base_url = "https://ai.f1class.icu/v1";
+
+    // 2. Locate hermes binary
+    let hermes_bin = which_hermes();
+    if hermes_bin.is_none() {
+        return Err("未找到 hermes 程序，无法写入配置".to_string());
+    }
+    let hermes_bin = hermes_bin.unwrap();
+
+    // 3. Backup existing files
+    let Some(home) = home_dir() else {
+        return Err("无法定位用户主目录".to_string());
+    };
+    let hermes_dir = home.join(".hermes");
+    let timestamp = chrono_timestamp();
+    let mut backup_paths: Vec<String> = Vec::new();
+
+    let config_path = hermes_dir.join("config.yaml");
+    if config_path.exists() {
+        let bak = hermes_dir.join(format!("config.yaml.bak-{}", timestamp));
+        if let Err(e) = fs::copy(&config_path, &bak) {
+            return Err(format!("备份 config.yaml 失败：{}", e));
+        }
+        backup_paths.push(bak.display().to_string());
+    }
+
+    let env_path = hermes_dir.join(".env");
+    if env_path.exists() {
+        let bak = hermes_dir.join(format!(".env.bak-{}", timestamp));
+        if let Err(e) = fs::copy(&env_path, &bak) {
+            return Err(format!("备份 .env 失败：{}", e));
+        }
+        backup_paths.push(bak.display().to_string());
+    }
+
+    // 4. Execute hermes config set commands (no token in logs)
+    let config_commands: Vec<(&str, &str)> = vec![
+        ("model.provider", provider),
+        ("model.default", &model),
+        ("model.base_url", base_url),
+        ("model.api_mode", "chat_completions"),
+    ];
+
+    for (key, value) in &config_commands {
+        let output = std::process::Command::new(&hermes_bin)
+            .args(["config", "set", key, value])
+            .output();
+        match output {
+            Ok(o) if !o.status.success() => {
+                let stderr = String::from_utf8_lossy(&o.stderr);
+                return Err(format!("hermes config set {} 失败：{}", key, stderr.trim()));
+            }
+            Err(e) => {
+                return Err(format!("执行 hermes config set {} 失败：{}", key, e));
+            }
+            _ => {}
+        }
+    }
+
+    // 5. Write token to both provider keys (no logging of token value)
+    let token_keys = ["DEEPSEEK_API_KEY", "KIMI_API_KEY"];
+    for key in &token_keys {
+        let output = std::process::Command::new(&hermes_bin)
+            .args(["config", "set", key, &token])
+            .output();
+        match output {
+            Ok(o) if !o.status.success() => {
+                let stderr = String::from_utf8_lossy(&o.stderr);
+                return Err(format!("hermes config set {} 失败：{}", key, stderr.trim()));
+            }
+            Err(e) => {
+                return Err(format!("执行 hermes config set {} 失败：{}", key, e));
+            }
+            _ => {}
+        }
+    }
+
+    // 6. Verify by re-reading config
+    let verify = read_hermes_model_config();
+    let verified = match verify {
+        Ok(v) => v,
+        Err(_) => serde_json::json!(null),
+    };
+
+    Ok(serde_json::json!({
+        "success": true,
+        "appliedModel": model,
+        "appliedProvider": provider,
+        "baseUrl": base_url,
+        "apiMode": "chat_completions",
+        "backupPaths": backup_paths,
+        "verifiedConfig": verified
+    }))
+}
+
+fn which_hermes() -> Option<String> {
+    // Try ~/.hermes/hermes-agent (official install location)
+    if let Some(home) = home_dir() {
+        let local_bin = home.join(".hermes").join("hermes-agent");
+        if local_bin.exists() {
+            return Some(local_bin.display().to_string());
+        }
+    }
+    // Try common system locations
+    let candidates = [
+        "/usr/local/bin/hermes",
+        "/opt/homebrew/bin/hermes",
+    ];
+    for c in &candidates {
+        if std::path::Path::new(c).exists() {
+            return Some(c.to_string());
+        }
+    }
+    // Try PATH via which
+    if let Ok(output) = std::process::Command::new("which").arg("hermes").output() {
+        if output.status.success() {
+            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !path.is_empty() {
+                return Some(path);
+            }
+        }
+    }
+    None
+}
+
+fn chrono_timestamp() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    format!("{}", secs)
+}
+
 fn main() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![read_config, write_config, clear_config, read_chat_sessions, write_chat_sessions, clear_chat_sessions, check_hermes_installed, get_hermes_version, get_hermes_paths, get_hermes_help, check_hermes_api_server, hermes_chat_completion, read_hermes_model_config, read_hermes_native_memory])
+        .invoke_handler(tauri::generate_handler![read_config, write_config, clear_config, read_chat_sessions, write_chat_sessions, clear_chat_sessions, check_hermes_installed, get_hermes_version, get_hermes_paths, get_hermes_help, check_hermes_api_server, hermes_chat_completion, read_hermes_model_config, read_hermes_native_memory, apply_hermes_model_config])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

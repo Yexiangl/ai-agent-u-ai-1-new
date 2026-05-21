@@ -64,6 +64,9 @@ export interface HermesChatDone {
   rawUsage: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } | null;
   sessionId: string | null;
   elapsedMs: number;
+  partial?: boolean;
+  warning?: string;
+  streamError?: string | null;
   diagnostics?: {
     contentType: string;
     transferEncoding?: string;
@@ -79,6 +82,11 @@ export interface HermesChatDone {
     toolEventCount: number;
     emptyDeltaCount?: number;
     parseErrorCount?: number;
+    streamReadError?: boolean;
+    streamError?: string;
+    streamErrorDebug?: string;
+    streamErrorSourceChain?: string;
+    partial?: boolean;
     receivedDone: boolean;
   };
 }
@@ -191,4 +199,18 @@ export async function writeChatSessions(sessions: ChatSession[]): Promise<void> 
 
 export async function clearChatSessions(): Promise<void> {
   return invoke<void>("clear_chat_sessions");
+}
+
+export interface ApplyHermesModelResult {
+  success: boolean;
+  appliedModel: string;
+  appliedProvider: string;
+  baseUrl: string;
+  apiMode: string;
+  backupPaths: string[];
+  verifiedConfig: HermesModelConfig | null;
+}
+
+export async function applyHermesModelConfig(token: string, model: string): Promise<ApplyHermesModelResult> {
+  return invoke<ApplyHermesModelResult>("apply_hermes_model_config", { token, model });
 }
