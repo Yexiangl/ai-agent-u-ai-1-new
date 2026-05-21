@@ -1,13 +1,29 @@
 use std::fs;
+use std::collections::HashMap;
 use std::error::Error;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use futures_util::StreamExt;
 use tauri::{Emitter, Manager};
+
+type CancelMap = Mutex<HashMap<String, Arc<AtomicBool>>>;
+type TaskMap = Mutex<HashMap<String, tauri::async_runtime::JoinHandle<()>>>;
+
+fn cancel_map() -> &'static CancelMap {
+    static MAP: OnceLock<CancelMap> = OnceLock::new();
+    MAP.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn task_map() -> &'static TaskMap {
+    static MAP: OnceLock<TaskMap> = OnceLock::new();
+    MAP.get_or_init(|| Mutex::new(HashMap::new()))
+}
 
 fn config_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let dir = app.path().app_data_dir().map_err(|error| error.to_string())?;
@@ -559,7 +575,11 @@ fn hermes_chat_completion(app: tauri::AppHandle, request_id: String, model: Stri
     let rid = request_id.clone();
     let mdl = model.clone();
 
-    tauri::async_runtime::spawn(async move {
+    let cancel_flag = Arc::new(AtomicBool::new(false));
+    cancel_map().lock().unwrap().insert(rid.clone(), cancel_flag.clone());
+
+    let rid_for_handle = rid.clone();
+    let handle = tauri::async_runtime::spawn(async move {
         let started = std::time::Instant::now();
         let url = "http://127.0.0.1:8642/v1/chat/completions";
         let client = match reqwest::Client::builder()
@@ -730,12 +750,34 @@ fn hermes_chat_completion(app: tauri::AppHandle, request_id: String, model: Stri
         let mut parse_error_count: u64 = 0;
         let mut has_done = false;
         let mut first_byte_ms: Option<u64> = None;
+        let mut first_content_ms: Option<u64> = None;
+        let mut last_content_ms: u64 = 0;
+        let mut finish_reason: Option<String> = None;
         let mut last_byte_at = started;
         let mut line_buffer = String::new();
         let mut current_event = SseEvent { event: "message".to_string(), data: String::new() };
         let mut stream = response.bytes_stream();
 
         while let Some(item) = stream.next().await {
+            if cancel_flag.load(Ordering::Relaxed) {
+                println!("[stream-debug] cancelled by user requestId={}", rid);
+                let elapsed_ms = started.elapsed().as_millis() as u64;
+                let _ = app.emit("hermes-chat-done", serde_json::json!({
+                    "requestId": rid,
+                    "content": content_accumulated,
+                    "reasoningContent": reasoning_accumulated,
+                    "model": mdl,
+                    "rawUsage": usage_info,
+                    "sessionId": session_id,
+                    "elapsedMs": elapsed_ms,
+                    "stopped": true,
+                    "partial": !content_accumulated.is_empty() || !reasoning_accumulated.is_empty(),
+                    "warning": "已停止生成",
+                    "diagnostics": { "stoppedByUser": true }
+                }));
+                cancel_map().lock().unwrap().remove(&rid);
+                return;
+            }
             let bytes = match item {
                 Ok(bytes) => bytes,
                 Err(e) => {
@@ -862,6 +904,8 @@ fn hermes_chat_completion(app: tauri::AppHandle, request_id: String, model: Stri
 
                 if let Ok(json) = serde_json::from_str::<serde_json::Value>(&completed.data) {
                     let delta_opt = json.get("choices").and_then(|c| c.get(0)).and_then(|c| c.get("delta"));
+                    let fr = json.get("choices").and_then(|c| c.get(0)).and_then(|c| c.get("finish_reason")).and_then(|v| v.as_str()).map(|s| s.to_string());
+                    if fr.is_some() { finish_reason = fr; }
                     if let Some(delta) = delta_opt {
                         let content = delta.get("content").and_then(|v| v.as_str()).unwrap_or("");
                         let reasoning = delta.get("reasoning_content").and_then(|v| v.as_str()).unwrap_or("");
@@ -871,6 +915,10 @@ fn hermes_chat_completion(app: tauri::AppHandle, request_id: String, model: Stri
                         if !content.is_empty() {
                             chunk_count += 1;
                             content_chunk_count += 1;
+                            if first_content_ms.is_none() {
+                                first_content_ms = Some(started.elapsed().as_millis() as u64);
+                            }
+                            last_content_ms = started.elapsed().as_millis() as u64;
                             content_accumulated.push_str(content);
                             let emit_result = app.emit("hermes-chat-chunk", serde_json::json!({
                                 "requestId": rid, "content": content, "type": "content"
@@ -906,6 +954,8 @@ fn hermes_chat_completion(app: tauri::AppHandle, request_id: String, model: Stri
             "isSse": true,
             "fallbackToNonStreamJson": false,
             "firstByteMs": first_byte_ms,
+            "firstContentMs": first_content_ms,
+            "lastContentMs": last_content_ms,
             "bytesChunkCount": bytes_chunk_count,
             "sseEventCount": sse_event_count,
             "dataLineCount": data_line_count,
@@ -916,6 +966,8 @@ fn hermes_chat_completion(app: tauri::AppHandle, request_id: String, model: Stri
             "emptyDeltaCount": empty_delta_count,
             "parseErrorCount": parse_error_count,
             "receivedDone": has_done,
+            "finishReason": finish_reason,
+            "afterLastContentToDoneMs": if last_content_ms > 0 { Some(elapsed_ms - last_content_ms) } else { None },
             "streamReadError": false,
             "partial": false
         });
@@ -930,13 +982,28 @@ fn hermes_chat_completion(app: tauri::AppHandle, request_id: String, model: Stri
             "diagnostics": diagnostics
         }));
         println!("[stream-debug] emit eventName=hermes-chat-done requestId={} finalContentLength={} finalReasoningLength={} ok={} diagnostics={}", rid, content_accumulated.len(), reasoning_accumulated.len(), emit_done_result.is_ok(), diagnostics);
+        cancel_map().lock().unwrap().remove(&rid);
+        task_map().lock().unwrap().remove(&rid);
     });
+    task_map().lock().unwrap().insert(rid_for_handle, handle);
 
     Ok(serde_json::json!({
         "success": true,
         "accepted": true,
         "requestId": request_id
     }))
+}
+
+#[tauri::command]
+fn cancel_hermes_chat_completion(request_id: String) -> Result<serde_json::Value, String> {
+    if let Some(flag) = cancel_map().lock().unwrap().get(&request_id) {
+        flag.store(true, Ordering::Relaxed);
+    }
+    if let Some(handle) = task_map().lock().unwrap().remove(&request_id) {
+        handle.abort();
+    }
+    cancel_map().lock().unwrap().remove(&request_id);
+    Ok(serde_json::json!({ "cancelled": true, "requestId": request_id }))
 }
 
 #[tauri::command]
@@ -987,6 +1054,7 @@ fn read_hermes_model_config() -> Result<serde_json::Value, String> {
     let mut model: Option<String> = None;
     let mut provider: Option<String> = None;
     let mut base_url: Option<String> = None;
+    let mut reasoning_effort: Option<String> = None;
     let mut path_stack: Vec<(usize, String)> = Vec::new();
 
     for line in content.lines() {
@@ -1048,6 +1116,13 @@ fn read_hermes_model_config() -> Result<serde_json::Value, String> {
             {
                 base_url = Some(value.clone());
             }
+
+            if full_key == "agent.reasoning_effort"
+                || raw_key == "agent.reasoning_effort"
+                || (raw_key == "reasoning_effort" && reasoning_effort.is_none())
+            {
+                reasoning_effort = Some(value.clone());
+            }
         }
     }
 
@@ -1057,6 +1132,7 @@ fn read_hermes_model_config() -> Result<serde_json::Value, String> {
         "model": model,
         "provider": provider,
         "baseUrl": base_url,
+        "reasoningEffort": reasoning_effort,
         "updatedAt": updated_at,
         "error": null
     }))
@@ -1235,6 +1311,50 @@ fn apply_hermes_model_config(token: String, model: String) -> Result<serde_json:
     }))
 }
 
+#[tauri::command]
+async fn apply_hermes_reasoning_config(effort: String) -> Result<serde_json::Value, String> {
+    let valid = ["none", "minimal", "low", "medium", "high", "xhigh"];
+    if !valid.contains(&effort.as_str()) {
+        return Err(format!("无效的 reasoning_effort 值：{}", effort));
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        let hermes_bin = which_hermes();
+        if hermes_bin.is_none() {
+            return Err("未找到可执行的 Hermes 程序".to_string());
+        }
+        let bin = hermes_bin.unwrap();
+        let Some(home) = home_dir() else {
+            return Err("无法定位用户主目录".to_string());
+        };
+        let config_path = home.join(".hermes").join("config.yaml");
+        if config_path.exists() {
+            let bak = home.join(".hermes").join(format!("config.yaml.bak-reasoning-{}", chrono_timestamp()));
+            let _ = fs::copy(&config_path, &bak);
+        }
+        let output = std::process::Command::new(&bin)
+            .args(["config", "set", "agent.reasoning_effort", &effort])
+            .output();
+        match output {
+            Ok(o) if !o.status.success() => {
+                let stderr = String::from_utf8_lossy(&o.stderr);
+                return Err(format!("hermes config set agent.reasoning_effort 失败：{}", stderr.trim()));
+            }
+            Err(e) => return Err(format!("执行失败：{}", e)),
+            _ => {}
+        }
+        let verify = read_hermes_model_config();
+        let verified = match verify {
+            Ok(v) => v,
+            Err(_) => serde_json::json!(null),
+        };
+        Ok(serde_json::json!({
+            "success": true,
+            "appliedEffort": effort,
+            "verifiedConfig": verified
+        }))
+    }).await.map_err(|e| e.to_string())?
+}
+
 fn which_hermes() -> Option<String> {
     // 1. Try PATH via `which hermes` (highest priority)
     if let Ok(output) = std::process::Command::new("which").arg("hermes").output() {
@@ -1394,7 +1514,7 @@ async fn read_hermes_cron_cli_status() -> Result<serde_json::Value, String> {
 
 fn main() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![read_config, write_config, clear_config, read_chat_sessions, write_chat_sessions, clear_chat_sessions, check_hermes_installed, get_hermes_version, get_hermes_paths, get_hermes_help, check_hermes_api_server, hermes_chat_completion, read_hermes_model_config, read_hermes_native_memory, apply_hermes_model_config, read_hermes_cron_overview, read_hermes_cron_cli_status])
+        .invoke_handler(tauri::generate_handler![read_config, write_config, clear_config, read_chat_sessions, write_chat_sessions, clear_chat_sessions, check_hermes_installed, get_hermes_version, get_hermes_paths, get_hermes_help, check_hermes_api_server, hermes_chat_completion, cancel_hermes_chat_completion, read_hermes_model_config, read_hermes_native_memory, apply_hermes_model_config, apply_hermes_reasoning_config, read_hermes_cron_overview, read_hermes_cron_cli_status])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

@@ -14,6 +14,7 @@ export interface AppConfig {
   lastConnectionStatus: ConnectionStatus;
   enabledSkills: string[];
   tasks: SavedTask[];
+  showReasoning: boolean;
 }
 
 export interface ConnectionStatus {
@@ -45,5 +46,6 @@ export const DEFAULT_CONFIG: AppConfig = {
     message: "尚未测试连接"
   },
   enabledSkills: [],
-  tasks: []
+  tasks: [],
+  showReasoning: true
 };

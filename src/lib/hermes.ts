@@ -65,6 +65,7 @@ export interface HermesChatDone {
   sessionId: string | null;
   elapsedMs: number;
   partial?: boolean;
+  stopped?: boolean;
   warning?: string;
   streamError?: string | null;
   diagnostics?: {
@@ -109,12 +110,17 @@ export async function hermesChatCompletion(requestId: string, model: string, mes
   return invoke<HermesChatResult>("hermes_chat_completion", { requestId, model, messages });
 }
 
+export async function cancelHermesChatCompletion(requestId: string): Promise<{ cancelled: boolean; requestId: string }> {
+  return invoke("cancel_hermes_chat_completion", { requestId });
+}
+
 export interface HermesModelConfig {
   exists: boolean;
   configPath: string | null;
   model: string | null;
   provider: string | null;
   baseUrl: string | null;
+  reasoningEffort: string | null;
   updatedAt: string | null;
   error: string | null;
 }
@@ -236,4 +242,14 @@ export interface ApplyHermesModelResult {
 
 export async function applyHermesModelConfig(token: string, model: string): Promise<ApplyHermesModelResult> {
   return invoke<ApplyHermesModelResult>("apply_hermes_model_config", { token, model });
+}
+
+export interface ApplyReasoningResult {
+  success: boolean;
+  appliedEffort: string;
+  verifiedConfig: HermesModelConfig | null;
+}
+
+export async function applyHermesReasoningConfig(effort: string): Promise<ApplyReasoningResult> {
+  return invoke<ApplyReasoningResult>("apply_hermes_reasoning_config", { effort });
 }

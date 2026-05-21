@@ -3,6 +3,7 @@ import {
   Bot,
   BookOpen,
   CheckCircle2,
+  Check,
   ChevronDown,
   ChevronUp,
   Copy,
@@ -15,7 +16,9 @@ import {
   Loader2,
   MessageSquare,
   Moon,
+  MoreHorizontal,
   PackageOpen,
+  Pin,
   Plus,
   RefreshCcw,
   RotateCcw,
@@ -23,6 +26,7 @@ import {
   Search,
   Send,
   Settings2,
+  Square,
   Sun,
   Timer,
   Trash2,
@@ -30,7 +34,7 @@ import {
 import { listModels, type ChatMessage } from "@/lib/api";
 import { DEFAULT_CONFIG, type AppConfig } from "@/lib/config";
 import { clearConfig, loadConfig, saveConfig } from "@/lib/storage";
-import { applyHermesModelConfig, checkHermes, checkHermesApiServer, hermesChatCompletion, readChatSessions, readHermesCronCliStatus, readHermesCronOverview, readHermesModelConfig, readHermesNativeMemory, writeChatSessions, type ChatSession, type HermesApiServerStatus, type HermesChatChunk, type HermesChatDone, type HermesChatError, type HermesCronCliStatus, type HermesCronOverview, type HermesModelConfig, type HermesNativeMemoryFile, type HermesNativeMemoryResult, type HermesStatus, type HermesStreamDiagnostics, type HermesToolProgress } from "@/lib/hermes";
+import { applyHermesModelConfig, applyHermesReasoningConfig, cancelHermesChatCompletion, checkHermes, checkHermesApiServer, hermesChatCompletion, readChatSessions, readHermesCronCliStatus, readHermesCronOverview, readHermesModelConfig, readHermesNativeMemory, writeChatSessions, type ChatSession, type HermesApiServerStatus, type HermesChatChunk, type HermesChatDone, type HermesChatError, type HermesCronCliStatus, type HermesCronOverview, type HermesModelConfig, type HermesNativeMemoryFile, type HermesNativeMemoryResult, type HermesStatus, type HermesStreamDiagnostics, type HermesToolProgress } from "@/lib/hermes";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { cn, getErrorMessage } from "@/lib/utils";
 import { officialSkills, officialCategories, hermesHubSkills, hermesHubCategories, type OfficialSkill, type HermesHubSkill } from "@/data/skills";
@@ -163,6 +167,7 @@ function updateSessionFromMessages(session: ChatSession, messages: UiChatMessage
 
 function MarkdownContent({ text }: { text: string }) {
   if (!text) return null;
+  const [copiedIdx, setCopiedIdx] = useState(-1);
   const lines = text.split("\n");
   const elements: ReactNode[] = [];
   let i = 0;
@@ -205,18 +210,18 @@ function MarkdownContent({ text }: { text: string }) {
       i++; // closing ```
       const codeText = codeLines.join("\n");
       elements.push(
-        <pre key={key++} className="group relative my-2 overflow-x-auto rounded-lg bg-zinc-950 p-3 text-[13px] leading-relaxed text-zinc-100 dark:bg-zinc-900">
+        <pre key={key} className="group relative my-2 overflow-x-auto rounded-lg bg-zinc-950 p-3 text-[13px] leading-relaxed text-zinc-100 dark:bg-zinc-900">
           {lang && <div className="mb-1 text-[10px] text-zinc-500">{lang}</div>}
           <code>{codeText}</code>
           <button
             className="absolute right-2 top-2 rounded p-1 text-zinc-500 opacity-0 transition hover:text-zinc-300 group-hover:opacity-100"
-            onClick={() => navigator.clipboard.writeText(codeText)}
+            onClick={() => { navigator.clipboard.writeText(codeText); setCopiedIdx(key); setTimeout(() => setCopiedIdx(-1), 2000); }}
           >
-            <Copy className="h-3.5 w-3.5" />
+            {copiedIdx === key ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
           </button>
         </pre>
       );
-      continue;
+      key++;
     }
 
     // heading
@@ -274,6 +279,44 @@ function MarkdownContent({ text }: { text: string }) {
       continue;
     }
 
+    // table (GFM)
+    if (line.includes("|") && i + 1 < lines.length && /^\|?[\s:]*-+[\s:]*\|/.test(lines[i + 1] ?? "")) {
+      const tableLines: string[] = [];
+      while (i < lines.length && (lines[i] ?? "").includes("|")) {
+        tableLines.push(lines[i]!);
+        i++;
+      }
+      const parseRow = (row: string) => row.replace(/^\|/, "").replace(/\|$/, "").split("|").map((c) => c.trim());
+      const headers = parseRow(tableLines[0]!);
+      const dataRows = tableLines.slice(2).map(parseRow);
+      elements.push(
+        <div key={key++} className="my-2 overflow-x-auto rounded-lg border">
+          <table className="w-full border-collapse text-sm">
+            <thead>
+              <tr className="border-b bg-muted/40">
+                {headers.map((h, hi) => <th key={hi} className="px-3 py-2 text-left font-medium">{parseInline(h)}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {dataRows.map((row, ri) => (
+                <tr key={ri} className="border-b last:border-0">
+                  {row.map((cell, ci) => <td key={ci} className="px-3 py-2">{parseInline(cell)}</td>)}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+      continue;
+    }
+
+    // hr
+    if (/^---+$/.test(line.trim()) || /^\*\*\*+$/.test(line.trim())) {
+      elements.push(<hr key={key++} className="my-3 border-border/50" />);
+      i++;
+      continue;
+    }
+
     // empty line → paragraph break
     if (line.trim() === "") {
       if (elements.length > 0 && typeof elements[elements.length - 1] === "object") {
@@ -286,7 +329,7 @@ function MarkdownContent({ text }: { text: string }) {
 
     // paragraph
     const pLines: string[] = [];
-    while (i < lines.length && (lines[i] ?? "").trim() !== "" && !/^[\s]*[-*]\s+/.test(lines[i] ?? "") && !/^[\s]*\d+\.\s+/.test(lines[i] ?? "") && !(lines[i] ?? "").startsWith(">") && !(lines[i] ?? "").trim().startsWith("```") && !(lines[i] ?? "").trim().match(/^#{1,3}\s+/)) {
+    while (i < lines.length && (lines[i] ?? "").trim() !== "" && !/^[\s]*[-*]\s+/.test(lines[i] ?? "") && !/^[\s]*\d+\.\s+/.test(lines[i] ?? "") && !(lines[i] ?? "").startsWith(">") && !(lines[i] ?? "").trim().startsWith("```") && !(lines[i] ?? "").trim().match(/^#{1,3}\s+/) && !((lines[i] ?? "").includes("|") && i + 1 < lines.length && /^\|?[\s:]*-+[\s:]*\|/.test(lines[i + 1] ?? "")) && !/^---+$/.test((lines[i] ?? "").trim()) && !/^\*\*\*+$/.test((lines[i] ?? "").trim())) {
       pLines.push(lines[i]!);
       i++;
     }
@@ -311,6 +354,7 @@ const navItems = [
 function App() {
   const [active, setActive] = useState<RouteId>("home");
   const [chatDraft, setChatDraft] = useState("");
+  const [pendingNewSessionTitle, setPendingNewSessionTitle] = useState("");
   const [dark, setDark] = useState(false);
   const [config, setConfig] = useState<AppConfig>(DEFAULT_CONFIG);
   const [hermesCli, setHermesCli] = useState<HermesStatus | null>(null);
@@ -446,7 +490,7 @@ function App() {
           {!ready ? (
             <div className="flex h-[60vh] items-center justify-center text-muted-foreground"><Loader2 className="mr-2 h-4 w-4 animate-spin" /> 正在加载本地配置</div>
           ) : (
-            <Page active={active} setActive={setActive} chatDraft={chatDraft} setChatDraft={setChatDraft} config={config} updateConfig={updateConfig} hermesCli={hermesCli} hermesApi={hermesApi} hermesModelConfig={hermesModelConfig} setHermesModelConfig={setHermesModelConfig} refreshHermesCli={refreshHermesCli} refreshHermesApi={refreshHermesApi} cronOverview={cronOverview} setCronOverview={setCronOverview} cronCliStatus={cronCliStatus} setCronCliStatus={setCronCliStatus} cronLastLoadedAt={cronLastLoadedAt} setCronLastLoadedAt={setCronLastLoadedAt} />
+            <Page active={active} setActive={setActive} chatDraft={chatDraft} setChatDraft={setChatDraft} pendingNewSessionTitle={pendingNewSessionTitle} setPendingNewSessionTitle={setPendingNewSessionTitle} config={config} updateConfig={updateConfig} hermesCli={hermesCli} hermesApi={hermesApi} hermesModelConfig={hermesModelConfig} setHermesModelConfig={setHermesModelConfig} refreshHermesCli={refreshHermesCli} refreshHermesApi={refreshHermesApi} cronOverview={cronOverview} setCronOverview={setCronOverview} cronCliStatus={cronCliStatus} setCronCliStatus={setCronCliStatus} cronLastLoadedAt={cronLastLoadedAt} setCronLastLoadedAt={setCronLastLoadedAt} />
           )}
         </main>
       </div>
@@ -545,11 +589,11 @@ function Onboarding({ config, updateConfig, hermesCli, hermesApi }: { config: Ap
   );
 }
 
-function Page({ active, setActive, chatDraft, setChatDraft, config, updateConfig, hermesCli, hermesApi, hermesModelConfig, setHermesModelConfig, refreshHermesCli, refreshHermesApi, cronOverview, setCronOverview, cronCliStatus, setCronCliStatus, cronLastLoadedAt, setCronLastLoadedAt }: { active: RouteId; setActive: (id: RouteId) => void; chatDraft: string; setChatDraft: (value: string) => void; config: AppConfig; updateConfig: (next: AppConfig) => Promise<void>; hermesCli: HermesStatus | null; hermesApi: HermesApiServerStatus | null; hermesModelConfig: HermesModelConfig | null; setHermesModelConfig: (value: HermesModelConfig | null) => void; refreshHermesCli: () => Promise<HermesStatus>; refreshHermesApi: () => Promise<HermesApiServerStatus>; cronOverview: HermesCronOverview | null; setCronOverview: (v: HermesCronOverview | null) => void; cronCliStatus: HermesCronCliStatus | null; setCronCliStatus: (v: HermesCronCliStatus | null) => void; cronLastLoadedAt: number; setCronLastLoadedAt: (v: number) => void }) {
+function Page({ active, setActive, chatDraft, setChatDraft, pendingNewSessionTitle, setPendingNewSessionTitle, config, updateConfig, hermesCli, hermesApi, hermesModelConfig, setHermesModelConfig, refreshHermesCli, refreshHermesApi, cronOverview, setCronOverview, cronCliStatus, setCronCliStatus, cronLastLoadedAt, setCronLastLoadedAt }: { active: RouteId; setActive: (id: RouteId) => void; chatDraft: string; setChatDraft: (value: string) => void; pendingNewSessionTitle: string; setPendingNewSessionTitle: (v: string) => void; config: AppConfig; updateConfig: (next: AppConfig) => Promise<void>; hermesCli: HermesStatus | null; hermesApi: HermesApiServerStatus | null; hermesModelConfig: HermesModelConfig | null; setHermesModelConfig: (value: HermesModelConfig | null) => void; refreshHermesCli: () => Promise<HermesStatus>; refreshHermesApi: () => Promise<HermesApiServerStatus>; cronOverview: HermesCronOverview | null; setCronOverview: (v: HermesCronOverview | null) => void; cronCliStatus: HermesCronCliStatus | null; setCronCliStatus: (v: HermesCronCliStatus | null) => void; cronLastLoadedAt: number; setCronLastLoadedAt: (v: number) => void }) {
   if (active === "home") return <HomePage config={config} setActive={setActive} hermesCli={hermesCli} hermesApi={hermesApi} hermesModelConfig={hermesModelConfig} />;
-  if (active === "chat") return <ChatPage config={config} hermesCli={hermesCli} hermesApi={hermesApi} refreshHermesApi={refreshHermesApi} setActive={setActive} initialDraft={chatDraft} onDraftConsumed={() => setChatDraft("")} />;
+  if (active === "chat") return <ChatPage config={config} hermesCli={hermesCli} hermesApi={hermesApi} refreshHermesApi={refreshHermesApi} setActive={setActive} initialDraft={chatDraft} onDraftConsumed={() => setChatDraft("")} pendingNewSessionTitle={pendingNewSessionTitle} onNewSessionCreated={() => setPendingNewSessionTitle("")} />;
   if (active === "engines") return <EnginesPage config={config} updateConfig={updateConfig} hermesCli={hermesCli} hermesApi={hermesApi} hermesModelConfig={hermesModelConfig} setHermesModelConfig={setHermesModelConfig} refreshHermesCli={refreshHermesCli} refreshHermesApi={refreshHermesApi} />;
-  if (active === "skills") return <SkillsPage config={config} updateConfig={updateConfig} setActive={setActive} setChatDraft={setChatDraft} />;
+  if (active === "skills") return <SkillsPage config={config} updateConfig={updateConfig} setActive={setActive} setChatDraft={setChatDraft} setPendingNewSessionTitle={setPendingNewSessionTitle} />;
   if (active === "memory") return <MemoryPage />;
   if (active === "tasks") return <TasksPage cronOverview={cronOverview} setCronOverview={setCronOverview} cronCliStatus={cronCliStatus} setCronCliStatus={setCronCliStatus} cronLastLoadedAt={cronLastLoadedAt} setCronLastLoadedAt={setCronLastLoadedAt} />;
   if (active === "usage") return <UsagePage />;
@@ -624,6 +668,56 @@ function HomePage({ config, setActive, hermesCli, hermesApi, hermesModelConfig }
         </Card>
       )}
     </div>
+  );
+}
+
+const REASONING_LEVELS = [
+  { value: "none", label: "关闭" },
+  { value: "low", label: "轻量" },
+  { value: "medium", label: "标准" },
+  { value: "high", label: "深度" },
+  { value: "xhigh", label: "极深" },
+] as const;
+
+function ReasoningEffortControl({ hermesModelConfig, setHermesModelConfig, config, updateConfig }: { hermesModelConfig: HermesModelConfig | null; setHermesModelConfig: (v: HermesModelConfig | null) => void; config: AppConfig; updateConfig: (next: AppConfig) => Promise<void> }) {
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState("");
+  const current = hermesModelConfig?.reasoningEffort || "medium";
+
+  const handleChange = async (effort: string) => {
+    setSaving(true);
+    setMsg("");
+    try {
+      const res = await applyHermesReasoningConfig(effort);
+      if (res.verifiedConfig) setHermesModelConfig(res.verifiedConfig);
+      setMsg(`已设置为 ${REASONING_LEVELS.find((l) => l.value === effort)?.label || effort}`);
+    } catch (err) {
+      setMsg(`设置失败：${getErrorMessage(err)}`);
+    } finally { setSaving(false); }
+  };
+
+  const handleToggleShow = () => {
+    updateConfig({ ...config, showReasoning: !config.showReasoning });
+  };
+
+  return (
+    <>
+      <div className="space-y-1">
+        <label className="text-sm font-medium">推理深度</label>
+        <div className="flex flex-wrap gap-2">
+          {REASONING_LEVELS.map((level) => (
+            <Button key={level.value} size="sm" variant={current === level.value ? "default" : "outline"} disabled={saving} onClick={() => handleChange(level.value)}>{level.label}</Button>
+          ))}
+        </div>
+        <p className="text-xs text-muted-foreground">当前：{REASONING_LEVELS.find((l) => l.value === current)?.label || current}。更高强度可能增加响应时间和 token 消耗。</p>
+      </div>
+      <div className="flex items-center gap-3">
+        <Switch checked={config.showReasoning !== false} onCheckedChange={handleToggleShow} />
+        <span className="text-sm">显示思考过程</span>
+        <span className="text-xs text-muted-foreground">开启后 Agent 回复中会展示推理过程（默认折叠）。</span>
+      </div>
+      {msg && <div className="rounded-xl border bg-muted/30 p-2 text-xs text-muted-foreground">{msg}</div>}
+    </>
   );
 }
 
@@ -763,6 +857,17 @@ function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelCo
         </CardContent>
       </Card>
 
+      {/* 2.5 Reasoning Effort */}
+      <Card>
+        <CardHeader>
+          <CardTitle>思考强度</CardTitle>
+          <CardDescription>控制 Hermes Agent 的推理深度。是否生效取决于当前模型和模型供应服务是否支持。</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <ReasoningEffortControl hermesModelConfig={hermesModelConfig} setHermesModelConfig={setHermesModelConfig} config={config} updateConfig={updateConfig} />
+        </CardContent>
+      </Card>
+
       {/* 3. Apply Preview Dialog */}
       {showApplyPreview && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setShowApplyPreview(false)}>
@@ -823,7 +928,7 @@ function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelCo
 
 type ChatPhase = "ready" | "sending" | "thinking" | "running" | "done" | "error";
 
-function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, initialDraft, onDraftConsumed }: { config: AppConfig; hermesCli: HermesStatus | null; hermesApi: HermesApiServerStatus | null; refreshHermesApi: () => Promise<HermesApiServerStatus>; setActive: (id: RouteId) => void; initialDraft: string; onDraftConsumed: () => void }) {
+function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, initialDraft, onDraftConsumed, pendingNewSessionTitle, onNewSessionCreated }: { config: AppConfig; hermesCli: HermesStatus | null; hermesApi: HermesApiServerStatus | null; refreshHermesApi: () => Promise<HermesApiServerStatus>; setActive: (id: RouteId) => void; initialDraft: string; onDraftConsumed: () => void; pendingNewSessionTitle: string; onNewSessionCreated: () => void }) {
   const [input, setInput] = useState(initialDraft);
   const [messages, setMessages] = useState<UiChatMessage[]>([]);
   const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
@@ -832,6 +937,7 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
   const [deleteSessionId, setDeleteSessionId] = useState<string | null>(null);
   const [confirmClearHistory, setConfirmClearHistory] = useState(false);
   const [sessionsLoaded, setSessionsLoaded] = useState(false);
+  const sessionsLoadedRef = useRef(false);
   const [sessionError, setSessionError] = useState("");
   const [mobileHistoryOpen, setMobileHistoryOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -842,6 +948,7 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
   const [showStreamDiagnostics, setShowStreamDiagnostics] = useState(false);
   const [modeMessage, setModeMessage] = useState("");
   const [isComposing, setIsComposing] = useState(false);
+  const isComposingRef = useRef(false);
   const [confirmClear, setConfirmClear] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [lastElapsed, setLastElapsed] = useState<number | null>(null);
@@ -855,12 +962,15 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
   const chatSessionsRef = useRef<ChatSession[]>([]);
   const currentSessionIdRef = useRef<string | null>(null);
   const activeRequestRef = useRef<string | null>(null);
+  const stoppedIdsRef = useRef<Set<string>>(new Set());
   const unlistenRef = useRef<UnlistenFn[]>([]);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const twRef = useRef<TypewriterState>({ contentBuf: "", reasoningBuf: "", done: false, skip: false, rafId: null, requestId: "" });
   const autoFollowRef = useRef(true);
   const scrollRafRef = useRef<number | null>(null);
   const [showJumpToBottom, setShowJumpToBottom] = useState(false);
+  const [expandedDetailId, setExpandedDetailId] = useState<string | null>(null);
+  const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
 
   const persistSessions = async (next: ChatSession[]) => {
     const sorted = sortSessions(next);
@@ -874,11 +984,17 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
     }
   };
 
-  const createSession = async () => {
+  const createSession = async (title?: string) => {
     if (loading) return;
     cancelTypewriter();
     const session = createEmptySession("hermes-agent");
-    const next = sortSessions([session, ...chatSessions]);
+    if (title) session.title = title;
+    const existing = chatSessionsRef.current;
+    if (!sessionsLoadedRef.current && existing.length === 0) {
+      console.warn("[ChatPage] createSession blocked: sessions not yet loaded");
+      return;
+    }
+    const next = sortSessions([session, ...existing]);
     chatSessionsRef.current = next;
     currentSessionIdRef.current = session.id;
     setChatSessions(next);
@@ -1062,6 +1178,14 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
     });
   }, [initialDraft, onDraftConsumed]);
 
+  // When coming from Skill Center with a new session request
+  useEffect(() => {
+    if (!pendingNewSessionTitle || !sessionsLoaded) return;
+    void createSession(pendingNewSessionTitle);
+    onNewSessionCreated();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingNewSessionTitle, sessionsLoaded]);
+
   useEffect(() => {
     let cancelled = false;
     readChatSessions()
@@ -1077,6 +1201,7 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
         setMessages(initialMessages);
         messagesRef.current = initialMessages;
         setSessionsLoaded(true);
+        sessionsLoadedRef.current = true;
         if (sorted.length === 0) void persistSessions(initial);
       })
       .catch((err) => {
@@ -1088,6 +1213,7 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
         setChatSessions([session]);
         setCurrentSessionId(session.id);
         setSessionsLoaded(true);
+        sessionsLoadedRef.current = true;
         setSessionError("历史会话文件无法读取，已临时重建为空历史。后续保存成功后会恢复正常。");
       });
     return () => { cancelled = true; };
@@ -1099,14 +1225,14 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
     return el.scrollHeight - el.scrollTop - el.clientHeight < 120;
   };
 
-  const scheduleScrollToBottom = (force = false) => {
+  const scheduleScrollToBottom = (force = false, smooth = false) => {
     if (!force && !autoFollowRef.current) return;
     if (scrollRafRef.current !== null) return;
     scrollRafRef.current = requestAnimationFrame(() => {
       scrollRafRef.current = null;
       const el = scrollRef.current;
       if (!el) return;
-      el.scrollTop = el.scrollHeight;
+      el.scrollTo({ top: el.scrollHeight, behavior: smooth ? "smooth" : "auto" });
     });
   };
 
@@ -1121,7 +1247,14 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
   const jumpToBottom = () => {
     autoFollowRef.current = true;
     setShowJumpToBottom(false);
-    scheduleScrollToBottom(true);
+    if (scrollRafRef.current !== null) {
+      cancelAnimationFrame(scrollRafRef.current);
+      scrollRafRef.current = null;
+    }
+    const el = scrollRef.current;
+    if (el) {
+      el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    }
   };
 
   useEffect(() => {
@@ -1134,7 +1267,7 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
     setShowJumpToBottom(false);
     if (messages.length > 0) {
       setTimeout(() => {
-        if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+        if (scrollRef.current) scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "auto" });
       }, 0);
     }
   }, [currentSessionId, sessionsLoaded]);
@@ -1273,6 +1406,7 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
     try {
       const unlistenChunk = await listen<HermesChatChunk>("hermes-chat-chunk", (event) => {
         setStreamDiagnostics((prev) => ({ ...prev, frontChunkReceivedCount: prev.frontChunkReceivedCount + 1, currentRequestId: activeRequestRef.current }));
+        if (stoppedIdsRef.current.has(event.payload.requestId)) return;
         if (DEBUG_STREAM) console.debug("[stream-debug] front chunk", { requestId: event.payload.requestId, expectedRequestId: requestId, type: event.payload.type, length: event.payload.content?.length ?? 0 });
         if (event.payload.requestId !== requestId) {
           if (DEBUG_STREAM) console.debug("[stream-debug] front chunk filtered", { requestId: event.payload.requestId, expectedRequestId: requestId });
@@ -1299,6 +1433,7 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
 
       const unlistenTool = await listen<HermesToolProgress>("hermes-tool-progress", (event) => {
         setStreamDiagnostics((prev) => ({ ...prev, toolProgressReceivedCount: prev.toolProgressReceivedCount + 1, currentRequestId: activeRequestRef.current }));
+        if (stoppedIdsRef.current.has(event.payload.requestId)) return;
         if (DEBUG_STREAM) console.debug("[stream-debug] front tool", { requestId: event.payload.requestId, expectedRequestId: requestId, length: event.payload.data?.length ?? 0 });
         if (event.payload.requestId !== requestId) {
           setStreamDiagnostics((prev) => ({ ...prev, filteredEventCount: prev.filteredEventCount + 1 }));
@@ -1332,6 +1467,11 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
 
       const unlistenDone = await listen<HermesChatDone>("hermes-chat-done", (event) => {
         setStreamDiagnostics((prev) => ({ ...prev, doneReceivedCount: prev.doneReceivedCount + 1, doneReceived: true, currentRequestId: activeRequestRef.current, rust: { ...prev.rust, ...(event.payload.diagnostics || {}) } }));
+        if (stoppedIdsRef.current.has(event.payload.requestId)) {
+          stoppedIdsRef.current.delete(event.payload.requestId);
+          cleanupListeners();
+          return;
+        }
         if (DEBUG_STREAM) console.debug("[stream-debug] front done", { requestId: event.payload.requestId, expectedRequestId: requestId, contentLength: event.payload.content?.length ?? 0, reasoningLength: event.payload.reasoningContent?.length ?? 0, diagnostics: event.payload.diagnostics });
         if (event.payload.requestId !== requestId) {
           setStreamDiagnostics((prev) => ({ ...prev, filteredEventCount: prev.filteredEventCount + 1 }));
@@ -1354,6 +1494,8 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
           twRef.current.reasoningBuf += finalReasoning.slice(displayedReasoningLength + pendingReasoningLength);
         }
         twRef.current.done = true;
+        setLoading(false);
+        setPhase("done");
         setMessages((prev) => {
           const idx = prev.findIndex((m) => m.role === "assistant" && m.requestId === requestId);
           if (idx < 0) return prev;
@@ -1372,7 +1514,7 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
         setLastElapsed(event.payload.elapsedMs);
         if (event.payload.sessionId) setSessionId(event.payload.sessionId);
         setModeMessage("");
-        if (event.payload.partial) {
+        if (event.payload.partial && !event.payload.stopped) {
           setErrorDetail(`流式连接提前结束，已保留已生成内容。\n错误：${event.payload.streamError || event.payload.warning || "unknown"}`);
           setShowErrorDetail(false);
         }
@@ -1398,6 +1540,7 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
 
       const unlistenErr = await listen<HermesChatError>("hermes-chat-error", (event) => {
         setStreamDiagnostics((prev) => ({ ...prev, errorReceivedCount: prev.errorReceivedCount + 1, currentRequestId: activeRequestRef.current }));
+        if (stoppedIdsRef.current.has(event.payload.requestId)) return;
         if (event.payload.requestId !== requestId) {
           setStreamDiagnostics((prev) => ({ ...prev, filteredEventCount: prev.filteredEventCount + 1 }));
           return;
@@ -1455,6 +1598,40 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
     }
   };
 
+  const stopGeneration = () => {
+    const rid = activeRequestRef.current;
+    if (!rid) return;
+    stoppedIdsRef.current.add(rid);
+    activeRequestRef.current = null;
+    if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+    cancelTypewriter();
+    setLoading(false);
+    setPhase("ready");
+    // Mark current assistant message as stopped, or remove if empty
+    setMessages((prev) => {
+      const idx = prev.findIndex((m) => m.role === "assistant" && m.requestId === rid);
+      if (idx < 0) return prev;
+      const u = [...prev];
+      const msg = u[idx]!;
+      const finalContent = (msg.content || "") + twRef.current.contentBuf;
+      const finalReasoning = (msg.reasoningContent || "") + twRef.current.reasoningBuf;
+      if (!finalContent.trim() && !finalReasoning.trim()) {
+        // No content generated — remove the placeholder, add a system notice
+        u.splice(idx, 1);
+        u.push({ role: "system" as any, content: "", requestId: rid, stopped: true } as any);
+      } else {
+        u[idx] = { ...msg, content: finalContent, reasoningContent: finalReasoning, partial: true, warning: "已停止生成" };
+      }
+      messagesRef.current = u;
+      return u;
+    });
+    twRef.current = { contentBuf: "", reasoningBuf: "", done: true, skip: false, rafId: null, requestId: "" };
+    // Save session with stopped content
+    void saveCurrentSession(messagesRef.current);
+    // Tell Rust to stop (best effort, non-blocking)
+    void cancelHermesChatCompletion(rid).catch(() => {});
+  };
+
   const regenLast = () => {
     if (messages.length < 2) return;
     const lastUserIdx = [...messages].reverse().findIndex((m) => m.role === "user");
@@ -1470,7 +1647,8 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key !== "Enter" || event.shiftKey || isComposing || event.nativeEvent.isComposing) return;
+    if (event.key !== "Enter" || event.shiftKey) return;
+    if (isComposing || isComposingRef.current || event.nativeEvent.isComposing || event.keyCode === 229) return;
     event.preventDefault();
     if (!input.trim() || loading) return;
     send();
@@ -1497,26 +1675,29 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
             <Input className="pl-8" value={sessionSearch} onChange={(event) => setSessionSearch(event.target.value)} placeholder="搜索历史" />
           </div>
         </CardHeader>
-        <CardContent className="min-h-0 flex-1 overflow-y-auto p-2">
+        <CardContent className="min-h-0 flex-1 overflow-y-auto p-2" onClick={() => setMenuOpenId(null)}>
           {sessionError && <div className="mb-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-2 text-xs text-amber-700 dark:text-amber-300">{sessionError}</div>}
           {!sessionsLoaded && <div className="p-3 text-sm text-muted-foreground"><Loader2 className="mr-2 inline h-4 w-4 animate-spin" />正在加载历史</div>}
           {filteredSessions.map((session) => (
-            <div key={session.id} className={cn("group rounded-xl border p-2", session.id === currentSessionId ? "border-primary/40 bg-primary/5" : "border-transparent hover:bg-muted/50")}>
-              <button className="w-full text-left" disabled={loading} onClick={() => switchSession(session)}>
-                <div className="flex items-center gap-2">
-                  {session.pinned && <span className="text-[10px] text-primary">置顶</span>}
-                  <div className="min-w-0 flex-1 truncate text-sm font-medium">{session.title}</div>
+            <div key={session.id} className={cn("group relative rounded-xl border", session.id === currentSessionId ? "border-primary/40 bg-primary/5" : "border-transparent hover:bg-muted/50")}>
+              <button className="flex w-full items-start gap-2 p-2 text-left" disabled={loading} onClick={() => { setMenuOpenId(null); switchSession(session); }}>
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-medium">{session.title}</div>
+                  <div className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{session.lastMessagePreview || "暂无消息"}</div>
                 </div>
-                <div className="mt-1 line-clamp-2 text-xs text-muted-foreground">{session.lastMessagePreview || "暂无消息"}</div>
-                <div className="mt-2 flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
-                  <span>{formatUnixTime(session.updatedAt)}</span>
-                  {Boolean(session.totalTokens) && <span>{session.totalTokens} tokens</span>}
-                </div>
+                {session.pinned && <Pin className="mt-1 h-3 w-3 shrink-0 text-primary/60" />}
               </button>
-              <div className="mt-2 hidden flex-wrap gap-1 group-hover:flex">
-                <Button variant="ghost" size="sm" onClick={() => renameSession(session)}>重命名</Button>
-                <Button variant="ghost" size="sm" onClick={() => togglePinSession(session)}>{session.pinned ? "取消置顶" : "置顶"}</Button>
-                <Button variant="ghost" size="sm" onClick={() => setDeleteSessionId(session.id)}>删除</Button>
+              <div className="absolute right-1 top-1">
+                <Button variant="ghost" size="icon" className={cn("h-7 w-7 opacity-0 transition-opacity group-hover:opacity-100", menuOpenId === session.id && "opacity-100")} onClick={(e) => { e.stopPropagation(); setMenuOpenId(menuOpenId === session.id ? null : session.id); }}>
+                  <MoreHorizontal className="h-3.5 w-3.5" />
+                </Button>
+                {menuOpenId === session.id && (
+                  <div className="absolute right-0 top-8 z-20 min-w-[100px] rounded-xl border bg-card p-1 shadow-lg">
+                    <button className="w-full rounded-lg px-3 py-1.5 text-left text-sm hover:bg-muted" onClick={() => { renameSession(session); setMenuOpenId(null); }}>重命名</button>
+                    <button className="w-full rounded-lg px-3 py-1.5 text-left text-sm hover:bg-muted" onClick={() => { togglePinSession(session); setMenuOpenId(null); }}>{session.pinned ? "取消置顶" : "置顶"}</button>
+                    <button className="w-full rounded-lg px-3 py-1.5 text-left text-sm text-rose-600 hover:bg-rose-500/10" onClick={() => { setDeleteSessionId(session.id); setMenuOpenId(null); }}>删除</button>
+                  </div>
+                )}
               </div>
             </div>
           ))}
@@ -1527,32 +1708,27 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
         </div>
       </Card>
       <Card className="flex min-h-0 flex-1 flex-col overflow-hidden">
-        <CardHeader className="shrink-0 border-b bg-background/80 py-3 backdrop-blur">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <div className="text-sm font-medium">与本机 Hermes Agent 对话</div>
-              <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                <span className="flex items-center gap-1.5 rounded-full border bg-background px-2 py-1">
-                  <span className={cn("h-2 w-2 rounded-full", hermesConnected ? "bg-emerald-500" : hermesInstalled ? "bg-amber-500" : "bg-rose-500")} />
-                  {hermesConnected ? "Hermes Agent 已连接" : hermesInstalled ? "Hermes 对话服务未运行" : "Hermes 未安装"}
-                </span>
-                {hermesConnected && <PhaseBadge phase={phase} />}
-                {(phase === "sending" || phase === "thinking" || phase === "running") && <span>已耗时 {elapsedLive}s</span>}
-                {phase === "done" && lastElapsed != null && <span>耗时 {lastElapsed >= 1000 ? `${Math.round(lastElapsed / 1000)}s` : "1s"}</span>}
-              </div>
-            </div>
-            <div className="flex flex-wrap justify-end gap-2">
+        <CardHeader className="shrink-0 border-b bg-background/80 py-2.5 backdrop-blur">
+          <div className="flex items-center gap-3">
+            <span className="flex items-center gap-1.5 text-xs">
+              <span className={cn("h-2 w-2 rounded-full", hermesConnected ? "bg-emerald-500" : hermesInstalled ? "bg-amber-500" : "bg-rose-500")} />
+              {hermesConnected ? "Hermes 已连接" : hermesInstalled ? "对话服务未运行" : "未安装"}
+            </span>
+            <span className="text-xs text-muted-foreground">·</span>
+            {hermesConnected && <PhaseBadge phase={phase} />}
+            {(phase === "sending" || phase === "thinking" || phase === "running") && <span className="text-xs text-muted-foreground">已耗时 {elapsedLive}s</span>}
+            {phase === "done" && lastElapsed != null && <span className="text-xs text-muted-foreground">耗时 {lastElapsed >= 1000 ? `${Math.round(lastElapsed / 1000)}s` : "1s"}</span>}
+            <div className="ml-auto flex flex-wrap items-center gap-2">
               {DEBUG_STREAM && (
                 <Button variant="ghost" size="sm" onClick={() => setShowAdvanced(!showAdvanced)}>
-                  {showAdvanced ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                  高级诊断
+                  {showAdvanced ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}高级诊断
                 </Button>
               )}
               <Button variant="outline" size="sm" onClick={() => setConfirmClear(true)} disabled={messages.length === 0}><Trash2 className="h-4 w-4" />清空</Button>
               <Button variant="outline" size="sm" onClick={resetSession}><Plus className="h-4 w-4" />新会话</Button>
             </div>
           </div>
-          {!hermesConnected && <Button className="mt-3" variant="outline" size="sm" onClick={() => setActive("engines")}>前往 Hermes 管理</Button>}
+          {!hermesConnected && <Button className="mt-2" variant="outline" size="sm" onClick={() => setActive("engines")}>前往 Hermes 管理</Button>}
           <div className="mt-3 lg:hidden">
             <Button variant="ghost" size="sm" onClick={() => setMobileHistoryOpen(!mobileHistoryOpen)}>
               {mobileHistoryOpen ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
@@ -1583,7 +1759,8 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
           )}
         </CardHeader>
         <CardContent className="flex min-h-0 flex-1 flex-col p-0">
-          <div ref={scrollRef} onScroll={handleMessageScroll} className="relative min-h-0 flex-1 space-y-5 overflow-y-auto bg-gradient-to-b from-background to-muted/20 px-5 py-6 pb-8">
+          <div className="relative flex-1 min-h-0">
+            <div ref={scrollRef} onScroll={handleMessageScroll} className="h-full space-y-5 overflow-y-auto bg-gradient-to-b from-background to-muted/20 px-5 py-6">
             {messages.length === 0 && (
               <div className="flex min-h-[50vh] flex-col items-center justify-center text-center">
                 <h3 className="text-xl font-semibold">今天想让 Hermes 帮你做什么？</h3>
@@ -1604,10 +1781,20 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
               </div>
             )}
             {messages.map((message, index) => {
+              // System notice for stopped-with-no-content
+              if ((message as any).role === "system" && (message as any).stopped) {
+                return (
+                  <div key={message.requestId || index} className="flex justify-start">
+                    <div className="rounded-lg bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground">已停止生成，未生成内容。</div>
+                  </div>
+                );
+              }
+              if (message.role !== "user" && message.role !== "assistant") return null;
               const isLastAssistant = message.role === "assistant" && index === messages.length - 1;
               const isPlaceholder = isLastAssistant && loading;
               const showPlaceholderText = isPlaceholder && !message.content && !message.reasoningContent;
               const isActiveAssistant = Boolean(loading && message.role === "assistant" && message.requestId === activeRequestRef.current);
+              const isStopped = Boolean(message.partial && message.warning === "已停止生成");
               return (
                 <div key={message.requestId || index} className={cn("group flex", message.role === "user" ? "justify-end" : "justify-start")}>
                   <div className={cn("flex flex-col", message.role === "user" ? "max-w-[68%] items-end" : "max-w-[720px] items-start")}>
@@ -1615,40 +1802,45 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
                       "rounded-2xl px-5 py-3.5 text-[15px] leading-7",
                       message.role === "user"
                         ? "bg-primary text-primary-foreground"
-                        : "border border-border/50 bg-card text-foreground"
+                        : "border border-border/40 bg-card text-foreground"
                     )}>
-                      <div className="mb-1 flex items-center gap-2 text-[11px] opacity-70">
-                        <span>{message.role === "user" ? "你" : "Hermes Agent"}</span>
-                        {message.role === "assistant" && isActiveAssistant && <span>· 正在生成</span>}
-                      </div>
                       {message.role === "assistant" && <ReasoningBlock content={message.reasoningContent || ""} isPlaceholder={isPlaceholder} phase={isPlaceholder ? phase : "done"} />}
-                      {message.role === "assistant" && <ToolsBlock toolEvents={message.toolEvents} />}
+                      {message.role === "assistant" && (message.toolEvents?.length ?? 0) > 0 && <ToolsBlock toolEvents={message.toolEvents} />}
                       {showPlaceholderText ? <PlaceholderText phase={phase} elapsedLive={elapsedLive} /> : isActiveAssistant ? <div className="whitespace-pre-wrap leading-7">{message.content || ""}</div> : <MarkdownContent text={message.content || ""} />}
-                      {message.role === "assistant" && message.partial && (
+                      {message.role === "assistant" && isStopped && (
+                        <div className="mt-2 inline-flex items-center gap-1 rounded-md bg-amber-500/10 px-2 py-0.5 text-[11px] text-amber-700 dark:text-amber-300">已停止生成</div>
+                      )}
+                      {message.role === "assistant" && message.partial && !isStopped && (
                         <div className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
                           {message.warning || "回复可能不完整"}
                         </div>
                       )}
                     </div>
                     {message.role === "assistant" && (
-                      <div className="mt-1.5 flex flex-wrap items-center gap-1.5 pl-1 text-[11px] text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100">
+                      <div className="mt-1.5 flex flex-wrap items-center gap-2 pl-1 text-[11px] text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100">
+                        <span>Hermes</span>
+                        {message.elapsedMs != null && <span>· {message.elapsedMs >= 1000 ? `${(message.elapsedMs / 1000).toFixed(1)}s` : `${message.elapsedMs}ms`}</span>}
+                        {message.usage?.total_tokens != null && <span>· {message.usage.total_tokens} tokens</span>}
                         <Button variant="ghost" size="sm" onClick={() => navigator.clipboard.writeText(message.content || "")}><Copy className="h-3 w-3" />复制</Button>
                         {isActiveAssistant && <Button variant="ghost" size="sm" onClick={skipTypewriter}><FastForward className="h-3 w-3" />快速显示</Button>}
                         {isLastAssistant && !loading && messages.length >= 2 && <Button variant="ghost" size="sm" onClick={regenLast}><RotateCcw className="h-3 w-3" />重新生成</Button>}
+                        <DetailsEntry message={message} expandedDetailId={expandedDetailId} setExpandedDetailId={setExpandedDetailId} />
                       </div>
                     )}
                   </div>
                 </div>
               );
             })}
-            <div ref={endRef} />
-            {showJumpToBottom && (
-              <Button className="sticky bottom-3 left-1/2 z-10 -translate-x-1/2 rounded-full shadow-md" size="sm" onClick={jumpToBottom}>
+            <div ref={endRef} className="h-28 shrink-0" />
+          </div>
+          {showJumpToBottom && (
+            <div className="pointer-events-none absolute inset-x-0 bottom-4 z-20 flex justify-center">
+              <Button className="pointer-events-auto rounded-full shadow-lg" size="sm" onClick={jumpToBottom}>
                 回到底部
               </Button>
-            )}
-          </div>
-          {error && (
+            </div>
+          )}
+        </div>          {error && (
             <div className="border-t px-5 py-3">
               <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-rose-700 dark:text-rose-400 whitespace-pre-wrap">{error}</div>
               {errorDetail && (
@@ -1669,18 +1861,23 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
                 className="max-h-[180px] min-h-14 resize-none overflow-y-auto border-0 bg-transparent px-3 py-2 shadow-none focus-visible:ring-0"
                 value={input}
                 onChange={handleInputChange}
-                onCompositionStart={() => setIsComposing(true)}
-                onCompositionEnd={() => setIsComposing(false)}
+                onCompositionStart={() => { setIsComposing(true); isComposingRef.current = true; }}
+                onCompositionEnd={() => { setIsComposing(false); isComposingRef.current = false; }}
                 onKeyDown={handleKeyDown}
                 placeholder={hermesConnected ? "向 Hermes Agent 发送消息..." : disabledReason}
                 disabled={!hermesConnected || loading}
               />
               <div className="flex items-center justify-between px-2 pb-1">
                 <span className="text-[11px] text-muted-foreground">Enter 发送 · Shift + Enter 换行</span>
-                <Button className="rounded-full" disabled={loading || !hermesConnected || !input.trim()} onClick={send}>
-                  {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                  {loading ? "生成中" : "发送"}
-                </Button>
+                {loading ? (
+                  <Button className="rounded-full" variant="destructive" onClick={stopGeneration}>
+                    <Square className="h-4 w-4" />停止
+                  </Button>
+                ) : (
+                  <Button className="rounded-full" disabled={!hermesConnected || !input.trim()} onClick={send}>
+                    <Send className="h-4 w-4" />发送
+                  </Button>
+                )}
               </div>
             </div>
           </div>
@@ -1714,14 +1911,17 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
   );
 }
 
-function SkillsPage({ config, updateConfig, setActive, setChatDraft }: { config: AppConfig; updateConfig: (next: AppConfig) => Promise<void>; setActive: (id: RouteId) => void; setChatDraft: (value: string) => void }) {
+function SkillsPage({ config, updateConfig, setActive, setChatDraft, setPendingNewSessionTitle }: { config: AppConfig; updateConfig: (next: AppConfig) => Promise<void>; setActive: (id: RouteId) => void; setChatDraft: (value: string) => void; setPendingNewSessionTitle: (v: string) => void }) {
   const [tab, setTab] = useState<"official" | "hub" | "enabled">("official");
   const [category, setCategory] = useState<string>("全部");
   const [search, setSearch] = useState("");
+  const [riskFilter, setRiskFilter] = useState<string>("全部");
+  const [enabledOnly, setEnabledOnly] = useState(false);
   const [detailSkill, setDetailSkill] = useState<OfficialSkill | null>(null);
   const [hubDetail, setHubDetail] = useState<HermesHubSkill | null>(null);
   const [runSkill, setRunSkill] = useState<OfficialSkill | null>(null);
   const [formValues, setFormValues] = useState<Record<string, string>>({});
+  const [showPreview, setShowPreview] = useState(false);
 
   const toggleSkill = (id: string) => {
     const enabledSkills = config.enabledSkills.includes(id) ? config.enabledSkills.filter((item) => item !== id) : [...config.enabledSkills, id];
@@ -1731,11 +1931,14 @@ function SkillsPage({ config, updateConfig, setActive, setChatDraft }: { config:
   const query = search.trim().toLowerCase();
   const filteredOfficial = officialSkills.filter((skill) => {
     if (category !== "全部" && skill.category !== category) return false;
+    if (riskFilter !== "全部" && skill.riskLevel !== riskFilter) return false;
+    if (enabledOnly && !config.enabledSkills.includes(skill.id)) return false;
     if (query && !skill.name.toLowerCase().includes(query) && !skill.description.toLowerCase().includes(query)) return false;
     return true;
   });
   const filteredHub = hermesHubSkills.filter((skill) => {
     if (category !== "全部" && skill.category !== category) return false;
+    if (riskFilter !== "全部" && skill.riskLevel !== riskFilter) return false;
     if (query && !skill.name.toLowerCase().includes(query) && !skill.description.toLowerCase().includes(query)) return false;
     return true;
   });
@@ -1746,16 +1949,33 @@ function SkillsPage({ config, updateConfig, setActive, setChatDraft }: { config:
 
   const openRun = (skill: OfficialSkill) => {
     setRunSkill(skill);
+    setShowPreview(false);
     const defaults: Record<string, string> = {};
     skill.inputFields.forEach((field) => { defaults[field.id] = field.options?.[0] ?? ""; });
     setFormValues(defaults);
   };
 
+  const builtPrompt = runSkill ? (() => {
+    let p = `你正在运行 Skill：${runSkill.name}\n\n技能目标：\n${runSkill.description}\n\n`;
+    const filled = runSkill.inputFields.filter((f) => formValues[f.id]?.trim());
+    if (filled.length > 0) {
+      p += "用户填写的信息：\n";
+      filled.forEach((f) => { p += `- ${f.label}：${formValues[f.id]}\n`; });
+      p += "\n";
+    }
+    p += "请按照以下工作流完成：\n";
+    let fp = runSkill.fullPrompt;
+    runSkill.inputFields.forEach((f) => { fp = fp.replace(`{${f.id}}`, formValues[f.id] || `[待填写：${f.label}]`); });
+    p += fp;
+    return p;
+  })() : "";
+
+  const missingRequired = runSkill?.inputFields.filter((f) => f.required && !formValues[f.id]?.trim()) ?? [];
+
   const generateAndGo = () => {
     if (!runSkill) return;
-    let prompt = runSkill.fullPrompt;
-    runSkill.inputFields.forEach((field) => { prompt = prompt.replace(`{${field.id}}`, formValues[field.id] || ""); });
-    setChatDraft(prompt);
+    setPendingNewSessionTitle(runSkill.name);
+    setChatDraft(builtPrompt);
     setActive("chat");
     setRunSkill(null);
   };
@@ -1767,15 +1987,26 @@ function SkillsPage({ config, updateConfig, setActive, setChatDraft }: { config:
       <Card>
         <CardHeader>
           <CardTitle>Skill Center</CardTitle>
-          <CardDescription>Skill 是 Agent 的可复用工作流。当前版本内置官方模板技能；HermesHub 兼容技能将在后续版本开放安装。</CardDescription>
+          <CardDescription>Skill 是 Agent 的可复用工作流。选择技能后，Hermes Agent 会按固定流程帮你完成任务。当前内置官方模板技能；高级扩展技能将在后续版本开放。</CardDescription>
           <div className="mt-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-700 dark:text-emerald-300">当前所有技能均为本地模板，不会执行本地命令，不会修改系统文件。</div>
         </CardHeader>
       </Card>
 
       <div className="flex flex-wrap items-center gap-2">
         <Button size="sm" variant={tab === "official" ? "default" : "outline"} onClick={() => { setTab("official"); setCategory("全部"); }}>官方模板</Button>
-        <Button size="sm" variant={tab === "hub" ? "default" : "outline"} onClick={() => { setTab("hub"); setCategory("全部"); }}>HermesHub 兼容</Button>
         <Button size="sm" variant={tab === "enabled" ? "default" : "outline"} onClick={() => setTab("enabled")}>已启用 ({enabledList.length})</Button>
+        <Button size="sm" variant={tab === "hub" ? "default" : "outline"} onClick={() => { setTab("hub"); setCategory("全部"); }}>扩展预览</Button>
+        <select className="rounded-xl border bg-background px-2 py-1 text-sm" value={riskFilter} onChange={(e) => setRiskFilter(e.target.value)}>
+          <option value="全部">全部风险</option>
+          <option value="low">低风险</option>
+          <option value="medium">中风险</option>
+          <option value="high">高风险</option>
+        </select>
+        {tab === "official" && (
+          <label className="flex items-center gap-1.5 text-sm text-muted-foreground">
+            <input type="checkbox" checked={enabledOnly} onChange={(e) => setEnabledOnly(e.target.checked)} className="rounded" />只看已启用
+          </label>
+        )}
         <Input className="ml-auto max-w-[220px]" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="搜索技能" />
       </div>
 
@@ -1785,22 +2016,25 @@ function SkillsPage({ config, updateConfig, setActive, setChatDraft }: { config:
         </div>
       )}
 
+      {/* Official Tab */}
       {tab === "official" && (
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3 [&>*]:transition-all [&>*]:duration-200">
           {filteredOfficial.map((skill) => (
-            <Card key={skill.id} accent={skill.riskLevel === "high" ? "#F43F5E" : skill.riskLevel === "medium" ? "#F59E0B" : "#10B981"}>
-              <CardHeader>
-                <div className="flex justify-between gap-3">
-                  <div><CardTitle>{skill.name}</CardTitle><CardDescription>{skill.description}</CardDescription></div>
-                  <Badge tone={config.enabledSkills.includes(skill.id) ? "success" : "muted"}>{config.enabledSkills.includes(skill.id) ? "已启用" : "未启用"}</Badge>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div className="flex flex-wrap gap-2"><Badge tone={riskColor(skill.riskLevel)}>风险 {riskLabel(skill.riskLevel)}</Badge><Badge tone="info">{skill.category}</Badge></div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <Button variant="outline" size="sm" onClick={() => setDetailSkill(skill)}>查看详情</Button>
-                  <Button size="sm" onClick={() => openRun(skill)}>运行技能</Button>
+            <Card key={skill.id} className="group flex flex-col hover:-translate-y-0.5 hover:shadow-md" accent={skill.riskLevel === "high" ? "#F43F5E" : skill.riskLevel === "medium" ? "#F59E0B" : "#10B981"}>
+              <CardHeader className="pb-2">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1"><CardTitle>{skill.name}</CardTitle></div>
                   <Switch checked={config.enabledSkills.includes(skill.id)} onCheckedChange={() => toggleSkill(skill.id)} />
+                </div>
+                <CardDescription className="line-clamp-2">{skill.description}</CardDescription>
+              </CardHeader>
+              <CardContent className="flex-1 space-y-3 pt-0">
+                <div className="flex flex-wrap gap-2"><Badge tone={riskColor(skill.riskLevel)}>风险 {riskLabel(skill.riskLevel)}</Badge><Badge tone="info">{skill.category}</Badge>{skill.verified && <Badge tone="success">官方认证</Badge>}</div>
+                {skill.recommendedUseCases.length > 0 && <p className="text-xs text-muted-foreground">场景：{skill.recommendedUseCases.join("、")}</p>}
+                <div className="text-[10px] text-muted-foreground">{config.enabledSkills.includes(skill.id) ? "已启用 · 在已启用列表可快速找到" : "未启用 · 启用后可在已启用列表快速找到"}</div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button size="sm" onClick={() => openRun(skill)}>运行技能</Button>
+                  <Button variant="outline" size="sm" onClick={() => setDetailSkill(skill)}>详情</Button>
                 </div>
               </CardContent>
             </Card>
@@ -1809,10 +2043,16 @@ function SkillsPage({ config, updateConfig, setActive, setChatDraft }: { config:
         </div>
       )}
 
+      {/* Hub Tab */}
       {tab === "hub" && (
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <div className="space-y-4">
+          <div className="rounded-xl border bg-muted/30 p-4 text-sm text-muted-foreground space-y-2">
+            <div>这些是未来可能接入的 Hermes 高级技能，需要联网、授权或额外配置。当前版本仅展示能力预览，暂不支持安装。</div>
+            <div className="text-xs">当前不会联网安装第三方技能，不会执行命令，不会修改 ~/.hermes。</div>
+          </div>
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3 [&>*]:transition-all [&>*]:duration-200">
           {filteredHub.map((skill) => (
-            <Card key={skill.id}>
+            <Card key={skill.id} className="group hover:-translate-y-0.5 hover:shadow-md">
               <CardHeader>
                 <div className="flex justify-between gap-3">
                   <div><CardTitle>{skill.name}</CardTitle><CardDescription>{skill.description}</CardDescription></div>
@@ -1824,68 +2064,96 @@ function SkillsPage({ config, updateConfig, setActive, setChatDraft }: { config:
                 <p className="text-xs text-muted-foreground">适合：{skill.audience}</p>
                 <div className="flex flex-wrap gap-2">
                   <Button variant="outline" size="sm" onClick={() => setHubDetail(skill)}>查看说明</Button>
-                  <Button size="sm" disabled>安装（后续开放）</Button>
                 </div>
               </CardContent>
             </Card>
           ))}
-          {filteredHub.length === 0 && <div className="col-span-full p-4 text-center text-sm text-muted-foreground">没有匹配的 HermesHub 技能。</div>}
+          {filteredHub.length === 0 && <div className="col-span-full p-4 text-center text-sm text-muted-foreground">没有匹配的扩展技能。</div>}
+          </div>
         </div>
       )}
 
+      {/* Enabled Tab */}
       {tab === "enabled" && (
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3 [&>*]:transition-all [&>*]:duration-200">
           {enabledList.map((skill) => (
-            <Card key={skill.id} accent="#10B981">
-              <CardHeader><CardTitle>{skill.name}</CardTitle><CardDescription>{skill.description}</CardDescription></CardHeader>
-              <CardContent className="flex flex-wrap gap-2">
+            <Card key={skill.id} className="group hover:-translate-y-0.5 hover:shadow-md" accent="#10B981">
+              <CardHeader className="pb-2"><CardTitle>{skill.name}</CardTitle><CardDescription>{skill.description}</CardDescription></CardHeader>
+              <CardContent className="flex flex-wrap gap-2 pt-0">
                 <Button size="sm" onClick={() => openRun(skill)}>运行技能</Button>
                 <Button variant="outline" size="sm" onClick={() => toggleSkill(skill.id)}>停用</Button>
               </CardContent>
             </Card>
           ))}
-          {enabledList.length === 0 && <div className="col-span-full p-4 text-center text-sm text-muted-foreground">暂无已启用的技能。在"官方模板"中启用技能后会显示在这里。</div>}
+          {enabledList.length === 0 && (
+            <div className="col-span-full rounded-xl border bg-muted/30 p-8 text-center text-sm text-muted-foreground">
+              还没有启用技能。你可以在"官方模板"中启用常用技能，方便下次快速找到。
+            </div>
+          )}
         </div>
       )}
 
+      {/* Detail Modal */}
       {detailSkill && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setDetailSkill(null)}>
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4 animate-in fade-in" onClick={() => setDetailSkill(null)}>
           <Card className="max-h-[80vh] w-full max-w-lg overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <CardHeader><CardTitle>{detailSkill.name}</CardTitle><CardDescription>{detailSkill.description}</CardDescription></CardHeader>
             <CardContent className="space-y-4 text-sm">
               <div className="flex flex-wrap gap-2"><Badge tone={riskColor(detailSkill.riskLevel)}>风险 {riskLabel(detailSkill.riskLevel)}</Badge><Badge tone="info">{detailSkill.category}</Badge><Badge tone="success">v{detailSkill.version}</Badge></div>
-              <div><span className="font-medium">适合场景：</span>{detailSkill.recommendedUseCases.join("、")}</div>
-              <div><span className="font-medium">输入项：</span>{detailSkill.inputFields.map((f) => f.label).join("、")}</div>
-              {detailSkill.examples.length > 0 && <div><span className="font-medium">示例输出：</span><pre className="mt-1 max-h-32 overflow-auto rounded-lg border bg-muted/30 p-2 text-xs">{detailSkill.examples[0].output}</pre></div>}
-              <div><span className="font-medium">完整提示词：</span><pre className="mt-1 max-h-40 overflow-auto rounded-lg border bg-muted/30 p-2 text-xs whitespace-pre-wrap">{detailSkill.fullPrompt}</pre></div>
-              <div className="text-xs text-muted-foreground">权限：{detailSkill.requiredPermissions.length > 0 ? detailSkill.requiredPermissions.join(", ") : "无特殊权限"} · 作者：{detailSkill.author} · 已验证：{detailSkill.verified ? "是" : "否"}</div>
+              <div>适合场景：{detailSkill.recommendedUseCases.join("、")}</div>
+              <div>输入项：{detailSkill.inputFields.map((f) => f.label).join("、")}</div>
+              {detailSkill.examples.length > 0 && <div>示例输出：<pre className="mt-1 max-h-32 overflow-auto rounded-lg border bg-muted/30 p-2 text-xs">{detailSkill.examples[0].output}</pre></div>}
+              <div>完整提示词：<pre className="mt-1 max-h-40 overflow-auto rounded-lg border bg-muted/30 p-2 text-xs whitespace-pre-wrap">{detailSkill.fullPrompt}</pre></div>
+              <div className="text-xs text-muted-foreground">权限：{detailSkill.requiredPermissions.length > 0 ? detailSkill.requiredPermissions.join(", ") : "无"} · {detailSkill.author} · 已验证</div>
               <div className="flex gap-2"><Button onClick={() => { openRun(detailSkill); setDetailSkill(null); }}>运行技能</Button><Button variant="outline" onClick={() => setDetailSkill(null)}>关闭</Button></div>
             </CardContent>
           </Card>
         </div>
       )}
 
+      {/* Hub Detail Modal */}
       {hubDetail && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setHubDetail(null)}>
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" onClick={() => setHubDetail(null)}>
           <Card className="max-h-[80vh] w-full max-w-lg overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <CardHeader><CardTitle>{hubDetail.name}</CardTitle><CardDescription>{hubDetail.description}</CardDescription></CardHeader>
             <CardContent className="space-y-4 text-sm">
-              <div className="flex flex-wrap gap-2"><Badge tone={riskColor(hubDetail.riskLevel)}>风险 {riskLabel(hubDetail.riskLevel)}</Badge><Badge tone="info">{hubDetail.category}</Badge><Badge tone="muted">后续版本开放</Badge></div>
-              <div><span className="font-medium">适合人群：</span>{hubDetail.audience}</div>
-              <div><span className="font-medium">需要权限：</span>{hubDetail.requiredPermissions.length > 0 ? hubDetail.requiredPermissions.join(", ") : "无"}</div>
-              <div><span className="font-medium">外部服务：</span>{hubDetail.externalServices.length > 0 ? hubDetail.externalServices.join(", ") : "无"}</div>
-              <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-300">HermesHub 兼容技能遵循 agentskills.io 开放标准。当前版本仅展示预览，后续版本将支持安全安装。不会执行 hermes skills install，不会修改 ~/.hermes。</div>
+              <div className="flex flex-wrap gap-2"><Badge tone={riskColor(hubDetail.riskLevel)}>风险 {riskLabel(hubDetail.riskLevel)}</Badge><Badge tone="info">{hubDetail.category}</Badge><Badge tone="muted">后续开放</Badge></div>
+              <div>适合人群：{hubDetail.audience}</div>
+              {hubDetail.requiredPermissions.length > 0 && <div>可能需要权限：{hubDetail.requiredPermissions.join("、")}</div>}
+              {hubDetail.externalServices.length > 0 && <div>可能需要的外部服务：{hubDetail.externalServices.join("、")}</div>}
+              <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-300">当前版本不会安装或执行该技能。后续版本将支持安全安装。</div>
               <Button variant="outline" onClick={() => setHubDetail(null)}>关闭</Button>
             </CardContent>
           </Card>
         </div>
       )}
 
+      {/* Skill Runner Drawer */}
       {runSkill && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setRunSkill(null)}>
-          <Card className="max-h-[80vh] w-full max-w-lg overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-            <CardHeader><CardTitle>运行：{runSkill.name}</CardTitle><CardDescription>填写以下信息后生成 Agent 指令，跳转到对话页。</CardDescription></CardHeader>
-            <CardContent className="space-y-4">
+        <div className="fixed inset-0 z-50">
+          <div className="absolute inset-0 bg-black/40 transition-opacity" onClick={() => setRunSkill(null)} />
+          <div className="absolute bottom-0 right-0 top-0 w-full overflow-y-auto border-l bg-card shadow-2xl sm:max-w-[480px] animate-slide-in">
+            <div className="sticky top-0 z-10 border-b bg-card/95 px-5 py-4 backdrop-blur">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-lg font-semibold">{runSkill.name}</h3>
+                  <div className="mt-1.5 flex flex-wrap gap-1.5"><Badge tone={riskColor(runSkill.riskLevel)}>风险 {riskLabel(runSkill.riskLevel)}</Badge><Badge tone="info">{runSkill.category}</Badge><Badge tone="success">官方认证</Badge></div>
+                  <p className="mt-2 text-xs text-muted-foreground">{runSkill.description}</p>
+                </div>
+                <Button variant="ghost" size="icon" onClick={() => setRunSkill(null)}><ChevronUp className="h-4 w-4 rotate-90" /></Button>
+              </div>
+              {/* Step indicator */}
+              <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
+                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary text-[10px] font-medium text-primary-foreground">1</span>填写信息
+                <ChevronDown className="h-2 w-2 opacity-30" />
+                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-muted text-[10px] font-medium">2</span>生成指令
+                <ChevronDown className="h-2 w-2 opacity-30" />
+                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-muted text-[10px] font-medium">3</span>进入对话
+              </div>
+            </div>
+
+            <div className="space-y-4 px-5 py-4">
+              {/* Form fields */}
               {runSkill.inputFields.map((field) => (
                 <div key={field.id} className="space-y-1">
                   <label className="text-sm font-medium">{field.label}{field.required && <span className="text-rose-500"> *</span>}</label>
@@ -1894,18 +2162,39 @@ function SkillsPage({ config, updateConfig, setActive, setChatDraft }: { config:
                       {field.options?.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
                     </select>
                   ) : field.type === "textarea" ? (
-                    <Textarea placeholder={field.placeholder} value={formValues[field.id] || ""} onChange={(e) => setFormValues({ ...formValues, [field.id]: e.target.value })} />
+                    <Textarea placeholder={field.placeholder} value={formValues[field.id] || ""} onChange={(e) => setFormValues({ ...formValues, [field.id]: e.target.value })} className="min-h-20" />
                   ) : (
                     <Input placeholder={field.placeholder} value={formValues[field.id] || ""} onChange={(e) => setFormValues({ ...formValues, [field.id]: e.target.value })} />
                   )}
                 </div>
               ))}
+
+              {/* Instruction preview */}
+              <div>
+                <button onClick={() => setShowPreview(!showPreview)} className="flex items-center gap-1 text-xs text-muted-foreground hover:underline">
+                  {showPreview ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                  Agent 指令预览
+                </button>
+                {showPreview && (
+                  <div className="mt-2 max-h-48 overflow-y-auto rounded-xl border bg-muted/30 p-3">
+                    <pre className="whitespace-pre-wrap text-xs text-muted-foreground">{builtPrompt}</pre>
+                    <Button variant="ghost" size="sm" className="mt-2" onClick={() => navigator.clipboard.writeText(builtPrompt)}><Copy className="h-3 w-3" />复制指令</Button>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Bottom actions */}
+            <div className="sticky bottom-0 border-t bg-card/95 px-5 py-4 backdrop-blur">
+              {missingRequired.length > 0 && (
+                <p className="mb-2 text-xs text-rose-500">请填写必填字段：{missingRequired.map((f) => f.label).join("、")}</p>
+              )}
               <div className="flex gap-2">
-                <Button onClick={generateAndGo}>生成并进入对话</Button>
+                <Button className="flex-1" disabled={missingRequired.length > 0} onClick={generateAndGo}>生成并进入对话</Button>
                 <Button variant="outline" onClick={() => setRunSkill(null)}>取消</Button>
               </div>
-            </CardContent>
-          </Card>
+            </div>
+          </div>
         </div>
       )}
     </div>
@@ -2295,36 +2584,17 @@ function PhaseBadge({ phase }: { phase: ChatPhase }) {
 }
 
 function PlaceholderText({ phase, elapsedLive }: { phase: ChatPhase; elapsedLive: number }) {
-  if (elapsedLive < 8) return <div className="text-sm text-muted-foreground"><span className="animate-pulse">Hermes 正在思考</span><span className="ml-1 tracking-widest">...</span></div>;
-  if (elapsedLive < 20) return <div className="text-sm text-muted-foreground">Hermes 正在处理复杂任务，请稍等… <span className="text-[11px]">{elapsedLive}s</span></div>;
-  return <div className="text-sm text-muted-foreground">任务仍在进行，窗口没有卡住。 <span className="text-[11px]">{elapsedLive}s</span></div>;
+  return <div className="text-sm text-muted-foreground"><span className="animate-pulse">Hermes 正在回复</span><span>…</span></div>;
 }
 
 function ReasoningBlock({ content, isPlaceholder, phase }: { content: string; isPlaceholder?: boolean; phase?: ChatPhase }) {
   const [open, setOpen] = useState(false);
   const hasContent = content.length > 0;
 
-  if (isPlaceholder && !hasContent) {
-    return (
-      <div className="mb-2">
-        <button
-          onClick={() => setOpen(!open)}
-          className="flex items-center gap-1 text-[11px] text-purple-600 dark:text-purple-400 hover:underline"
-        >
-          {open ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-          推理过程 / 思考状态
-        </button>
-        {open && (
-          <div className="mt-1 max-h-48 overflow-y-auto rounded-lg border border-purple-500/20 bg-purple-500/5 p-2 text-xs text-muted-foreground space-y-0.5">
-            <div>· 已发送到 Hermes</div>
-            <div>· 正在等待 Hermes 响应</div>
-            {phase === "running" && <div>· 已收到第一个内容片段</div>}
-          </div>
-        )}
-      </div>
-    );
-  }
+  // During generation with no content yet: show nothing
+  if (isPlaceholder && !hasContent) return null;
 
+  // No reasoning content and not loading: show nothing
   if (!hasContent && !isPlaceholder) return null;
 
   return (
@@ -2365,6 +2635,27 @@ function ToolsBlock({ toolEvents }: { toolEvents?: string[] }) {
         </div>
       )}
     </div>
+  );
+}
+
+function DetailsEntry({ message, expandedDetailId, setExpandedDetailId }: { message: UiChatMessage; expandedDetailId: string | null; setExpandedDetailId: (v: string | null) => void }) {
+  if (!message.modelName && !message.sessionId && !message.usage) return null;
+  const msgId = message.requestId || message.sessionId || "";
+  const open = expandedDetailId === msgId;
+  const toggle = () => setExpandedDetailId(open ? null : msgId);
+  return (
+    <span className="relative inline-flex items-center gap-1">
+      <button onClick={toggle} className="text-[11px] hover:underline">{open ? "收起详情" : "详情"}</button>
+      {open && (
+        <div className="absolute bottom-full left-0 z-10 mb-1 rounded-xl border bg-card p-2.5 text-xs text-muted-foreground shadow-lg">
+          {message.modelName && <div>模型：{message.modelName}</div>}
+          {message.usage?.prompt_tokens != null && <div>输入：{message.usage.prompt_tokens}</div>}
+          {message.usage?.completion_tokens != null && <div>输出：{message.usage.completion_tokens}</div>}
+          {message.usage?.total_tokens != null && <div>合计：{message.usage.total_tokens}</div>}
+          {message.sessionId && <div className="mt-1 max-w-[320px] break-all border-t pt-1 text-[10px]">会话 ID：{message.sessionId}</div>}
+        </div>
+      )}
+    </span>
   );
 }
 
