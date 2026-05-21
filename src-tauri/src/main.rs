@@ -14,6 +14,12 @@ fn config_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(dir.join("config.json"))
 }
 
+fn chat_sessions_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let dir = app.path().app_data_dir().map_err(|error| error.to_string())?;
+    fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+    Ok(dir.join("chat-sessions.json"))
+}
+
 #[tauri::command]
 fn read_config(app: tauri::AppHandle) -> Result<Option<serde_json::Value>, String> {
     let path = config_path(&app)?;
@@ -35,6 +41,38 @@ fn write_config(app: tauri::AppHandle, config: serde_json::Value) -> Result<(), 
 #[tauri::command]
 fn clear_config(app: tauri::AppHandle) -> Result<(), String> {
     let path = config_path(&app)?;
+    if path.exists() {
+        fs::remove_file(path).map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn read_chat_sessions(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
+    let path = chat_sessions_path(&app)?;
+    if !path.exists() {
+        return Ok(serde_json::json!([]));
+    }
+    let content = fs::read_to_string(path).map_err(|error| error.to_string())?;
+    match serde_json::from_str(&content) {
+        Ok(value) => Ok(value),
+        Err(error) => {
+            eprintln!("chat-sessions.json parse error: {}", error);
+            Ok(serde_json::json!([]))
+        }
+    }
+}
+
+#[tauri::command]
+fn write_chat_sessions(app: tauri::AppHandle, sessions: serde_json::Value) -> Result<(), String> {
+    let path = chat_sessions_path(&app)?;
+    let content = serde_json::to_string_pretty(&sessions).map_err(|error| error.to_string())?;
+    fs::write(path, content).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn clear_chat_sessions(app: tauri::AppHandle) -> Result<(), String> {
+    let path = chat_sessions_path(&app)?;
     if path.exists() {
         fs::remove_file(path).map_err(|error| error.to_string())?;
     }
@@ -69,6 +107,96 @@ fn clean_yaml_scalar(value: &str) -> String {
         .trim()
         .trim_matches(&['"', '\''] as &[_])
         .to_string()
+}
+
+fn redact_sensitive_content(content: &str) -> String {
+    let mut output = String::new();
+    for line in content.lines() {
+        let lower = line.to_lowercase();
+        if ["token", "api_key", "apikey", "secret", "password", "authorization", "bearer", "sk-"]
+            .iter()
+            .any(|needle| lower.contains(needle))
+        {
+            output.push_str("[REDACTED]\n");
+        } else {
+            output.push_str(line);
+            output.push('\n');
+        }
+    }
+    output
+}
+
+fn memory_kind(path: &std::path::Path) -> &'static str {
+    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or_default().to_lowercase();
+    if name == "memory.md" { "memory" }
+    else if name == "user.md" { "user" }
+    else if name == "soul.md" { "soul" }
+    else { "unknown" }
+}
+
+fn memory_title(path: &std::path::Path, hermes_root: &std::path::Path) -> String {
+    let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("memory");
+    let relative = path.strip_prefix(hermes_root).ok().and_then(|p| p.to_str()).unwrap_or(file_name);
+    if relative.contains("memories/users/") && file_name.eq_ignore_ascii_case("USER.md") {
+        "用户记忆 USER.md".to_string()
+    } else {
+        file_name.to_string()
+    }
+}
+
+fn collect_memory_file(files: &mut Vec<serde_json::Value>, hermes_root: &std::path::Path, path: PathBuf) {
+    if !path.exists() || !path.is_file() {
+        return;
+    }
+    if path.extension().and_then(|e| e.to_str()).map(|e| !e.eq_ignore_ascii_case("md")).unwrap_or(true) {
+        return;
+    }
+    let Ok(canonical_root) = hermes_root.canonicalize() else { return; };
+    let Ok(canonical_path) = path.canonicalize() else { return; };
+    if !canonical_path.starts_with(&canonical_root) {
+        return;
+    }
+
+    let metadata = match fs::metadata(&canonical_path) {
+        Ok(metadata) => metadata,
+        Err(_) => return,
+    };
+    let mut file = match fs::File::open(&canonical_path) {
+        Ok(file) => file,
+        Err(_) => return,
+    };
+    let mut buffer = vec![0u8; 50 * 1024];
+    let bytes_read = match file.read(&mut buffer) {
+        Ok(bytes_read) => bytes_read,
+        Err(_) => return,
+    };
+    buffer.truncate(bytes_read);
+    let content = redact_sensitive_content(&String::from_utf8_lossy(&buffer));
+    let preview: String = content.chars().take(500).collect();
+    let relative_path = canonical_path
+        .strip_prefix(&canonical_root)
+        .ok()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|| canonical_path.file_name().and_then(|n| n.to_str()).unwrap_or_default().to_string());
+    let updated_at = metadata.modified().ok()
+        .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+        .map(|duration| duration.as_secs().to_string());
+    let kind = memory_kind(&canonical_path);
+    let id = format!("{}-{}", kind, files.len() + 1);
+
+    files.push(serde_json::json!({
+        "id": id,
+        "title": memory_title(&canonical_path, &canonical_root),
+        "path": canonical_path.to_string_lossy().to_string(),
+        "relativePath": relative_path,
+        "kind": kind,
+        "exists": true,
+        "size": metadata.len(),
+        "updatedAt": updated_at,
+        "contentPreview": preview,
+        "content": content,
+        "readOnly": true
+    }));
 }
 
 fn run_command_timeout(command: &str, args: &[&str], timeout: Duration) -> Result<String, String> {
@@ -789,9 +917,73 @@ fn read_hermes_model_config() -> Result<serde_json::Value, String> {
     }))
 }
 
+#[tauri::command]
+fn read_hermes_native_memory() -> Result<serde_json::Value, String> {
+    let Some(home) = home_dir() else {
+        return Ok(serde_json::json!({
+            "homeDir": "~/.hermes",
+            "found": false,
+            "files": [],
+            "checkedAt": checked_at(),
+            "error": "无法定位用户主目录"
+        }));
+    };
+    let hermes_root = home.join(".hermes");
+    if !hermes_root.exists() || !hermes_root.is_dir() {
+        return Ok(serde_json::json!({
+            "homeDir": "~/.hermes",
+            "found": false,
+            "files": [],
+            "checkedAt": checked_at(),
+            "error": null
+        }));
+    }
+
+    let mut files: Vec<serde_json::Value> = Vec::new();
+    for rel in [
+        "MEMORY.md",
+        "USER.md",
+        "SOUL.md",
+        "memory/MEMORY.md",
+        "memory/USER.md",
+        "memory/SOUL.md",
+        "memories/MEMORY.md",
+        "memories/USER.md",
+        "memories/SOUL.md",
+    ] {
+        collect_memory_file(&mut files, &hermes_root, hermes_root.join(rel));
+    }
+
+    let users_dir = hermes_root.join("memories").join("users");
+    if users_dir.exists() && users_dir.is_dir() {
+        if let Ok(entries) = fs::read_dir(&users_dir) {
+            for entry in entries.flatten() {
+                let user_dir = entry.path();
+                if user_dir.is_dir() {
+                    collect_memory_file(&mut files, &hermes_root, user_dir.join("USER.md"));
+                }
+            }
+        }
+    }
+
+    files.sort_by(|a, b| {
+        let ar = a.get("relativePath").and_then(|v| v.as_str()).unwrap_or_default();
+        let br = b.get("relativePath").and_then(|v| v.as_str()).unwrap_or_default();
+        ar.cmp(br)
+    });
+
+    Ok(serde_json::json!({
+        "homeDir": "~/.hermes",
+        "found": true,
+        "files": files,
+        "checkedAt": checked_at(),
+        "error": null
+    }))
+}
+
 fn main() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![read_config, write_config, clear_config, check_hermes_installed, get_hermes_version, get_hermes_paths, get_hermes_help, check_hermes_api_server, hermes_chat_completion, read_hermes_model_config])
+        .invoke_handler(tauri::generate_handler![read_config, write_config, clear_config, read_chat_sessions, write_chat_sessions, clear_chat_sessions, check_hermes_installed, get_hermes_version, get_hermes_paths, get_hermes_help, check_hermes_api_server, hermes_chat_completion, read_hermes_model_config, read_hermes_native_memory])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

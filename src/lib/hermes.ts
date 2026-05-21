@@ -111,6 +111,52 @@ export interface HermesModelConfig {
   error: string | null;
 }
 
+export interface HermesNativeMemoryFile {
+  id: string;
+  title: string;
+  path: string;
+  relativePath: string;
+  kind: "memory" | "user" | "soul" | "unknown";
+  exists: boolean;
+  size: number;
+  updatedAt: string | null;
+  contentPreview: string;
+  content: string;
+  readOnly: boolean;
+}
+
+export interface HermesNativeMemoryResult {
+  homeDir: string;
+  found: boolean;
+  files: HermesNativeMemoryFile[];
+  checkedAt: string;
+  error: string | null;
+}
+
+export interface StoredChatMessage extends ChatMessage {
+  requestId?: string;
+  source?: "Hermes Agent";
+  elapsedMs?: number;
+  usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } | null;
+  modelName?: string;
+  sessionId?: string | null;
+  reasoningContent?: string;
+  toolEvents?: string[];
+}
+
+export interface ChatSession {
+  id: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  messages: StoredChatMessage[];
+  hermesSessionId?: string | null;
+  model: string;
+  totalTokens?: number;
+  lastMessagePreview?: string;
+  pinned?: boolean;
+}
+
 export async function checkHermes(): Promise<HermesStatus> {
   return invoke<HermesStatus>("check_hermes_installed");
 }
@@ -129,4 +175,20 @@ export async function getHermesHelp(): Promise<HermesHelpResult> {
 
 export async function readHermesModelConfig(): Promise<HermesModelConfig> {
   return invoke<HermesModelConfig>("read_hermes_model_config");
+}
+
+export async function readHermesNativeMemory(): Promise<HermesNativeMemoryResult> {
+  return invoke<HermesNativeMemoryResult>("read_hermes_native_memory");
+}
+
+export async function readChatSessions(): Promise<ChatSession[]> {
+  return invoke<ChatSession[]>("read_chat_sessions");
+}
+
+export async function writeChatSessions(sessions: ChatSession[]): Promise<void> {
+  return invoke<void>("write_chat_sessions", { sessions });
+}
+
+export async function clearChatSessions(): Promise<void> {
+  return invoke<void>("clear_chat_sessions");
 }

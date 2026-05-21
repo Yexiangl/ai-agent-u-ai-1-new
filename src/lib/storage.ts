@@ -8,10 +8,6 @@ function mergeConfig(value: Partial<AppConfig> | null): AppConfig {
     ...DEFAULT_CONFIG,
     ...value,
     selectedEngine: "hermes",
-    memoryFiles: {
-      ...DEFAULT_CONFIG.memoryFiles,
-      ...(value?.memoryFiles ?? {})
-    },
     tasks: value?.tasks ?? DEFAULT_CONFIG.tasks,
     enabledSkills: value?.enabledSkills ?? DEFAULT_CONFIG.enabledSkills
   };
