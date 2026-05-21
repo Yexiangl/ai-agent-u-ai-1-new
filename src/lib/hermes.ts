@@ -201,6 +201,29 @@ export async function clearChatSessions(): Promise<void> {
   return invoke<void>("clear_chat_sessions");
 }
 
+export interface HermesCronOverview {
+  cronDirExists: boolean;
+  outputDirExists: boolean;
+  outputFileCount: number;
+  hermesAvailable: boolean;
+  checkedAt: string;
+}
+
+export interface HermesCronCliStatus {
+  schedulerRunning: boolean;
+  schedulerStatus: string;
+  jobs: Array<{ raw: string }>;
+  hermesAvailable: boolean;
+}
+
+export async function readHermesCronOverview(): Promise<HermesCronOverview> {
+  return invoke<HermesCronOverview>("read_hermes_cron_overview");
+}
+
+export async function readHermesCronCliStatus(): Promise<HermesCronCliStatus> {
+  return invoke<HermesCronCliStatus>("read_hermes_cron_cli_status");
+}
+
 export interface ApplyHermesModelResult {
   success: boolean;
   appliedModel: string;

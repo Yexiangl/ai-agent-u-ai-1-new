@@ -30,12 +30,11 @@ import {
 import { listModels, type ChatMessage } from "@/lib/api";
 import { DEFAULT_CONFIG, type AppConfig } from "@/lib/config";
 import { clearConfig, loadConfig, saveConfig } from "@/lib/storage";
-import { applyHermesModelConfig, checkHermes, checkHermesApiServer, hermesChatCompletion, readChatSessions, readHermesModelConfig, readHermesNativeMemory, writeChatSessions, type ChatSession, type HermesApiServerStatus, type HermesChatChunk, type HermesChatDone, type HermesChatError, type HermesModelConfig, type HermesNativeMemoryFile, type HermesNativeMemoryResult, type HermesStatus, type HermesStreamDiagnostics, type HermesToolProgress } from "@/lib/hermes";
+import { applyHermesModelConfig, checkHermes, checkHermesApiServer, hermesChatCompletion, readChatSessions, readHermesCronCliStatus, readHermesCronOverview, readHermesModelConfig, readHermesNativeMemory, writeChatSessions, type ChatSession, type HermesApiServerStatus, type HermesChatChunk, type HermesChatDone, type HermesChatError, type HermesCronCliStatus, type HermesCronOverview, type HermesModelConfig, type HermesNativeMemoryFile, type HermesNativeMemoryResult, type HermesStatus, type HermesStreamDiagnostics, type HermesToolProgress } from "@/lib/hermes";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { cn, getErrorMessage } from "@/lib/utils";
 import { officialSkills, officialCategories, hermesHubSkills, hermesHubCategories, type OfficialSkill, type HermesHubSkill } from "@/data/skills";
 import { tutorials } from "@/data/tutorials";
-import { usageStats } from "@/data/usage";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -317,6 +316,9 @@ function App() {
   const [hermesCli, setHermesCli] = useState<HermesStatus | null>(null);
   const [hermesApi, setHermesApi] = useState<HermesApiServerStatus | null>(null);
   const [hermesModelConfig, setHermesModelConfig] = useState<HermesModelConfig | null>(null);
+  const [cronOverview, setCronOverview] = useState<HermesCronOverview | null>(null);
+  const [cronCliStatus, setCronCliStatus] = useState<HermesCronCliStatus | null>(null);
+  const [cronLastLoadedAt, setCronLastLoadedAt] = useState(0);
   const [ready, setReady] = useState(false);
   const showOnboarding = ready && !config.hasCompletedOnboarding;
 
@@ -444,7 +446,7 @@ function App() {
           {!ready ? (
             <div className="flex h-[60vh] items-center justify-center text-muted-foreground"><Loader2 className="mr-2 h-4 w-4 animate-spin" /> 正在加载本地配置</div>
           ) : (
-            <Page active={active} setActive={setActive} chatDraft={chatDraft} setChatDraft={setChatDraft} config={config} updateConfig={updateConfig} hermesCli={hermesCli} hermesApi={hermesApi} hermesModelConfig={hermesModelConfig} setHermesModelConfig={setHermesModelConfig} refreshHermesCli={refreshHermesCli} refreshHermesApi={refreshHermesApi} />
+            <Page active={active} setActive={setActive} chatDraft={chatDraft} setChatDraft={setChatDraft} config={config} updateConfig={updateConfig} hermesCli={hermesCli} hermesApi={hermesApi} hermesModelConfig={hermesModelConfig} setHermesModelConfig={setHermesModelConfig} refreshHermesCli={refreshHermesCli} refreshHermesApi={refreshHermesApi} cronOverview={cronOverview} setCronOverview={setCronOverview} cronCliStatus={cronCliStatus} setCronCliStatus={setCronCliStatus} cronLastLoadedAt={cronLastLoadedAt} setCronLastLoadedAt={setCronLastLoadedAt} />
           )}
         </main>
       </div>
@@ -543,13 +545,13 @@ function Onboarding({ config, updateConfig, hermesCli, hermesApi }: { config: Ap
   );
 }
 
-function Page({ active, setActive, chatDraft, setChatDraft, config, updateConfig, hermesCli, hermesApi, hermesModelConfig, setHermesModelConfig, refreshHermesCli, refreshHermesApi }: { active: RouteId; setActive: (id: RouteId) => void; chatDraft: string; setChatDraft: (value: string) => void; config: AppConfig; updateConfig: (next: AppConfig) => Promise<void>; hermesCli: HermesStatus | null; hermesApi: HermesApiServerStatus | null; hermesModelConfig: HermesModelConfig | null; setHermesModelConfig: (value: HermesModelConfig | null) => void; refreshHermesCli: () => Promise<HermesStatus>; refreshHermesApi: () => Promise<HermesApiServerStatus> }) {
+function Page({ active, setActive, chatDraft, setChatDraft, config, updateConfig, hermesCli, hermesApi, hermesModelConfig, setHermesModelConfig, refreshHermesCli, refreshHermesApi, cronOverview, setCronOverview, cronCliStatus, setCronCliStatus, cronLastLoadedAt, setCronLastLoadedAt }: { active: RouteId; setActive: (id: RouteId) => void; chatDraft: string; setChatDraft: (value: string) => void; config: AppConfig; updateConfig: (next: AppConfig) => Promise<void>; hermesCli: HermesStatus | null; hermesApi: HermesApiServerStatus | null; hermesModelConfig: HermesModelConfig | null; setHermesModelConfig: (value: HermesModelConfig | null) => void; refreshHermesCli: () => Promise<HermesStatus>; refreshHermesApi: () => Promise<HermesApiServerStatus>; cronOverview: HermesCronOverview | null; setCronOverview: (v: HermesCronOverview | null) => void; cronCliStatus: HermesCronCliStatus | null; setCronCliStatus: (v: HermesCronCliStatus | null) => void; cronLastLoadedAt: number; setCronLastLoadedAt: (v: number) => void }) {
   if (active === "home") return <HomePage config={config} setActive={setActive} hermesCli={hermesCli} hermesApi={hermesApi} hermesModelConfig={hermesModelConfig} />;
   if (active === "chat") return <ChatPage config={config} hermesCli={hermesCli} hermesApi={hermesApi} refreshHermesApi={refreshHermesApi} setActive={setActive} initialDraft={chatDraft} onDraftConsumed={() => setChatDraft("")} />;
   if (active === "engines") return <EnginesPage config={config} updateConfig={updateConfig} hermesCli={hermesCli} hermesApi={hermesApi} hermesModelConfig={hermesModelConfig} setHermesModelConfig={setHermesModelConfig} refreshHermesCli={refreshHermesCli} refreshHermesApi={refreshHermesApi} />;
   if (active === "skills") return <SkillsPage config={config} updateConfig={updateConfig} setActive={setActive} setChatDraft={setChatDraft} />;
   if (active === "memory") return <MemoryPage />;
-  if (active === "tasks") return <TasksPage config={config} updateConfig={updateConfig} />;
+  if (active === "tasks") return <TasksPage cronOverview={cronOverview} setCronOverview={setCronOverview} cronCliStatus={cronCliStatus} setCronCliStatus={setCronCliStatus} cronLastLoadedAt={cronLastLoadedAt} setCronLastLoadedAt={setCronLastLoadedAt} />;
   if (active === "usage") return <UsagePage />;
   if (active === "tutorials") return <TutorialsPage config={config} />;
   return <AboutPage config={config} updateConfig={updateConfig} />;
@@ -1126,6 +1128,17 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
     scheduleScrollToBottom(false);
   }, [messages, loading]);
 
+  // Initial load / session switch: scroll to bottom instantly
+  useEffect(() => {
+    autoFollowRef.current = true;
+    setShowJumpToBottom(false);
+    if (messages.length > 0) {
+      setTimeout(() => {
+        if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+      }, 0);
+    }
+  }, [currentSessionId, sessionsLoaded]);
+
   const autoResize = (el: HTMLTextAreaElement | null) => {
     if (!el) return;
     el.style.height = "auto";
@@ -1571,7 +1584,25 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
         </CardHeader>
         <CardContent className="flex min-h-0 flex-1 flex-col p-0">
           <div ref={scrollRef} onScroll={handleMessageScroll} className="relative min-h-0 flex-1 space-y-5 overflow-y-auto bg-gradient-to-b from-background to-muted/20 px-5 py-6 pb-8">
-            {messages.length === 0 && <div className="mx-auto mt-16 max-w-md text-center text-sm leading-7 text-muted-foreground">输入问题后发送，Hermes Agent 的回复会在这里平滑显示。支持 Markdown、代码块和推理过程折叠查看。</div>}
+            {messages.length === 0 && (
+              <div className="flex min-h-[50vh] flex-col items-center justify-center text-center">
+                <h3 className="text-xl font-semibold">今天想让 Hermes 帮你做什么？</h3>
+                <p className="mt-2 max-w-md text-sm text-muted-foreground">输入问题后发送，回复会在这里平滑显示。支持 Markdown、代码块和推理过程。</p>
+                <div className="mt-8 grid w-full max-w-lg gap-3 sm:grid-cols-2">
+                  {[
+                    { text: "写一段朋友圈宣传文案", fill: "写一段适合朋友圈发布的产品宣传文案" },
+                    { text: "总结一份资料", fill: "请总结以下资料的核心要点：" },
+                    { text: "解释一段报错", fill: "请解释以下报错的原因并给出修复建议：" },
+                    { text: "制定一个工作计划", fill: "请帮我制定一个工作计划：" },
+                  ].map((card) => (
+                    <button key={card.text} onClick={() => { setInput(card.fill); requestAnimationFrame(() => { inputRef.current?.focus(); autoResize(inputRef.current); }); }}
+                      className="rounded-xl border bg-card p-4 text-left text-sm transition hover:border-primary/40 hover:bg-primary/5">
+                      {card.text}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             {messages.map((message, index) => {
               const isLastAssistant = message.role === "assistant" && index === messages.length - 1;
               const isPlaceholder = isLastAssistant && loading;
@@ -1579,12 +1610,12 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
               const isActiveAssistant = Boolean(loading && message.role === "assistant" && message.requestId === activeRequestRef.current);
               return (
                 <div key={message.requestId || index} className={cn("group flex", message.role === "user" ? "justify-end" : "justify-start")}>
-                  <div className={cn("flex flex-col", message.role === "user" ? "max-w-[70%] items-end" : "max-w-[78%] items-start")}>
+                  <div className={cn("flex flex-col", message.role === "user" ? "max-w-[68%] items-end" : "max-w-[720px] items-start")}>
                     <div className={cn(
-                      "rounded-2xl px-4 py-3 text-[14.5px] leading-7 shadow-sm transition-colors",
+                      "rounded-2xl px-5 py-3.5 text-[15px] leading-7",
                       message.role === "user"
                         ? "bg-primary text-primary-foreground"
-                        : "border border-border/60 bg-card/95 text-foreground"
+                        : "border border-border/50 bg-card text-foreground"
                     )}>
                       <div className="mb-1 flex items-center gap-2 text-[11px] opacity-70">
                         <span>{message.role === "user" ? "你" : "Hermes Agent"}</span>
@@ -2016,19 +2047,228 @@ function formatUnixTime(value: string | null) {
   return new Date(numeric * 1000).toLocaleString();
 }
 
-function TasksPage({ config, updateConfig }: { config: AppConfig; updateConfig: (next: AppConfig) => Promise<void> }) {
-  const [name, setName] = useState("");
-  const addTask = () => {
-    if (!name.trim()) return;
-    updateConfig({ ...config, tasks: [...config.tasks, { id: crypto.randomUUID(), name, frequency: "每天 09:00", prompt: "", model: "hermes-agent", channel: "本地记录", enabled: true }] });
-    setName("");
+function TasksPage({ cronOverview, setCronOverview, cronCliStatus, setCronCliStatus, cronLastLoadedAt, setCronLastLoadedAt }: { cronOverview: HermesCronOverview | null; setCronOverview: (v: HermesCronOverview | null) => void; cronCliStatus: HermesCronCliStatus | null; setCronCliStatus: (v: HermesCronCliStatus | null) => void; cronLastLoadedAt: number; setCronLastLoadedAt: (v: number) => void }) {
+  const [loading, setLoading] = useState(false);
+  const [cliLoading, setCliLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [showCreate, setShowCreate] = useState(false);
+  const [taskName, setTaskName] = useState("");
+  const [taskSchedule, setTaskSchedule] = useState("every day at 9am");
+  const [taskPrompt, setTaskPrompt] = useState("");
+
+  const handleRefresh = async () => {
+    setLoading(true);
+    setError("");
+    try { setCronOverview(await readHermesCronOverview()); setCronLastLoadedAt(Date.now()); } catch (err) { setError(getErrorMessage(err)); }
+    finally { setLoading(false); }
   };
-  return <div className="space-y-4"><Card><CardHeader><CardTitle>新建定时任务</CardTitle><CardDescription>当前版本仅支持任务配置草稿保存，不会在后台自动执行。真实定时执行将在后续版本开放。</CardDescription></CardHeader><CardContent className="flex gap-2"><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="任务名称" /><Button onClick={addTask}><Save className="h-4 w-4" />保存任务</Button></CardContent></Card><Card><CardHeader><CardTitle>任务列表</CardTitle></CardHeader><CardContent className="overflow-x-auto"><Table><thead><tr><Th>任务名称</Th><Th>频率</Th><Th>模型</Th><Th>渠道</Th><Th>状态</Th></tr></thead><tbody>{config.tasks.map((t) => ({ name: t.name, frequency: t.frequency, model: t.model === "hermes-agent" ? "Hermes Agent" : t.model, channel: t.channel, status: t.enabled ? "启用" : "暂停" })).map((task) => <tr key={`${task.name}-${task.frequency}`}><Td>{task.name}</Td><Td>{task.frequency}</Td><Td>{task.model}</Td><Td>{task.channel}</Td><Td><Badge tone={task.status === "成功" ? "success" : "info"}>{task.status}</Badge></Td></tr>)}</tbody></Table></CardContent></Card></div>;
+
+  const handleDetectCli = async () => {
+    setCliLoading(true);
+    try { setCronCliStatus(await readHermesCronCliStatus()); setCronLastLoadedAt(Date.now()); } catch { /* non-fatal */ }
+    finally { setCliLoading(false); }
+  };
+
+  const lastLoadedText = cronLastLoadedAt
+    ? `上次检测：${Math.round((Date.now() - cronLastLoadedAt) / 60000)} 分钟前${Date.now() - cronLastLoadedAt > 300000 ? '，状态可能已过期，可点击刷新。' : ''}`
+    : "尚未检测 Cron 状态。点击下方按钮开始。";
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <CardTitle>Hermes 定时任务</CardTitle>
+          <CardDescription>Hermes Cron 可以让 Agent 按计划自动执行任务。点击下方按钮检测本机 Cron 状态。</CardDescription>
+          <div className="mt-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">Cron 任务运行在新的 Agent 会话中，不会自动继承当前聊天内容。请在任务描述中写清楚完整背景。</div>
+        </CardHeader>
+      </Card>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <Button size="sm" onClick={handleRefresh} disabled={loading}>{loading && <Loader2 className="h-4 w-4 animate-spin" />}{cronOverview ? <RefreshCcw className="h-4 w-4" /> : "检测 Cron 目录"}</Button>
+        <Button variant="outline" size="sm" onClick={handleDetectCli} disabled={cliLoading}>{cliLoading && <Loader2 className="h-4 w-4 animate-spin" />}检测 CLI 状态</Button>
+        <span className="text-xs text-muted-foreground">{lastLoadedText}</span>
+      </div>
+
+      {error && <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-rose-700 dark:text-rose-400">{error}</div>}
+
+      {cronOverview && (
+        <div className="grid gap-4 md:grid-cols-3">
+          <Metric label="Cron 目录" value={cronOverview.cronDirExists ? "已存在" : "不存在"} tone={cronOverview.cronDirExists ? "success" : "muted"} />
+          <Metric label="Scheduler" value={cronCliStatus ? (cronCliStatus.schedulerRunning ? "运行中" : "已停止") : cliLoading ? "检测中" : "未检测"} tone={cronCliStatus?.schedulerRunning ? "success" : cliLoading ? "info" : "muted"} />
+          <Metric label="任务数" value={cronCliStatus ? String(cronCliStatus.jobs.length) : cliLoading ? "…" : "-"} tone="info" />
+        </div>
+      )}
+
+      {cronCliStatus && (
+        <Card>
+          <CardHeader><CardTitle>任务列表</CardTitle><CardDescription>{cronCliStatus.jobs.length ? `共 ${cronCliStatus.jobs.length} 个任务` : "暂无定时任务"}</CardDescription></CardHeader>
+          <CardContent>
+            {cronCliStatus.jobs.length > 0 ? (
+              <div className="space-y-2">
+                {cronCliStatus.jobs.map((job, i) => <div key={i} className="rounded-xl border bg-muted/30 p-3 text-sm font-mono">{job.raw}</div>)}
+              </div>
+            ) : (
+              <div className="text-sm text-muted-foreground">当前没有定时任务。可在 Agent 对话中使用 /cron 命令创建。</div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {cronOverview?.outputDirExists && (
+        <Card>
+          <CardHeader><CardTitle>输出记录</CardTitle><CardDescription>Cron 输出目录共有 {cronOverview.outputFileCount} 个文件。查看文件内容将在后续版本开放。</CardDescription></CardHeader>
+        </Card>
+      )}
+
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div><CardTitle>新建任务预览</CardTitle><CardDescription>生成 Hermes Cron 指令，当前不真实创建。</CardDescription></div>
+            <Button variant="ghost" size="sm" onClick={() => setShowCreate(!showCreate)}>{showCreate ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}</Button>
+          </div>
+        </CardHeader>
+        {showCreate && (
+          <CardContent className="space-y-3">
+            <Input value={taskName} onChange={(e) => setTaskName(e.target.value)} placeholder="任务名称" />
+            <Input value={taskSchedule} onChange={(e) => setTaskSchedule(e.target.value)} placeholder="执行频率，例如 every day at 9am" />
+            <Textarea value={taskPrompt} onChange={(e) => setTaskPrompt(e.target.value)} placeholder="任务描述 / prompt" />
+            {taskName && taskPrompt && (
+              <div className="rounded-xl border bg-muted/30 p-3"><pre className="whitespace-pre-wrap text-xs text-muted-foreground">{`/cron add "${taskSchedule}" "${taskPrompt}"`}</pre></div>
+            )}
+            <div className="flex gap-2">
+              <Button variant="outline" disabled={!taskName || !taskPrompt} onClick={() => { navigator.clipboard.writeText(`/cron add "${taskSchedule}" "${taskPrompt}"`); }}><Copy className="h-4 w-4" />复制命令</Button>
+              <Button disabled>真正创建（后续开放）</Button>
+            </div>
+          </CardContent>
+        )}
+      </Card>
+    </div>
+  );
 }
 
 
 function UsagePage() {
-  return <div className="space-y-4"><div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-300">当前为示例数据，用于展示未来统计样式。真实使用统计将在后续版本接入。</div><div className="grid gap-4 md:grid-cols-4"><Metric label="今日调用次数" value={String(usageStats.callsToday)} tone="info" /><Metric label="估算 Token" value={usageStats.estimatedTokens} tone="info" /><Metric label="常用模型" value={usageStats.commonModel} tone="success" /><Metric label="错误次数" value={String(usageStats.errors)} tone="danger" /></div><Card><CardHeader><CardTitle>最近调用记录</CardTitle></CardHeader><CardContent className="overflow-x-auto"><Table><thead><tr><Th>时间</Th><Th>模型</Th><Th>Token</Th><Th>状态</Th></tr></thead><tbody>{usageStats.logs.map((log) => <tr key={`${log.time}-${log.model}`}><Td>{log.time}</Td><Td>{log.model}</Td><Td>{log.tokens}</Td><Td><Badge tone={log.status === "成功" ? "success" : "danger"}>{log.status}</Badge></Td></tr>)}</tbody></Table></CardContent></Card></div>;
+  const [sessions, setSessions] = useState<ChatSession[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try { setSessions(await readChatSessions()); } catch { /* ignore */ }
+    finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const allMessages = sessions.flatMap((session) => session.messages);
+  const assistantMsgs = allMessages.filter((message) => message.role === "assistant");
+  const userMsgs = allMessages.filter((message) => message.role === "user");
+  const totalTokens = assistantMsgs.reduce((sum, message) => sum + (message.usage?.total_tokens ?? 0), 0);
+  const promptTokens = assistantMsgs.reduce((sum, message) => sum + (message.usage?.prompt_tokens ?? 0), 0);
+  const completionTokens = assistantMsgs.reduce((sum, message) => sum + (message.usage?.completion_tokens ?? 0), 0);
+
+  const now = Date.now();
+  const dayMs = 86400000;
+  const todayTokens = assistantMsgs
+    .filter((message) => (message as any).createdAt && now - new Date((message as any).createdAt).getTime() < dayMs)
+    .reduce((sum, message) => sum + (message.usage?.total_tokens ?? 0), 0);
+  const weekTokens = assistantMsgs
+    .filter((message) => (message as any).createdAt && now - new Date((message as any).createdAt).getTime() < 7 * dayMs)
+    .reduce((sum, message) => sum + (message.usage?.total_tokens ?? 0), 0);
+  const monthTokens = assistantMsgs
+    .filter((message) => (message as any).createdAt && now - new Date((message as any).createdAt).getTime() < 30 * dayMs)
+    .reduce((sum, message) => sum + (message.usage?.total_tokens ?? 0), 0);
+
+  const lastUse = sessions.length > 0
+    ? sessions.reduce((latest, session) => Math.max(latest, Number(session.updatedAt) * 1000), 0)
+    : 0;
+  const lastUseText = lastUse ? new Date(lastUse).toLocaleString() : "暂无";
+
+  // Model breakdown
+  const modelMap = new Map<string, number>();
+  assistantMsgs.filter((message) => message.modelName).forEach((message) => {
+    const key = message.modelName || "未知";
+    modelMap.set(key, (modelMap.get(key) ?? 0) + (message.usage?.total_tokens ?? 0));
+  });
+
+  const sortedSessions = [...sessions].sort((a, b) => Number(b.updatedAt) - Number(a.updatedAt)).slice(0, 5);
+
+  if (loading) {
+    return <div className="flex items-center justify-center py-16"><Loader2 className="h-6 w-6 animate-spin" /></div>;
+  }
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <CardTitle>使用概况</CardTitle>
+          <CardDescription>本页统计来自本机历史会话，仅用于估算使用量。实际额度以模型供应服务后台为准。</CardDescription>
+        </CardHeader>
+      </Card>
+
+      {sessions.length === 0 ? (
+        <div className="rounded-xl border bg-muted/30 p-8 text-center text-sm text-muted-foreground">
+          暂无使用数据，开始一次 Agent 对话后这里会自动统计。
+        </div>
+      ) : (
+        <>
+          <div className="grid gap-4 md:grid-cols-4">
+            <Metric label="总会话数" value={String(sessions.length)} tone="info" />
+            <Metric label="总消息数" value={String(allMessages.length)} tone="info" />
+            <Metric label="总 Token" value={totalTokens > 1000 ? `${(totalTokens / 1000).toFixed(1)}K` : String(totalTokens)} tone="success" />
+            <Metric label="最近使用" value={lastUseText} tone="info" />
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-3">
+            <Metric label="近 7 天 Token" value={weekTokens > 1000 ? `${(weekTokens / 1000).toFixed(1)}K` : String(weekTokens)} tone="info" />
+            <Metric label="输入 Token" value={promptTokens > 1000 ? `${(promptTokens / 1000).toFixed(1)}K` : String(promptTokens)} tone="info" />
+            <Metric label="输出 Token" value={completionTokens > 1000 ? `${(completionTokens / 1000).toFixed(1)}K` : String(completionTokens)} tone="info" />
+          </div>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>模型用量分布</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {modelMap.size === 0 ? (
+                <div className="text-sm text-muted-foreground">暂无模型用量数据。</div>
+              ) : (
+                <div className="space-y-2">
+                  {[...modelMap.entries()].sort((a, b) => b[1] - a[1]).map(([model, tokens]) => (
+                    <div key={model} className="flex items-center justify-between rounded-xl border bg-muted/30 px-4 py-3">
+                      <span className="font-medium">{model}</span>
+                      <span className="text-sm text-muted-foreground">{tokens > 1000 ? `${(tokens / 1000).toFixed(1)}K` : tokens} tokens</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>最近会话</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2">
+                {sortedSessions.map((session) => (
+                  <div key={session.id} className="flex items-center justify-between rounded-xl border bg-muted/30 px-4 py-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm font-medium">{session.title || "新对话"}</div>
+                      <div className="text-xs text-muted-foreground">{session.lastMessagePreview || ""} · {formatUnixTime(session.updatedAt)}</div>
+                    </div>
+                    <span className="ml-3 shrink-0 text-xs text-muted-foreground">{session.totalTokens || 0} tokens</span>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        </>
+      )}
+      <div className="flex gap-2">
+        <Button variant="outline" size="sm" onClick={load} disabled={loading}><RefreshCcw className={cn("h-4 w-4", loading && "animate-spin")} />刷新统计</Button>
+      </div>
+    </div>
+  );
 }
 
 function TutorialsPage({ config }: { config: AppConfig }) {

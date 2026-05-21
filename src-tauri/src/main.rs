@@ -1294,9 +1294,107 @@ fn chrono_timestamp() -> String {
     format!("{}", secs)
 }
 
+#[tauri::command]
+async fn read_hermes_cron_overview() -> Result<serde_json::Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let Some(home) = home_dir() else {
+            return Ok(serde_json::json!({"cronDirExists": false, "outputDirExists": false, "outputFileCount": 0, "hermesAvailable": false, "checkedAt": checked_at()}));
+        };
+        let cron_dir = home.join(".hermes").join("cron");
+        let output_dir = cron_dir.join("output");
+        let cron_dir_exists = cron_dir.exists() && cron_dir.is_dir();
+        let output_dir_exists = output_dir.exists() && output_dir.is_dir();
+        let mut output_file_count = 0u64;
+        if output_dir_exists {
+            if let Ok(entries) = std::fs::read_dir(&output_dir) {
+                output_file_count = entries.flatten().filter(|e| e.path().is_file()).count() as u64;
+            }
+        }
+        let hermes_bin = which_hermes();
+        Ok(serde_json::json!({
+            "cronDirExists": cron_dir_exists,
+            "outputDirExists": output_dir_exists,
+            "outputFileCount": output_file_count,
+            "hermesAvailable": hermes_bin.is_some(),
+            "checkedAt": checked_at()
+        }))
+    }).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn read_hermes_cron_cli_status() -> Result<serde_json::Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let hermes_bin = which_hermes();
+        if hermes_bin.is_none() {
+            return Ok(serde_json::json!({"schedulerRunning": false, "schedulerStatus": "未找到可执行 Hermes", "jobs": [], "hermesAvailable": false}));
+        }
+        let bin = hermes_bin.unwrap();
+
+        let mut scheduler_running = false;
+        let mut status_text = String::new();
+        let child = std::process::Command::new(&bin).args(["cron", "status"]).stdout(Stdio::piped()).stderr(Stdio::null()).spawn();
+        if let Ok(mut child) = child {
+            let started = std::time::Instant::now();
+            loop {
+                match child.try_wait() {
+                    Ok(Some(status)) => {
+                        if status.success() {
+                            if let Ok(output) = child.wait_with_output() {
+                                status_text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                                scheduler_running = status_text.contains("running");
+                            }
+                        }
+                        break;
+                    }
+                    Ok(None) => {
+                        if started.elapsed() > Duration::from_secs(2) { let _ = child.kill(); break; }
+                        std::thread::sleep(Duration::from_millis(30));
+                    }
+                    Err(_) => break,
+                }
+            }
+        }
+
+        let mut jobs: Vec<serde_json::Value> = Vec::new();
+        let child = std::process::Command::new(&bin).args(["cron", "list"]).stdout(Stdio::piped()).stderr(Stdio::null()).spawn();
+        if let Ok(mut child) = child {
+            let started = std::time::Instant::now();
+            loop {
+                match child.try_wait() {
+                    Ok(Some(status)) => {
+                        if status.success() {
+                            if let Ok(output) = child.wait_with_output() {
+                                let raw = String::from_utf8_lossy(&output.stdout);
+                                for line in raw.lines() {
+                                    let trimmed = line.trim();
+                                    if trimmed.is_empty() || trimmed.starts_with("No scheduled") || trimmed.contains("Create one") { continue; }
+                                    jobs.push(serde_json::json!({"raw": trimmed}));
+                                }
+                            }
+                        }
+                        break;
+                    }
+                    Ok(None) => {
+                        if started.elapsed() > Duration::from_secs(2) { let _ = child.kill(); break; }
+                        std::thread::sleep(Duration::from_millis(30));
+                    }
+                    Err(_) => break,
+                }
+            }
+        }
+
+        Ok(serde_json::json!({
+            "schedulerRunning": scheduler_running,
+            "schedulerStatus": status_text,
+            "jobs": jobs,
+            "hermesAvailable": true
+        }))
+    }).await.map_err(|e| e.to_string())?
+}
+
 fn main() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![read_config, write_config, clear_config, read_chat_sessions, write_chat_sessions, clear_chat_sessions, check_hermes_installed, get_hermes_version, get_hermes_paths, get_hermes_help, check_hermes_api_server, hermes_chat_completion, read_hermes_model_config, read_hermes_native_memory, apply_hermes_model_config])
+        .invoke_handler(tauri::generate_handler![read_config, write_config, clear_config, read_chat_sessions, write_chat_sessions, clear_chat_sessions, check_hermes_installed, get_hermes_version, get_hermes_paths, get_hermes_help, check_hermes_api_server, hermes_chat_completion, read_hermes_model_config, read_hermes_native_memory, apply_hermes_model_config, read_hermes_cron_overview, read_hermes_cron_cli_status])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

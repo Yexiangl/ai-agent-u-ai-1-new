@@ -13,9 +13,13 @@
 
 ### Hermes 管理合并模型配置
 - Hermes 管理页面统一管理：状态检测 + 模型供应 Token + 模型选择 + 应用到 Hermes
-- `apply_hermes_model_config` Tauri 命令：写入 `~/.hermes/config.yaml`、`.env`，自动备份
+- `apply_hermes_model_config` Tauri 命令已真实写入成功，通过 `hermes config set` 执行
+- 写入前自动备份 `~/.hermes/config.yaml` 和 `~/.hermes/.env`
 - Token 同步写入 `DEEPSEEK_API_KEY` 和 `KIMI_API_KEY` 两个环境变量
+- Rust 后端强制模型白名单和 provider 映射，不允许前端传入自定义值
 - 支持"测试 Token""保存配置""应用到 Hermes""读取 Hermes 配置"四个操作
+- 修复 Hermes CLI 路径检测：不再将 `~/.hermes/hermes-agent` 目录误识别为 CLI
+- 现在优先使用 PATH / `~/.local/bin/hermes` 等真实可执行 Hermes CLI
 
 ### 专属模型供应 Token
 - 用户使用专属 Token 调用模型服务，前/后端不保存上游 API Key
@@ -46,23 +50,24 @@
 - 业务记忆模板（业务介绍/价格表/回复风格等）标记为"后续版本开放"
 
 ### Skill Center 当前状态
-- 官方模板 10+ 个（校园副业/通用办公/自媒体/学习资料/编程辅助）
+- 官方模板 24 个（校园副业 9 + 通用办公 4 + 自媒体 4 + 学习资料 3 + 编程辅助 3，含 1 个预留）
 - 官方技能可在对话中启用，通过"运行技能"生成 prompt 跳转到对话页
-- HermesHub 兼容技能 10+ 个，仅预览展示，标记为"后续开放"
+- HermesHub 兼容技能 14 个，仅预览展示，标记为"后续开放"
 - 所有技能声明：不执行本地命令、不修改系统文件
 - HermesHub 技能不执行 `hermes skills install`
 
 ### 其他
 - 首页状态仪表板（Hermes 状态/当前模型/Token 状态/已启用 Skills）
-- Onboarding 引导页（首次启动检测 Hermes + 配置 Token）
+- Onboarding 引导页：检测 Hermes 安装状态 → 填写专属 Token → 选择模型 → 直接复用 `applyHermesModelConfig` 写入 Hermes 配置 → 进入工作台
 - 深色模式切换
 - 定时任务页面（草稿保存）、使用情况页面（示例数据）、教程页面、关于页面
 
 ## 仍待完成
+- [ ] 使用概况真实化：从 `chat-sessions.json` 统计 token，替换示例数据
+- [ ] Hermes Cron 只读状态 / 输出记录 / 任务预览
+- [ ] 后续再做真实 Cron 创建/暂停/恢复/删除
 - [ ] 真实定时任务后台执行
-- [ ] 真实使用统计数据接入
 - [ ] HermesHub 技能安装（安全安装流程）
 - [ ] 业务记忆模板写入 Hermes 原生记忆
 - [ ] Token 加密存储（当前明文）
 - [ ] Windows 平台打包与测试
-- [ ] Skill 市场/社区接入
