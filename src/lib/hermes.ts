@@ -253,3 +253,32 @@ export interface ApplyReasoningResult {
 export async function applyHermesReasoningConfig(effort: string): Promise<ApplyReasoningResult> {
   return invoke<ApplyReasoningResult>("apply_hermes_reasoning_config", { effort });
 }
+
+export interface AiFileEntry {
+  name: string;
+  category: string;
+  path: string;
+  size: number;
+  modified: string | null;
+  extension: string;
+}
+
+export interface AiFilesListResult {
+  files: AiFileEntry[];
+}
+
+export async function ensureAiFilesDirs(): Promise<{ ok: boolean; root: string }> {
+  return invoke("ensure_ai_files_dirs");
+}
+
+export async function listAiFiles(category?: string): Promise<AiFilesListResult> {
+  return invoke<AiFilesListResult>("list_ai_files", { category: category ?? null });
+}
+
+export async function deleteAiFile(path: string): Promise<{ ok: boolean }> {
+  return invoke("delete_ai_file", { path });
+}
+
+export async function openAiFileLocation(path: string): Promise<{ ok: boolean }> {
+  return invoke("open_ai_file_location", { path });
+}

@@ -1503,18 +1503,114 @@ async fn read_hermes_cron_cli_status() -> Result<serde_json::Value, String> {
             }
         }
 
-        Ok(serde_json::json!({
-            "schedulerRunning": scheduler_running,
-            "schedulerStatus": status_text,
-            "jobs": jobs,
-            "hermesAvailable": true
-        }))
+    Ok(serde_json::json!({
+        "schedulerRunning": scheduler_running,
+        "schedulerStatus": status_text,
+        "jobs": jobs,
+        "hermesAvailable": true
+    }))
     }).await.map_err(|e| e.to_string())?
+}
+
+fn ai_files_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    Ok(dir.join("ai-files"))
+}
+
+fn safe_resolve(ai_root: &std::path::Path, path: &str) -> Option<PathBuf> {
+    let resolved = ai_root.join(path);
+    match resolved.canonicalize() {
+        Ok(canonical) => {
+            let root = ai_root.canonicalize().ok()?;
+            if canonical.starts_with(root) { Some(canonical) } else { None }
+        }
+        Err(_) => {
+            // If path doesn't exist yet but is within root, allow it
+            let root = ai_root.canonicalize().ok()?;
+            let normalized = ai_root.join(path);
+            if normalized.starts_with(root) { Some(normalized) } else { None }
+        }
+    }
+}
+
+#[tauri::command]
+fn ensure_ai_files_dirs(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
+    let root = ai_files_dir(&app)?;
+    for sub in ["uploads", "generated", "videos", "exports", "temp"] {
+        let dir = root.join(sub);
+        fs::create_dir_all(&dir).map_err(|e| format!("创建 {} 失败: {}", sub, e))?;
+    }
+    Ok(serde_json::json!({ "ok": true, "root": root.display().to_string() }))
+}
+
+#[tauri::command]
+fn list_ai_files(app: tauri::AppHandle, category: Option<String>) -> Result<serde_json::Value, String> {
+    let root = ai_files_dir(&app)?;
+    let mut files: Vec<serde_json::Value> = Vec::new();
+    let categories = match category.as_deref() {
+        Some("uploads") | Some("generated") | Some("videos") | Some("exports") | Some("temp") | None => {
+            category.clone().map(|c| vec![c]).unwrap_or_else(|| vec!["uploads".into(), "generated".into(), "videos".into(), "exports".into(), "temp".into()])
+        }
+        _ => vec!["uploads".into(), "generated".into(), "videos".into(), "exports".into(), "temp".into()],
+    };
+    for cat in &categories {
+        let dir = root.join(cat);
+        if !dir.exists() { continue; }
+        if let Ok(entries) = fs::read_dir(&dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if !path.is_file() { continue; }
+                let meta = path.metadata().ok();
+                let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
+                let size = meta.as_ref().map(|m| m.len()).unwrap_or(0);
+                let modified = meta.as_ref().and_then(|m| m.modified().ok())
+                    .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                    .map(|d| d.as_secs().to_string());
+                let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+                files.push(serde_json::json!({
+                    "name": name,
+                    "category": cat,
+                    "path": path.display().to_string(),
+                    "size": size,
+                    "modified": modified,
+                    "extension": ext
+                }));
+            }
+        }
+    }
+    files.sort_by(|a, b| b.get("modified").and_then(|v| v.as_str().and_then(|s| s.parse::<u64>().ok())).unwrap_or(0)
+        .cmp(&a.get("modified").and_then(|v| v.as_str().and_then(|s| s.parse::<u64>().ok())).unwrap_or(0)));
+    Ok(serde_json::json!({ "files": files }))
+}
+
+#[tauri::command]
+fn delete_ai_file(app: tauri::AppHandle, path: String) -> Result<serde_json::Value, String> {
+    let root = ai_files_dir(&app)?;
+    let resolved = safe_resolve(&root, &path).ok_or("路径无效或超出范围")?;
+    if !resolved.is_file() {
+        return Err("只能删除文件".into());
+    }
+    fs::remove_file(&resolved).map_err(|e| format!("删除失败: {}", e))?;
+    Ok(serde_json::json!({ "ok": true }))
+}
+
+#[tauri::command]
+fn open_ai_file_location(app: tauri::AppHandle, path: String) -> Result<serde_json::Value, String> {
+    let root = ai_files_dir(&app)?;
+    let resolved = safe_resolve(&root, &path).ok_or("路径无效或超出范围")?;
+    let target = if resolved.is_file() { resolved.parent().unwrap_or(&resolved).to_path_buf() } else { resolved };
+    #[cfg(target_os = "macos")]
+    { std::process::Command::new("open").arg(&target).spawn().map_err(|e| e.to_string())?; }
+    #[cfg(target_os = "windows")]
+    { std::process::Command::new("explorer").arg(&target).spawn().map_err(|e| e.to_string())?; }
+    #[cfg(target_os = "linux")]
+    { std::process::Command::new("xdg-open").arg(&target).spawn().map_err(|e| e.to_string())?; }
+    Ok(serde_json::json!({ "ok": true }))
 }
 
 fn main() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![read_config, write_config, clear_config, read_chat_sessions, write_chat_sessions, clear_chat_sessions, check_hermes_installed, get_hermes_version, get_hermes_paths, get_hermes_help, check_hermes_api_server, hermes_chat_completion, cancel_hermes_chat_completion, read_hermes_model_config, read_hermes_native_memory, apply_hermes_model_config, apply_hermes_reasoning_config, read_hermes_cron_overview, read_hermes_cron_cli_status])
+        .invoke_handler(tauri::generate_handler![read_config, write_config, clear_config, read_chat_sessions, write_chat_sessions, clear_chat_sessions, check_hermes_installed, get_hermes_version, get_hermes_paths, get_hermes_help, check_hermes_api_server, hermes_chat_completion, cancel_hermes_chat_completion, read_hermes_model_config, read_hermes_native_memory, apply_hermes_model_config, apply_hermes_reasoning_config, read_hermes_cron_overview, read_hermes_cron_cli_status, ensure_ai_files_dirs, list_ai_files, delete_ai_file, open_ai_file_location])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

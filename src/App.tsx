@@ -11,6 +11,7 @@ import {
   EyeOff,
   FastForward,
   FileText,
+  FolderOpen,
   Home,
   KeyRound,
   Loader2,
@@ -34,7 +35,7 @@ import {
 import { listModels, type ChatMessage } from "@/lib/api";
 import { DEFAULT_CONFIG, type AppConfig } from "@/lib/config";
 import { clearConfig, loadConfig, saveConfig } from "@/lib/storage";
-import { applyHermesModelConfig, applyHermesReasoningConfig, cancelHermesChatCompletion, checkHermes, checkHermesApiServer, hermesChatCompletion, readChatSessions, readHermesCronCliStatus, readHermesCronOverview, readHermesModelConfig, readHermesNativeMemory, writeChatSessions, type ChatSession, type HermesApiServerStatus, type HermesChatChunk, type HermesChatDone, type HermesChatError, type HermesCronCliStatus, type HermesCronOverview, type HermesModelConfig, type HermesNativeMemoryFile, type HermesNativeMemoryResult, type HermesStatus, type HermesStreamDiagnostics, type HermesToolProgress } from "@/lib/hermes";
+import { applyHermesModelConfig, applyHermesReasoningConfig, cancelHermesChatCompletion, checkHermes, checkHermesApiServer, deleteAiFile, ensureAiFilesDirs, hermesChatCompletion, listAiFiles, openAiFileLocation, readChatSessions, readHermesCronCliStatus, readHermesCronOverview, readHermesModelConfig, readHermesNativeMemory, writeChatSessions, type AiFileEntry, type ChatSession, type HermesApiServerStatus, type HermesChatChunk, type HermesChatDone, type HermesChatError, type HermesCronCliStatus, type HermesCronOverview, type HermesModelConfig, type HermesNativeMemoryFile, type HermesNativeMemoryResult, type HermesStatus, type HermesStreamDiagnostics, type HermesToolProgress } from "@/lib/hermes";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { cn, getErrorMessage } from "@/lib/utils";
 import { officialSkills, officialCategories, hermesHubSkills, hermesHubCategories, type OfficialSkill, type HermesHubSkill } from "@/data/skills";
@@ -48,7 +49,7 @@ import { Switch } from "@/components/ui/switch";
 import { Table, Td, Th } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 
-type RouteId = "home" | "chat" | "engines" | "skills" | "memory" | "tasks" | "usage" | "tutorials" | "about";
+type RouteId = "home" | "chat" | "engines" | "skills" | "memory" | "tasks" | "usage" | "files" | "tutorials" | "about";
 type UiChatMessage = ChatMessage & {
   requestId?: string;
   source?: "Hermes Agent";
@@ -347,6 +348,7 @@ const navItems = [
   { id: "memory", label: "Hermes 记忆", icon: FileText },
   { id: "tasks", label: "定时任务", icon: Timer },
   { id: "usage", label: "使用情况", icon: Bot },
+  { id: "files", label: "AI 文件库", icon: FolderOpen },
   { id: "tutorials", label: "教程", icon: BookOpen },
   { id: "about", label: "关于", icon: KeyRound }
 ] as const;
@@ -592,11 +594,12 @@ function Onboarding({ config, updateConfig, hermesCli, hermesApi }: { config: Ap
 function Page({ active, setActive, chatDraft, setChatDraft, pendingNewSessionTitle, setPendingNewSessionTitle, config, updateConfig, hermesCli, hermesApi, hermesModelConfig, setHermesModelConfig, refreshHermesCli, refreshHermesApi, cronOverview, setCronOverview, cronCliStatus, setCronCliStatus, cronLastLoadedAt, setCronLastLoadedAt }: { active: RouteId; setActive: (id: RouteId) => void; chatDraft: string; setChatDraft: (value: string) => void; pendingNewSessionTitle: string; setPendingNewSessionTitle: (v: string) => void; config: AppConfig; updateConfig: (next: AppConfig) => Promise<void>; hermesCli: HermesStatus | null; hermesApi: HermesApiServerStatus | null; hermesModelConfig: HermesModelConfig | null; setHermesModelConfig: (value: HermesModelConfig | null) => void; refreshHermesCli: () => Promise<HermesStatus>; refreshHermesApi: () => Promise<HermesApiServerStatus>; cronOverview: HermesCronOverview | null; setCronOverview: (v: HermesCronOverview | null) => void; cronCliStatus: HermesCronCliStatus | null; setCronCliStatus: (v: HermesCronCliStatus | null) => void; cronLastLoadedAt: number; setCronLastLoadedAt: (v: number) => void }) {
   if (active === "home") return <HomePage config={config} setActive={setActive} hermesCli={hermesCli} hermesApi={hermesApi} hermesModelConfig={hermesModelConfig} />;
   if (active === "chat") return <ChatPage config={config} hermesCli={hermesCli} hermesApi={hermesApi} refreshHermesApi={refreshHermesApi} setActive={setActive} initialDraft={chatDraft} onDraftConsumed={() => setChatDraft("")} pendingNewSessionTitle={pendingNewSessionTitle} onNewSessionCreated={() => setPendingNewSessionTitle("")} />;
-  if (active === "engines") return <EnginesPage config={config} updateConfig={updateConfig} hermesCli={hermesCli} hermesApi={hermesApi} hermesModelConfig={hermesModelConfig} setHermesModelConfig={setHermesModelConfig} refreshHermesCli={refreshHermesCli} refreshHermesApi={refreshHermesApi} />;
+  if (active === "engines") return <EnginesPage config={config} updateConfig={updateConfig} hermesCli={hermesCli} hermesApi={hermesApi} hermesModelConfig={hermesModelConfig} setHermesModelConfig={setHermesModelConfig} refreshHermesCli={refreshHermesCli} refreshHermesApi={refreshHermesApi} setActive={setActive} />;
   if (active === "skills") return <SkillsPage config={config} updateConfig={updateConfig} setActive={setActive} setChatDraft={setChatDraft} setPendingNewSessionTitle={setPendingNewSessionTitle} />;
   if (active === "memory") return <MemoryPage />;
   if (active === "tasks") return <TasksPage cronOverview={cronOverview} setCronOverview={setCronOverview} cronCliStatus={cronCliStatus} setCronCliStatus={setCronCliStatus} cronLastLoadedAt={cronLastLoadedAt} setCronLastLoadedAt={setCronLastLoadedAt} />;
   if (active === "usage") return <UsagePage />;
+  if (active === "files") return <AiFilesPage />;
   if (active === "tutorials") return <TutorialsPage config={config} />;
   return <AboutPage config={config} updateConfig={updateConfig} />;
 }
@@ -721,7 +724,7 @@ function ReasoningEffortControl({ hermesModelConfig, setHermesModelConfig, confi
   );
 }
 
-function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelConfig, setHermesModelConfig, refreshHermesCli, refreshHermesApi }: { config: AppConfig; updateConfig: (next: AppConfig) => Promise<void>; hermesCli: HermesStatus | null; hermesApi: HermesApiServerStatus | null; hermesModelConfig: HermesModelConfig | null; setHermesModelConfig: (value: HermesModelConfig | null) => void; refreshHermesCli: () => Promise<HermesStatus>; refreshHermesApi: () => Promise<HermesApiServerStatus> }) {
+function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelConfig, setHermesModelConfig, refreshHermesCli, refreshHermesApi, setActive }: { config: AppConfig; updateConfig: (next: AppConfig) => Promise<void>; hermesCli: HermesStatus | null; hermesApi: HermesApiServerStatus | null; hermesModelConfig: HermesModelConfig | null; setHermesModelConfig: (value: HermesModelConfig | null) => void; refreshHermesCli: () => Promise<HermesStatus>; refreshHermesApi: () => Promise<HermesApiServerStatus>; setActive: (id: RouteId) => void }) {
   const [refreshing, setRefreshing] = useState(false);
   const [showKey, setShowKey] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -769,27 +772,98 @@ function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelCo
   };
 
   const [applying, setApplying] = useState(false);
+  const [applyStep, setApplyStep] = useState(0);
+  const [applySteps, setApplySteps] = useState<{ label: string; status: "pending" | "running" | "success" | "error" }[]>([
+    { label: "检查模型供应 Token", status: "pending" },
+    { label: "写入 Hermes 模型配置", status: "pending" },
+    { label: "写入模型供应凭证", status: "pending" },
+    { label: "验证配置结果", status: "pending" },
+    { label: "完成", status: "pending" },
+  ]);
+  const [applyDone, setApplyDone] = useState(false);
+  const [applyFailed, setApplyFailed] = useState("");
+  const [applySuccess, setApplySuccess] = useState<{ model: string; provider: string } | null>(null);
+
+  const updateStep = (idx: number, status: "running" | "success" | "error") => {
+    setApplySteps((prev) => {
+      const next = [...prev];
+      next[idx] = { ...next[idx], status };
+      return next;
+    });
+    setApplyStep(idx);
+  };
+
   const doApply = async () => {
-    setApplying(true); setResult(null); setShowApplyPreview(false);
+    if (!tokenDraft.trim()) return;
+    setShowApplyPreview(false);
+    setApplying(true);
+    setApplyStep(0);
+    setApplyDone(false);
+    setApplyFailed("");
+    setApplySuccess(null);
+    setApplySteps((prev) => prev.map((s) => ({ ...s, status: "pending" as const })));
+
+    // Step 1: Check token
+    updateStep(0, "running");
+    await new Promise((r) => setTimeout(r, 300));
     try {
-      if (!tokenDraft.trim()) throw new Error("请先填写专属模型供应 Token");
+      const testRes = await listModels(config.baseUrl, tokenDraft);
+      if (!testRes.ok) throw new Error(testRes.error || "Token 验证失败");
+      updateStep(0, "success");
+    } catch (err) {
+      updateStep(0, "error");
+      setApplyFailed(`Token 验证失败：${getErrorMessage(err)}`);
+      setApplying(false);
+      return;
+    }
+
+    // Step 2: Write model config
+    updateStep(1, "running");
+    try {
       const res = await applyHermesModelConfig(tokenDraft, selectedModel);
-      if (!res.success) throw new Error("写入失败");
+      if (!res.success) throw new Error("写入返回失败");
+      updateStep(1, "success");
+
+      // Step 3: Credentials written (part of applyHermesModelConfig)
+      updateStep(2, "success");
+
+      // Step 4: Verify
+      updateStep(3, "running");
       await updateConfig({ ...config, apiKey: tokenDraft, defaultModel: selectedModel, hasCompletedOnboarding: true });
       if (res.verifiedConfig) {
         setHermesModelConfig(res.verifiedConfig);
         const verified = res.verifiedConfig as HermesModelConfig;
         if (verified.model !== selectedModel) {
-          setResult({ ok: true, message: `配置已写入，但验证显示模型为 ${verified.model || "未知"}。若未生效请新建会话或重启 Hermes。` });
-        } else {
-          setResult({ ok: true, message: `配置已写入 Hermes。新建会话将使用 ${res.appliedModel}，当前会话不受影响。` });
+          updateStep(3, "error");
+          setApplyFailed(`验证显示模型为 ${verified.model || "未知"}，与预期不一致`);
+          setApplying(false);
+          return;
         }
-      } else {
-        setResult({ ok: true, message: `配置已写入 Hermes。若当前对话仍使用旧模型，请新建会话。` });
       }
-    } catch (err) { setResult({ ok: false, message: `写入失败：${getErrorMessage(err)}。已有配置未受影响，可在高级诊断查看备份路径。` }); }
-    finally { setApplying(false); }
+      updateStep(3, "success");
+
+      // Step 5: Done
+      updateStep(4, "success");
+      setApplySuccess({ model: selectedModel, provider: currentProvider });
+      setApplyDone(true);
+    } catch (err) {
+      updateStep(1, "error");
+      setApplyFailed(`写入失败：${getErrorMessage(err)}。已有配置未受影响。`);
+    } finally {
+      setApplying(false);
+    }
   };
+
+  const timeAgo = (ts: string | undefined | null) => {
+    if (!ts) return "未检测";
+    const secs = Math.max(0, Math.floor(Date.now() / 1000) - Number(ts));
+    if (secs < 10) return "刚刚";
+    if (secs < 60) return `${secs} 秒前`;
+    if (secs < 3600) return `${Math.floor(secs / 60)} 分钟前`;
+    return `今天 ${new Date(Number(ts) * 1000).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}`;
+  };
+
+  const shortBaseUrl = config.baseUrl.replace(/^https?:\/\//, "");
 
   const hermesConnected = hermesApi?.running;
   const hermesInstalled = hermesCli?.installed;
@@ -804,7 +878,7 @@ function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelCo
           <div className="flex items-start justify-between gap-3">
             <div>
               <CardTitle>Hermes 状态</CardTitle>
-              <CardDescription>{hermesConnected ? "Hermes Agent 正在运行，可以正常对话。" : hermesInstalled ? "Hermes 已安装，但对话服务未运行。" : "未检测到 Hermes。"}</CardDescription>
+              <CardDescription>{hermesConnected ? "本机 Hermes Agent 已连接，可以开始对话。" : hermesInstalled ? "未检测到本地 Hermes 对话服务，请先启动 Hermes。" : "未检测到 Hermes，请确认已正确安装。"}</CardDescription>
             </div>
             <Badge tone={hermesConnected ? "success" : hermesInstalled ? "warning" : "danger"}>{hermesConnected ? "已连接" : hermesInstalled ? "未运行" : "未安装"}</Badge>
           </div>
@@ -818,7 +892,7 @@ function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelCo
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <Button disabled={refreshing} onClick={refreshAll}>{refreshing && <Loader2 className="h-4 w-4 animate-spin" />}<RefreshCcw className="h-4 w-4" />刷新状态</Button>
-            <span className="text-xs text-muted-foreground">最近检测：{hermesApi?.checkedAt || hermesCli?.checkedAt || "暂无"}</span>
+            <span className="text-xs text-muted-foreground">最近检测：{timeAgo(hermesApi?.checkedAt || hermesCli?.checkedAt)}</span>
           </div>
         </CardContent>
       </Card>
@@ -845,13 +919,13 @@ function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelCo
               <option value="deepseek-v4-pro">deepseek-v4-pro（高质量）</option>
               <option value="kimi-k2.6">kimi-k2.6（长文本）</option>
             </select>
-            <p className="text-xs text-muted-foreground">Provider：{currentProvider} · 服务地址：{config.baseUrl}</p>
+            <p className="text-xs text-muted-foreground">Provider：{currentProvider} · 服务：{shortBaseUrl}</p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button disabled={testing} onClick={testToken}>{testing && <Loader2 className="h-4 w-4 animate-spin" />}测试 Token</Button>
-            <Button onClick={saveConfig}><Save className="h-4 w-4" />保存配置</Button>
-            <Button variant="outline" onClick={() => setShowApplyPreview(true)}>应用到 Hermes</Button>
-            <Button variant="outline" disabled={readingConfig} onClick={readConfig}>{readingConfig && <Loader2 className="h-4 w-4 animate-spin" />}读取 Hermes 配置</Button>
+            <Button onClick={() => setShowApplyPreview(true)} disabled={!tokenDraft.trim()}>应用到 Hermes</Button>
+            <Button variant="outline" disabled={testing} onClick={testToken}>{testing && <Loader2 className="h-4 w-4 animate-spin" />}测试 Token</Button>
+            <Button variant="outline" onClick={saveConfig}><Save className="h-4 w-4" />保存配置</Button>
+            <Button variant="ghost" size="sm" disabled={readingConfig} onClick={readConfig}>{readingConfig && <Loader2 className="h-4 w-4 animate-spin" />}读取 Hermes 配置</Button>
           </div>
           {result && <div className={cn("rounded-xl border p-3 text-sm", result.ok ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400" : "border-rose-500/30 bg-rose-500/10 text-rose-700 dark:text-rose-400")}>{result.message}</div>}
         </CardContent>
@@ -868,27 +942,79 @@ function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelCo
         </CardContent>
       </Card>
 
-      {/* 3. Apply Preview Dialog */}
+      {/* 3. Apply Progress / Result */}
       {showApplyPreview && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setShowApplyPreview(false)}>
-          <Card className="max-h-[80vh] w-full max-w-md overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+          <Card className="w-full max-w-md overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <CardHeader>
               <CardTitle>应用配置到 Hermes</CardTitle>
-              <CardDescription>确认后将写入 Hermes 配置，新会话将使用新模型。</CardDescription>
+              <CardDescription>{!applying && !applyDone ? "确认后开始写入 Hermes 配置。" : ""}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="rounded-xl border bg-muted/30 p-3 text-sm space-y-1">
-                <div><span className="font-medium">模型：</span>{selectedModel}</div>
-                <div><span className="font-medium">Provider：</span>{currentProvider}</div>
-                <div><span className="font-medium">服务地址：</span>{config.baseUrl}</div>
-                <div><span className="font-medium">Token：</span>{tokenDraft ? "已填写（不显示明文）" : "未填写"}</div>
-              </div>
-              <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-700 dark:text-emerald-300">写入前会自动备份现有配置。Token 将同时写入 DEEPSEEK_API_KEY 和 KIMI_API_KEY，方便后续切换模型。</div>
-              <div className="flex gap-2">
-                <Button disabled={applying || !tokenDraft.trim()} onClick={doApply}>{applying && <Loader2 className="h-4 w-4 animate-spin" />}确认应用</Button>
-                <Button variant="outline" onClick={() => { navigator.clipboard.writeText(`hermes config set model.provider ${currentProvider}\nhermes config set model.default ${selectedModel}\nhermes config set model.base_url ${config.baseUrl}\nhermes config set model.api_mode chat_completions`); setShowApplyPreview(false); setResult({ ok: true, message: "命令已复制到剪贴板" }); }}><Copy className="h-4 w-4" />复制命令</Button>
-                <Button variant="outline" onClick={() => setShowApplyPreview(false)}>取消</Button>
-              </div>
+              {!applying && !applyDone && !applyFailed && (
+                <>
+                  <div className="rounded-xl border bg-muted/30 p-3 text-sm space-y-1">
+                    <div><span className="font-medium">模型：</span>{selectedModel}</div>
+                    <div><span className="font-medium">Provider：</span>{currentProvider}</div>
+                    <div><span className="font-medium">服务地址：</span>{config.baseUrl}</div>
+                    <div><span className="font-medium">Token：</span>{tokenDraft ? "已填写（不显示明文）" : "未填写"}</div>
+                  </div>
+                  <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-700 dark:text-emerald-300">写入前会自动备份现有配置。</div>
+                  <div className="flex gap-2">
+                    <Button disabled={!tokenDraft.trim()} onClick={doApply}>确认应用</Button>
+                    <Button variant="outline" onClick={() => { navigator.clipboard.writeText(`hermes config set model.provider ${currentProvider}\nhermes config set model.default ${selectedModel}\nhermes config set model.base_url ${config.baseUrl}\nhermes config set model.api_mode chat_completions`); setShowApplyPreview(false); setResult({ ok: true, message: "命令已复制到剪贴板" }); }}><Copy className="h-4 w-4" />复制命令</Button>
+                    <Button variant="outline" onClick={() => setShowApplyPreview(false)}>取消</Button>
+                  </div>
+                </>
+              )}
+
+              {(applying || applyDone || applyFailed) && (
+                <>
+                  {/* Step progress */}
+                  <div className="space-y-2">
+                    {applySteps.map((step, i) => (
+                      <div key={i} className={cn("flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors duration-200",
+                        step.status === "running" && "bg-primary/5 text-primary",
+                        step.status === "success" && "bg-emerald-500/5 text-emerald-700 dark:text-emerald-300",
+                        step.status === "error" && "bg-rose-500/5 text-rose-700 dark:text-rose-300",
+                        step.status === "pending" && "text-muted-foreground"
+                      )}>
+                        {step.status === "pending" && <div className="h-4 w-4 rounded-full border" />}
+                        {step.status === "running" && <Loader2 className="h-4 w-4 animate-spin" />}
+                        {step.status === "success" && <CheckCircle2 className="h-4 w-4" />}
+                        {step.status === "error" && <div className="flex h-4 w-4 items-center justify-center rounded-full border border-rose-500 text-[10px] font-bold text-rose-500">!</div>}
+                        <span>{step.label}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Success state */}
+                  {applyDone && applySuccess && (
+                    <div className="space-y-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4">
+                      <div className="text-sm font-medium text-emerald-700 dark:text-emerald-300">配置已应用到 Hermes</div>
+                      <div className="space-y-1 text-xs text-emerald-700/80 dark:text-emerald-300/80">
+                        <div>当前模型：{applySuccess.model}</div>
+                        <div>Provider：{applySuccess.provider}</div>
+                        <div>服务地址：{config.baseUrl}</div>
+                      </div>
+                      <div className="text-xs text-emerald-600/70 dark:text-emerald-400/70">新建会话将使用新模型，当前会话不受影响。</div>
+                      <div className="flex gap-2 pt-1">
+                        <Button size="sm" onClick={() => { setShowApplyPreview(false); setApplyDone(false); setActive("chat"); }}>进入 Agent 对话</Button>
+                        <Button variant="outline" size="sm" onClick={() => { setShowApplyPreview(false); setApplyDone(false); }}>留在 Hermes 管理</Button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Failure state */}
+                  {applyFailed && (
+                    <div className="space-y-3 rounded-xl border border-rose-500/30 bg-rose-500/10 p-4">
+                      <div className="text-sm font-medium text-rose-700 dark:text-rose-300">配置写入失败</div>
+                      <div className="text-xs text-rose-600/80 dark:text-rose-400/80">{applyFailed}</div>
+                      <Button variant="outline" size="sm" onClick={() => setShowApplyPreview(false)}>关闭</Button>
+                    </div>
+                  )}
+                </>
+              )}
             </CardContent>
           </Card>
         </div>
@@ -2201,6 +2327,123 @@ function SkillsPage({ config, updateConfig, setActive, setChatDraft, setPendingN
   );
 }
 
+function AiFilesPage() {
+  const [files, setFiles] = useState<AiFileEntry[]>([]);
+  const [filter, setFilter] = useState("全部");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true); setError("");
+    try {
+      await ensureAiFilesDirs();
+      const cat = filter === "全部" ? undefined : filter;
+      const result = await listAiFiles(cat);
+      setFiles(result.files);
+    } catch (err) { setError(getErrorMessage(err)); }
+    finally { setLoading(false); }
+  }, [filter]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const counts = files.reduce((acc, file) => {
+    acc[file.category] = (acc[file.category] || 0) + 1;
+    acc.total = (acc.total || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>);
+
+  const fmtSize = (size: number) => {
+    if (size < 1024) return `${size} B`;
+    if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+    return `${(size / 1024 / 1024).toFixed(1)} MB`;
+  };
+
+  const categories = ["全部", "uploads", "generated", "videos", "exports"];
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <CardTitle>AI 文件库</CardTitle>
+          <CardDescription>统一管理 AI 生成、上传和导出的文件。文件保存在本机应用数据目录。</CardDescription>
+        </CardHeader>
+      </Card>
+
+      {error && <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-rose-700 dark:text-rose-400">{error}</div>}
+
+      <div className="grid gap-4 md:grid-cols-5">
+        <Metric label="总文件数" value={String(counts.total || 0)} tone="info" />
+        <Metric label="上传" value={String(counts.uploads || 0)} tone="info" />
+        <Metric label="生成" value={String(counts.generated || 0)} tone="success" />
+        <Metric label="视频" value={String(counts.videos || 0)} tone="warning" />
+        <Metric label="导出" value={String(counts.exports || 0)} tone="info" />
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        {categories.map((cat) => (
+          <Button key={cat} size="sm" variant={filter === cat ? "default" : "outline"} onClick={() => setFilter(cat)}>{cat === "全部" ? "全部" : cat}</Button>
+        ))}
+        <Button variant="outline" size="sm" onClick={load} disabled={loading} className="ml-auto"><RefreshCcw className={cn("h-4 w-4", loading && "animate-spin")} />刷新</Button>
+      </div>
+
+      <Card>
+        <CardContent className="p-0">
+          {loading ? (
+            <div className="flex items-center justify-center py-16"><Loader2 className="h-6 w-6 animate-spin" /></div>
+          ) : files.length === 0 ? (
+            <div className="p-8 text-center text-sm text-muted-foreground">暂无文件。上传或生成文件后会在这里显示。</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <thead>
+                  <tr>
+                    <Th>文件名</Th>
+                    <Th>类型</Th>
+                    <Th>大小</Th>
+                    <Th>来源</Th>
+                    <Th>时间</Th>
+                    <Th>操作</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {files.map((file) => (
+                    <tr key={file.path}>
+                      <Td className="max-w-[200px] truncate font-medium">{file.name}</Td>
+                      <Td><Badge tone="info">{file.extension || "未知"}</Badge></Td>
+                      <Td>{fmtSize(file.size)}</Td>
+                      <Td><Badge tone="muted">{file.category}</Badge></Td>
+                      <Td className="text-xs text-muted-foreground">{file.modified ? new Date(Number(file.modified) * 1000).toLocaleString() : "-"}</Td>
+                      <Td>
+                        <div className="flex gap-1">
+                          <Button variant="ghost" size="sm" onClick={() => openAiFileLocation(file.path)}>打开位置</Button>
+                          <Button variant="ghost" size="sm" onClick={() => { navigator.clipboard.writeText(file.path); }}><Copy className="h-3 w-3" /></Button>
+                          <Button variant="ghost" size="sm" className="text-rose-600" onClick={() => setConfirmDelete(file.path)}>删除</Button>
+                        </div>
+                      </Td>
+                    </tr>
+                  ))}
+                </tbody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {confirmDelete && (
+        <ConfirmDialog
+          open={true}
+          onClose={() => setConfirmDelete(null)}
+          title="删除文件"
+          description="此操作将永久删除该文件，不可恢复。"
+          confirmLabel="确认删除"
+          onConfirm={async () => { if (confirmDelete) { try { await deleteAiFile(confirmDelete); load(); } catch { /* ignore */ } setConfirmDelete(null); } }}
+        />
+      )}
+    </div>
+  );
+}
+
 function MemoryPage() {
   const [memory, setMemory] = useState<HermesNativeMemoryResult | null>(null);
   const [selectedId, setSelectedId] = useState<string>("");
@@ -2686,7 +2929,7 @@ function StreamDiagnosticsPanel({ diagnostics }: { diagnostics: FrontStreamDiagn
 }
 
 function Metric({ label, value, tone }: { label: string; value: string; tone: "success" | "info" | "warning" | "danger" | "muted" }) {
-  return <Card><CardHeader className="pb-2"><CardDescription>{label}</CardDescription><CardTitle className="flex items-center justify-between gap-3 text-xl"><span className="truncate">{value}</span><Badge tone={tone}>{tone === "success" ? "正常" : tone === "warning" ? "待配置" : tone === "danger" ? "异常" : tone === "muted" ? "占位" : "监控"}</Badge></CardTitle></CardHeader></Card>;
+  return <Card className="rounded-2xl"><CardHeader className="pb-2"><CardDescription>{label}</CardDescription><CardTitle className="flex items-center justify-between gap-3 text-xl"><span className="truncate">{value}</span><Badge tone={tone}>{tone === "success" ? "正常" : tone === "warning" ? "待配置" : tone === "danger" ? "异常" : tone === "muted" ? "未配置" : "当前"}</Badge></CardTitle></CardHeader></Card>;
 }
 
 export default App;
