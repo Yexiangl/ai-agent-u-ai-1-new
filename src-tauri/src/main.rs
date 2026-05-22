@@ -10,6 +10,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use futures_util::StreamExt;
+use calamine::Reader;
 use tauri::{Emitter, Manager};
 
 type CancelMap = Mutex<HashMap<String, Arc<AtomicBool>>>;
@@ -1202,6 +1203,11 @@ fn read_hermes_native_memory() -> Result<serde_json::Value, String> {
     }))
 }
 
+fn sanitize_token_error(error: &str, token: &str) -> String {
+    if token.is_empty() { return error.to_string(); }
+    error.replace(token, "[REDACTED]")
+}
+
 #[tauri::command]
 fn apply_hermes_model_config(token: String, model: String) -> Result<serde_json::Value, String> {
     // 1. Whitelist validation
@@ -1265,7 +1271,7 @@ fn apply_hermes_model_config(token: String, model: String) -> Result<serde_json:
             .output();
         match output {
             Ok(o) if !o.status.success() => {
-                let stderr = String::from_utf8_lossy(&o.stderr);
+                let stderr = sanitize_token_error(&String::from_utf8_lossy(&o.stderr), &token);
                 return Err(format!("hermes config set {} 失败：{}", key, stderr.trim()));
             }
             Err(e) => {
@@ -1275,21 +1281,41 @@ fn apply_hermes_model_config(token: String, model: String) -> Result<serde_json:
         }
     }
 
-    // 5. Write token to both provider keys (no logging of token value)
+    // 5. Write token to .env directly (NOT via CLI args to avoid ps visibility)
     let token_keys = ["DEEPSEEK_API_KEY", "KIMI_API_KEY"];
+    let env_path = hermes_dir.join(".env");
+    let mut env_content = if env_path.exists() {
+        fs::read_to_string(&env_path).unwrap_or_default()
+    } else {
+        String::new()
+    };
     for key in &token_keys {
-        let output = std::process::Command::new(&hermes_bin)
-            .args(["config", "set", key, &token])
-            .output();
-        match output {
-            Ok(o) if !o.status.success() => {
-                let stderr = String::from_utf8_lossy(&o.stderr);
-                return Err(format!("hermes config set {} 失败：{}", key, stderr.trim()));
-            }
-            Err(e) => {
-                return Err(format!("执行 hermes config set {} 失败：{}", key, e));
-            }
-            _ => {}
+        let key_eq = format!("{}=", key);
+        if let Some(line_start) = env_content.lines().position(|l| l.trim_start().starts_with(&key_eq)) {
+            // Replace existing line
+            let lines: Vec<&str> = env_content.lines().collect();
+            let updated: Vec<String> = lines.iter().enumerate().map(|(i, l)| {
+                if i == line_start {
+                    let comment = if l.contains('#') { l.split('#').nth(1).unwrap_or("").trim() } else { "" };
+                    if comment.is_empty() { format!("{}={}", key, token) }
+                    else { format!("{}={} # {}", key, token, comment) }
+                } else { l.to_string() }
+            }).collect();
+            env_content = updated.join("\n") + "\n";
+        } else {
+            // Append new line
+            if !env_content.ends_with('\n') { env_content.push('\n'); }
+            env_content.push_str(&format!("{}={}\n", key, token));
+        }
+    }
+    // Write .env with restricted permissions (0600 on Unix)
+    {
+        let mut file = std::fs::File::create(&env_path).map_err(|e| sanitize_token_error(&format!("写入 .env 失败：{}", e), &token))?;
+        file.write_all(env_content.as_bytes()).map_err(|e| sanitize_token_error(&format!("写入 .env 失败：{}", e), &token))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = file.set_permissions(std::fs::Permissions::from_mode(0o600));
         }
     }
 
@@ -1608,9 +1634,212 @@ fn open_ai_file_location(app: tauri::AppHandle, path: String) -> Result<serde_js
     Ok(serde_json::json!({ "ok": true }))
 }
 
+#[tauri::command]
+fn pick_and_upload_file(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
+    let files = rfd::FileDialog::new()
+        .add_filter("办公文件", &["txt", "md", "csv", "json", "log", "xlsx", "xls", "docx", "pptx"])
+        .pick_files();
+    if files.is_none() {
+        return Ok(serde_json::json!({ "files": [] }));
+    }
+    let root = ai_files_dir(&app)?;
+    let uploads = root.join("uploads");
+    fs::create_dir_all(&uploads).map_err(|e| e.to_string())?;
+    let mut results: Vec<serde_json::Value> = Vec::new();
+    for path in files.unwrap() {
+        let meta = path.metadata().map_err(|e| e.to_string())?;
+        if meta.len() > 10 * 1024 * 1024 {
+            return Err(format!("文件 {} 超过 10MB 限制", path.file_name().and_then(|n| n.to_str()).unwrap_or("")));
+        }
+        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("upload");
+        let dest = uploads.join(name);
+        let dest = if dest.exists() {
+            let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("file");
+            let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+            let ts = chrono_timestamp();
+            uploads.join(format!("{}-{}.{}", stem, ts, ext))
+        } else { dest };
+        fs::copy(&path, &dest).map_err(|e| format!("复制失败：{}", e))?;
+        let name = dest.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
+        results.push(serde_json::json!({
+            "name": name,
+            "path": dest.display().to_string(),
+            "size": meta.len()
+        }));
+    }
+    Ok(serde_json::json!({ "files": results }))
+}
+
+#[tauri::command]
+fn extract_ai_file_text(app: tauri::AppHandle, path: String) -> Result<serde_json::Value, String> {
+    let root = ai_files_dir(&app)?;
+    let resolved = safe_resolve(&root, &path).ok_or("路径无效或超出范围")?;
+    let ext = resolved.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+    let name = resolved.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
+    let max_chars = 120_000usize;
+
+    Ok(match ext.as_str() {
+        "txt" | "md" | "log" | "json" => {
+            let content = std::fs::read_to_string(&resolved).map_err(|e| e.to_string())?;
+            let truncated = content.chars().count() > max_chars;
+            let text: String = content.chars().take(max_chars).collect();
+            serde_json::json!({ "text": text, "truncated": truncated, "fileType": ext, "fileName": name })
+        }
+        "csv" => {
+            let mut rdr = csv::ReaderBuilder::new().has_headers(true).from_path(&resolved).map_err(|e| e.to_string())?;
+            let headers = rdr.headers().map_err(|e| e.to_string())?.clone();
+            let mut lines: Vec<String> = vec![headers.iter().collect::<Vec<&str>>().join(",")];
+            let mut row_count = 0u64;
+            for result in rdr.records() {
+                if row_count >= 2000 { break; }
+                let record = result.map_err(|e| e.to_string())?;
+                lines.push(record.iter().collect::<Vec<&str>>().join(","));
+                row_count += 1;
+            }
+            let text = lines.join("\n");
+            let truncated = text.chars().count() > max_chars;
+            serde_json::json!({ "text": if truncated { text.chars().take(max_chars).collect() } else { text }, "truncated": truncated, "fileType": "csv", "fileName": name, "rowCount": row_count })
+        }
+        "xlsx" | "xls" => {
+            let mut workbook = calamine::open_workbook_auto(&resolved).map_err(|e| format!("解析 Excel 失败：{}", e))?;
+            let sheets = workbook.sheet_names().to_vec();
+            let mut output = String::new();
+            let mut total_rows = 0u64;
+            let sheet_limit = 5usize.min(sheets.len());
+            for i in 0..sheet_limit {
+                let range = workbook.worksheet_range(&sheets[i]).map_err(|e| e.to_string())?;
+                if i > 0 { output.push_str("\n\n"); }
+                output.push_str(&format!("Sheet: {}\n", sheets[i]));
+                let mut rows = range.rows().peekable();
+                let col_count = rows.peek().map(|r| r.len().min(30)).unwrap_or(0);
+                let mut row_n = 0u64;
+                for row in rows {
+                    if row_n >= 200 { break; }
+                    let cells: Vec<String> = row.iter().take(col_count).map(|c| c.to_string()).collect();
+                    output.push_str(&cells.join("\t"));
+                    output.push('\n');
+                    row_n += 1;
+                }
+                total_rows += row_n;
+            }
+            let truncated = output.chars().count() > max_chars;
+            serde_json::json!({ "text": if truncated { output.chars().take(max_chars).collect() } else { output }, "truncated": truncated, "fileType": "xlsx", "fileName": name, "sheetCount": sheets.len(), "rowCount": total_rows })
+        }
+        "docx" => {
+            let file = std::fs::File::open(&resolved).map_err(|e| e.to_string())?;
+            let mut archive = zip::ZipArchive::new(file).map_err(|e| format!("解析 docx 失败：{}", e))?;
+            let doc = archive.by_name("word/document.xml").map_err(|_| "无 document.xml".to_string())?;
+            let xml_text = std::io::read_to_string(doc).map_err(|e| e.to_string())?;
+            let text = extract_xml_text(&xml_text);
+            let truncated = text.chars().count() > max_chars;
+            serde_json::json!({ "text": if truncated { text.chars().take(max_chars).collect() } else { text }, "truncated": truncated, "fileType": "docx", "fileName": name })
+        }
+        "pptx" => {
+            let file = std::fs::File::open(&resolved).map_err(|e| e.to_string())?;
+            let mut archive = zip::ZipArchive::new(file).map_err(|e| format!("解析 pptx 失败：{}", e))?;
+            let mut slide_nums: Vec<usize> = Vec::new();
+            for i in 0..archive.len() {
+                let entry = archive.by_index(i).map_err(|e| e.to_string())?;
+                let name_e = entry.name().to_string();
+                if name_e.starts_with("ppt/slides/slide") && name_e.ends_with(".xml") {
+                    if let Some(num) = name_e.split("slide").nth(1).and_then(|s| s.split('.').next()).and_then(|s| s.parse::<usize>().ok()) {
+                        slide_nums.push(num);
+                    }
+                }
+            }
+            slide_nums.sort();
+            slide_nums.truncate(80);
+            let mut output = String::new();
+            for num in &slide_nums {
+                let slide_name = format!("ppt/slides/slide{}.xml", num);
+                if let Ok(slide) = archive.by_name(&slide_name) {
+                    let xml_text = std::io::read_to_string(slide).map_err(|e| e.to_string())?;
+                    let text = extract_xml_text(&xml_text);
+                    if !text.trim().is_empty() {
+                        output.push_str(&format!("\nSlide {}:\n{}\n", num, text));
+                    }
+                }
+            }
+            if output.trim().is_empty() { output = "（未提取到文本内容）".to_string(); }
+            let truncated = output.chars().count() > max_chars;
+            serde_json::json!({ "text": if truncated { output.chars().take(max_chars).collect() } else { output }, "truncated": truncated, "fileType": "pptx", "fileName": name, "slideCount": slide_nums.len() })
+        }
+        _ => return Err(format!("不支持的文件类型：{}", ext)),
+    })
+}
+
+fn extract_xml_text(xml: &str) -> String {
+    let mut out = String::new();
+    let mut in_tag = false;
+    let mut in_text = false;
+    for ch in xml.chars() {
+        match ch {
+            '<' => { in_tag = true; in_text = false; }
+            '>' => { in_tag = false; }
+            _ if !in_tag => {
+                if ch == ' ' && !in_text { continue; }
+                in_text = true;
+                out.push(ch);
+            }
+            _ => {}
+        }
+    }
+    out.trim().split_whitespace().collect::<Vec<&str>>().join(" ")
+}
+
+#[tauri::command]
+fn save_generated_file(app: tauri::AppHandle, filename: String, content: String) -> Result<serde_json::Value, String> {
+    let root = ai_files_dir(&app)?;
+    let gen_dir = root.join("generated");
+    fs::create_dir_all(&gen_dir).map_err(|e| e.to_string())?;
+
+    // Sanitize filename: only keep the base name, strip any path components
+    let name = std::path::Path::new(&filename)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("generated.md");
+    // Remove any ../ or path separators and dangerous chars
+    let name: String = name.chars().filter(|c| c.is_alphanumeric() || *c == '.' || *c == '-' || *c == '_').collect();
+    if name.is_empty() || name == "." || name == ".." {
+        return Err("无效的文件名".into());
+    }
+
+    // Extension whitelist
+    let ext = std::path::Path::new(&name).extension().and_then(|e| e.to_str()).unwrap_or("md").to_lowercase();
+    if !["md", "txt", "json", "csv"].contains(&ext.as_str()) {
+        return Err(format!("不支持的文件类型：{}", ext));
+    }
+
+    let dest = gen_dir.join(&name);
+    let dest = if dest.exists() {
+        let stem = std::path::Path::new(&name).file_stem().and_then(|s| s.to_str()).unwrap_or("generated");
+        let ts = chrono_timestamp();
+        gen_dir.join(format!("{}-{}.{}", stem, ts, ext))
+    } else { dest };
+
+    // Final safety: canonicalize and verify stays within generated dir
+    let canonical_gen = gen_dir.canonicalize().map_err(|e| format!("无法访问 generated 目录：{}", e))?;
+    // Canonicalize the destination (may fail if not yet created, so verify via parent)
+    if let Ok(canonical_dest) = dest.canonicalize() {
+        if !canonical_dest.starts_with(&canonical_gen) {
+            return Err("路径无效".into());
+        }
+    } else {
+        // File doesn't exist yet — verify parent directory is within generated
+        let parent = dest.parent().unwrap_or(&gen_dir);
+        let canonical_parent = parent.canonicalize().map_err(|_| "路径无效")?;
+        if !canonical_parent.starts_with(&canonical_gen) {
+            return Err("路径无效".into());
+        }
+    }
+
+    std::fs::write(&dest, &content).map_err(|e| e.to_string())?;
+    Ok(serde_json::json!({ "ok": true, "path": dest.display().to_string() }))
+}
+
 fn main() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![read_config, write_config, clear_config, read_chat_sessions, write_chat_sessions, clear_chat_sessions, check_hermes_installed, get_hermes_version, get_hermes_paths, get_hermes_help, check_hermes_api_server, hermes_chat_completion, cancel_hermes_chat_completion, read_hermes_model_config, read_hermes_native_memory, apply_hermes_model_config, apply_hermes_reasoning_config, read_hermes_cron_overview, read_hermes_cron_cli_status, ensure_ai_files_dirs, list_ai_files, delete_ai_file, open_ai_file_location])
+        .invoke_handler(tauri::generate_handler![read_config, write_config, clear_config, read_chat_sessions, write_chat_sessions, clear_chat_sessions, check_hermes_installed, get_hermes_version, get_hermes_paths, get_hermes_help, check_hermes_api_server, hermes_chat_completion, cancel_hermes_chat_completion, read_hermes_model_config, read_hermes_native_memory, apply_hermes_model_config, apply_hermes_reasoning_config, read_hermes_cron_overview, read_hermes_cron_cli_status, ensure_ai_files_dirs, list_ai_files, delete_ai_file, open_ai_file_location, pick_and_upload_file, extract_ai_file_text, save_generated_file])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

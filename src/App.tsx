@@ -31,11 +31,12 @@ import {
   Sun,
   Timer,
   Trash2,
+  Upload,
 } from "lucide-react";
 import { listModels, type ChatMessage } from "@/lib/api";
 import { DEFAULT_CONFIG, type AppConfig } from "@/lib/config";
 import { clearConfig, loadConfig, saveConfig } from "@/lib/storage";
-import { applyHermesModelConfig, applyHermesReasoningConfig, cancelHermesChatCompletion, checkHermes, checkHermesApiServer, deleteAiFile, ensureAiFilesDirs, hermesChatCompletion, listAiFiles, openAiFileLocation, readChatSessions, readHermesCronCliStatus, readHermesCronOverview, readHermesModelConfig, readHermesNativeMemory, writeChatSessions, type AiFileEntry, type ChatSession, type HermesApiServerStatus, type HermesChatChunk, type HermesChatDone, type HermesChatError, type HermesCronCliStatus, type HermesCronOverview, type HermesModelConfig, type HermesNativeMemoryFile, type HermesNativeMemoryResult, type HermesStatus, type HermesStreamDiagnostics, type HermesToolProgress } from "@/lib/hermes";
+import { applyHermesModelConfig, applyHermesReasoningConfig, cancelHermesChatCompletion, checkHermes, checkHermesApiServer, deleteAiFile, ensureAiFilesDirs, extractAiFileText, hermesChatCompletion, listAiFiles, openAiFileLocation, pickAndUploadFile, readChatSessions, readHermesCronCliStatus, readHermesCronOverview, readHermesModelConfig, readHermesNativeMemory, saveGeneratedFile, writeChatSessions, type AiFileEntry, type ChatSession, type HermesApiServerStatus, type HermesChatChunk, type HermesChatDone, type HermesChatError, type HermesCronCliStatus, type HermesCronOverview, type HermesModelConfig, type HermesNativeMemoryFile, type HermesNativeMemoryResult, type HermesStatus, type HermesStreamDiagnostics, type HermesToolProgress } from "@/lib/hermes";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { cn, getErrorMessage } from "@/lib/utils";
 import { officialSkills, officialCategories, hermesHubSkills, hermesHubCategories, type OfficialSkill, type HermesHubSkill } from "@/data/skills";
@@ -61,6 +62,7 @@ type UiChatMessage = ChatMessage & {
   toolEvents?: string[];
   partial?: boolean;
   warning?: string;
+  attachments?: Array<{ name: string; path: string; size: number; truncated: boolean; text: string }>;
 };
 
 const DEBUG_STREAM = false;
@@ -104,6 +106,81 @@ type TypewriterState = {
   requestId: string;
 };
 
+function buildTableSummary(text: string, maxRows: number, maxCols: number): string {
+  const lines = text.split("\n");
+  const sheets: Array<{ name: string; headers: string[]; rows: string[][]; emptyCells: number; numericCols: number[] }> = [];
+  let currentSheet: { name: string; headers: string[]; rows: string[][] } | null = null;
+  let inHeader = false;
+  let headerCount = 0;
+  let demoRowCount = 0;
+
+  for (const line of lines) {
+    if (line.startsWith("Sheet: ")) {
+      if (currentSheet && currentSheet.rows.length > 0) {
+        const emptyCells = currentSheet.rows.flat().filter((c) => !c.trim()).length;
+        const numericCols: number[] = [];
+        for (let ci = 0; ci < (currentSheet.rows[0]?.length ?? 0) && ci < maxCols; ci++) {
+          const allNumeric = currentSheet.rows.slice(0, maxRows).every((r) => (r[ci] ?? "") === "" || !isNaN(Number(r[ci] ?? "")));
+          if (allNumeric) numericCols.push(ci);
+        }
+        sheets.push({ name: currentSheet.name, headers: currentSheet.headers.slice(0, maxCols), rows: currentSheet.rows.slice(0, maxRows), emptyCells, numericCols });
+      }
+      currentSheet = { name: line.replace("Sheet: ", "").trim(), headers: [], rows: [] };
+      inHeader = false; headerCount = 0; demoRowCount = 0;
+      continue;
+    }
+    if (!currentSheet) continue;
+    const cells = line.split("\t");
+    if (cells.length <= 1 && !line.includes("\t")) continue;
+    if (!inHeader && headerCount < 2) {
+      currentSheet.headers = cells.slice(0, maxCols);
+      headerCount++;
+    } else {
+      if (demoRowCount >= maxRows) continue;
+      currentSheet.rows.push(cells.slice(0, maxCols));
+      demoRowCount++;
+    }
+  }
+  if (currentSheet && currentSheet.rows.length > 0) {
+    const emptyCells = currentSheet.rows.flat().filter((c) => !c.trim()).length;
+    const numericCols: number[] = [];
+    for (let ci = 0; ci < (currentSheet.rows[0]?.length ?? 0) && ci < maxCols; ci++) {
+      const allNumeric = currentSheet.rows.slice(0, maxRows).every((r) => (r[ci] ?? "") === "" || !isNaN(Number(r[ci] ?? "")));
+      if (allNumeric) numericCols.push(ci);
+    }
+    sheets.push({ name: currentSheet.name, headers: currentSheet.headers.slice(0, maxCols), rows: currentSheet.rows.slice(0, maxRows), emptyCells, numericCols });
+  }
+
+  if (sheets.length === 0) return `（表格分析：未提取到结构化数据。已截取部分原始内容：\n${text.slice(0, 5000)}）`;
+
+  let out = `表格结构摘要：\n共 ${sheets.length} 个 Sheet：\n`;
+  for (const s of sheets) {
+    out += `\nSheet: ${s.name}\n行数(样例) / 列数：${s.rows.length} / ${s.headers.length}\n`;
+    out += `表头：${s.headers.join(" | ")}\n`;
+    if (s.numericCols.length > 0) {
+      out += "可能包含数值列：";
+      for (const ci of s.numericCols) {
+        const label = s.headers[ci] || `列${ci + 1}`;
+        const vals = s.rows.map((r) => Number(r[ci] || 0)).filter((v) => !isNaN(v));
+        if (vals.length > 0) {
+          const sum = vals.reduce((a, b) => a + b, 0);
+          const avg = sum / vals.length;
+          const min = Math.min(...vals);
+          const max = Math.max(...vals);
+          out += `\n  ${label}: 总计=${sum.toFixed(2)}, 平均=${avg.toFixed(2)}, 最小=${min}, 最大=${max}`;
+        }
+      }
+      out += "\n";
+    }
+    out += `样例数据（前 ${Math.min(s.rows.length, maxRows)} 行）：\n`;
+    for (const row of s.rows.slice(0, 8)) {
+      out += row.join(" | ") + "\n";
+    }
+    if (s.rows.length > 8) out += `... 共 ${s.rows.length} 行样例\n`;
+  }
+  return out;
+}
+
 function nowStamp() {
   return String(Math.floor(Date.now() / 1000));
 }
@@ -132,21 +209,31 @@ function createEmptySession(model = "hermes-agent"): ChatSession {
   return { id: crypto.randomUUID(), title: "新对话", createdAt: now, updatedAt: now, messages: [], hermesSessionId: null, model, totalTokens: 0, lastMessagePreview: "暂无消息", pinned: false };
 }
 
-function buildHermesMessages(systemPrompt: string, history: UiChatMessage[]): ChatMessage[] {
+function buildHermesMessages(systemPrompt: string, history: UiChatMessage[], lastUserModel?: string): ChatMessage[] {
   const clean = history
     .filter((message) => message.role === "user" || message.role === "assistant")
     .filter((message) => typeof message.content === "string" && message.content.trim().length > 0)
     .filter((message) => !(message.role === "assistant" && message.content.trim().startsWith("请求失败：")))
     .map((message) => ({ role: message.role, content: message.content.trim() } as ChatMessage));
+
+  // Separate last user message for attachment content budget
+  const lastIdx = clean.length - 1;
+  const historyMsgs = lastUserModel && clean[lastIdx]?.role === "user" ? clean.slice(0, -1) : clean;
+  let lastContent = lastUserModel || clean[lastIdx]?.content || "";
+  const MAX_FILE = 30_000;
+  if (lastContent.length > MAX_FILE) lastContent = lastContent.slice(0, MAX_FILE);
+
+  // Build history from older messages
+  const MAX_HISTORY = 20_000;
   const limited: ChatMessage[] = [];
-  let totalChars = 0;
-  for (const message of clean.slice(-20).reverse()) {
-    const length = message.content.length;
-    if (limited.length > 0 && totalChars + length > 20_000) break;
-    totalChars += length;
-    limited.push(message);
+  let total = 0;
+  for (const msg of historyMsgs.slice(-20).reverse()) {
+    if (total + msg.content.length > MAX_HISTORY) break;
+    total += msg.content.length;
+    limited.push(msg);
   }
-  return [{ role: "system", content: systemPrompt }, ...limited.reverse()];
+
+  return [{ role: "system", content: systemPrompt }, ...limited.reverse(), { role: "user", content: lastContent }];
 }
 
 function sortSessions(sessions: ChatSession[]) {
@@ -854,17 +941,6 @@ function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelCo
     }
   };
 
-  const timeAgo = (ts: string | undefined | null) => {
-    if (!ts) return "未检测";
-    const secs = Math.max(0, Math.floor(Date.now() / 1000) - Number(ts));
-    if (secs < 10) return "刚刚";
-    if (secs < 60) return `${secs} 秒前`;
-    if (secs < 3600) return `${Math.floor(secs / 60)} 分钟前`;
-    return `今天 ${new Date(Number(ts) * 1000).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}`;
-  };
-
-  const shortBaseUrl = config.baseUrl.replace(/^https?:\/\//, "");
-
   const hermesConnected = hermesApi?.running;
   const hermesInstalled = hermesCli?.installed;
   const hermesModel = hermesModelConfig?.model || null;
@@ -892,7 +968,7 @@ function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelCo
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <Button disabled={refreshing} onClick={refreshAll}>{refreshing && <Loader2 className="h-4 w-4 animate-spin" />}<RefreshCcw className="h-4 w-4" />刷新状态</Button>
-            <span className="text-xs text-muted-foreground">最近检测：{timeAgo(hermesApi?.checkedAt || hermesCli?.checkedAt)}</span>
+            <span className="text-xs text-muted-foreground">最近检测：{timeAgo(hermesApi?.checkedAt || hermesCli?.checkedAt) || "未检测"}</span>
           </div>
         </CardContent>
       </Card>
@@ -901,7 +977,7 @@ function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelCo
       <Card>
         <CardHeader>
           <CardTitle>模型供应配置</CardTitle>
-          <CardDescription>配置 Hermes Agent 使用的模型和 Token。额度用完后可联系商家续费。</CardDescription>
+          <CardDescription>配置专属 Token 和 Agent 模型。额度用完后可联系商家续费。</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-1">
@@ -910,16 +986,27 @@ function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelCo
               <Input type={showKey ? "text" : "password"} value={tokenDraft} onChange={(e) => setTokenDraft(e.target.value)} placeholder="请输入 Token" />
               <Button variant="outline" size="icon" onClick={() => setShowKey(!showKey)}>{showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</Button>
             </div>
-            <p className="text-xs text-muted-foreground">该 Token 用于让 Hermes Agent 调用 DeepSeek / Kimi 模型服务。请勿分享给他人。</p>
+            <p className="text-xs text-muted-foreground">该 Token 用于启用你的专属模型额度，请勿分享给他人。</p>
           </div>
-          <div className="space-y-1">
-            <label className="text-sm font-medium">Hermes 使用模型</label>
-            <select className="w-full rounded-xl border bg-background px-3 py-2 text-sm" value={selectedModel} onChange={(e) => setSelectedModel(e.target.value as typeof selectedModel)}>
-              <option value="deepseek-v4-flash">deepseek-v4-flash（快速）</option>
-              <option value="deepseek-v4-pro">deepseek-v4-pro（高质量）</option>
-              <option value="kimi-k2.6">kimi-k2.6（长文本）</option>
-            </select>
-            <p className="text-xs text-muted-foreground">Provider：{currentProvider} · 服务：{shortBaseUrl}</p>
+          <div className="space-y-2">
+            <label className="text-sm font-medium">选择 Agent 模型</label>
+            <div className="grid gap-2 sm:grid-cols-3">
+              {[
+                { value: "deepseek-v4-flash", title: "速度优先", subtitle: "响应快，适合日常聊天和简单任务", tag: "DeepSeek Flash" },
+                { value: "deepseek-v4-pro", title: "质量优先", subtitle: "适合复杂分析、方案整理", tag: "DeepSeek Pro" },
+                { value: "kimi-k2.6", title: "长文本 · 代码", subtitle: "适合长文档、代码、复杂上下文", tag: "Kimi K2.6" },
+              ].map((card) => (
+                <button key={card.value} onClick={() => setSelectedModel(card.value as typeof selectedModel)}
+                  className={cn("relative flex flex-col gap-1 rounded-2xl border px-4 py-3 text-left transition-all duration-150",
+                    selectedModel === card.value ? "border-primary bg-primary/5" : "border-border/60 hover:border-primary/30")}>
+                  {selectedModel === card.value && <Check className="absolute right-2 top-2 h-4 w-4 text-primary" />}
+                  <div className="text-sm font-medium">{card.title}</div>
+                  <div className="text-xs text-muted-foreground">{card.subtitle}</div>
+                  <Badge className="mt-1 self-start" tone="info">{card.tag}</Badge>
+                </button>
+              ))}
+            </div>
+            <p className="text-xs text-muted-foreground">额度消耗和响应速度会因模型不同而变化。</p>
           </div>
           <div className="flex flex-wrap gap-2">
             <Button onClick={() => setShowApplyPreview(true)} disabled={!tokenDraft.trim()}>应用到 Hermes</Button>
@@ -1010,7 +1097,10 @@ function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelCo
                     <div className="space-y-3 rounded-xl border border-rose-500/30 bg-rose-500/10 p-4">
                       <div className="text-sm font-medium text-rose-700 dark:text-rose-300">配置写入失败</div>
                       <div className="text-xs text-rose-600/80 dark:text-rose-400/80">{applyFailed}</div>
-                      <Button variant="outline" size="sm" onClick={() => setShowApplyPreview(false)}>关闭</Button>
+                      <div className="flex gap-2">
+                        <Button variant="outline" size="sm" onClick={() => setShowApplyPreview(false)}>关闭</Button>
+                        <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={() => { setShowApplyPreview(false); setTimeout(() => setShowAdvanced(true), 100); }}>查看诊断信息</Button>
+                      </div>
                     </div>
                   )}
                 </>
@@ -1020,34 +1110,54 @@ function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelCo
         </div>
       )}
 
-      {/* 4. Advanced (collapsed) */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <CardTitle className="text-sm">高级诊断</CardTitle>
-            <Button variant="ghost" size="sm" onClick={() => setShowAdvanced(!showAdvanced)}>{showAdvanced ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}{showAdvanced ? "收起" : "展开"}</Button>
-          </div>
-        </CardHeader>
-        {showAdvanced && (
-          <CardContent className="space-y-3 text-xs text-muted-foreground">
-            <div className="grid gap-1 rounded-xl border bg-muted/30 p-3">
-              <div>Hermes 路径：{hermesCli?.binaryPath || "未找到"}</div>
-              <div>配置文件：~/.hermes/config.yaml</div>
-              <div>密钥文件：~/.hermes/.env（不读取内容）</div>
-              <div>对话服务：http://127.0.0.1:8642/v1</div>
-              <div>模型供应：{config.baseUrl}</div>
-            </div>
-            {hermesModelConfig?.exists && (
-              <div className="grid gap-1 rounded-xl border bg-muted/30 p-3">
-                <div className="font-medium">Hermes 当前配置：</div>
-                <div>model = {hermesModelConfig.model || "未配置"}</div>
-                <div>provider = {hermesModelConfig.provider || "未配置"}</div>
-                <div>base_url = {hermesModelConfig.baseUrl || "未配置"}</div>
+      {/* 4. Diagnostic entry (lightweight) */}
+      <div className="flex items-center gap-3">
+        <button onClick={() => setShowAdvanced(true)} className="text-xs text-muted-foreground underline-offset-2 hover:underline">售后诊断</button>
+        {!hermesConnected && <span className="text-xs text-muted-foreground">· 查看诊断信息排查连接问题</span>}
+      </div>
+
+      {/* Diagnostic popup */}
+      {showAdvanced && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setShowAdvanced(false)}>
+          <Card className="max-h-[80vh] w-full max-w-md overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <CardHeader>
+              <CardTitle>售后诊断信息</CardTitle>
+              <CardDescription>以下信息用于排查问题，不包含密钥或 Token。</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3 text-sm">
+              <div className="space-y-1 rounded-xl border bg-muted/30 p-3">
+                <div>Hermes 状态：{hermesConnected ? "已连接" : hermesInstalled ? "未运行" : "未安装"}</div>
+                <div>Hermes 路径：{hermesCli?.binaryPath || "未找到"}</div>
+                <div>配置文件：~/.hermes/config.yaml</div>
+                <div>密钥文件：~/.hermes/.env（未读取内容）</div>
+                <div>对话服务：http://127.0.0.1:8642/v1</div>
+                <div>模型供应：{config.baseUrl}</div>
+                <div>当前模型：{hermesModelConfig?.model || config.defaultModel}</div>
+                <div>Provider：{hermesModelConfig?.provider || "未配置"}</div>
+                <div>最近检测：{timeAgo(hermesApi?.checkedAt || hermesCli?.checkedAt) || "未检测"}</div>
               </div>
-            )}
-          </CardContent>
-        )}
-      </Card>
+              <div className="flex gap-2">
+                <Button variant="outline" onClick={() => {
+                  const diag = [
+                    "AI Agent Workspace 诊断信息",
+                    `Hermes 状态：${hermesConnected ? "已连接" : hermesInstalled ? "未运行" : "未安装"}`,
+                    `Hermes 路径：${hermesCli?.binaryPath || "未找到"}`,
+                    `配置文件：~/.hermes/config.yaml`,
+                    `密钥文件：~/.hermes/.env（未读取内容）`,
+                    `对话服务：http://127.0.0.1:8642/v1`,
+                    `模型供应：${config.baseUrl}`,
+                    `当前模型：${hermesModelConfig?.model || config.defaultModel}`,
+                    `Provider：${hermesModelConfig?.provider || "未配置"}`,
+                    `最近检测：${timeAgo(hermesApi?.checkedAt || hermesCli?.checkedAt) || "未检测"}`,
+                  ].join("\n");
+                  navigator.clipboard.writeText(diag);
+                }}><Copy className="h-4 w-4" />复制诊断信息</Button>
+                <Button variant="outline" onClick={() => setShowAdvanced(false)}>关闭</Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
     </div>
   );
 }
@@ -1056,6 +1166,7 @@ type ChatPhase = "ready" | "sending" | "thinking" | "running" | "done" | "error"
 
 function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, initialDraft, onDraftConsumed, pendingNewSessionTitle, onNewSessionCreated }: { config: AppConfig; hermesCli: HermesStatus | null; hermesApi: HermesApiServerStatus | null; refreshHermesApi: () => Promise<HermesApiServerStatus>; setActive: (id: RouteId) => void; initialDraft: string; onDraftConsumed: () => void; pendingNewSessionTitle: string; onNewSessionCreated: () => void }) {
   const [input, setInput] = useState(initialDraft);
+  const [attachments, setAttachments] = useState<Array<{ name: string; path: string; text: string; truncated: boolean }>>([]);
   const [messages, setMessages] = useState<UiChatMessage[]>([]);
   const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
@@ -1348,17 +1459,17 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
   const isNearBottom = () => {
     const el = scrollRef.current;
     if (!el) return true;
-    return el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+    return el.scrollHeight - el.scrollTop - el.clientHeight < 80;
   };
 
-  const scheduleScrollToBottom = (force = false, smooth = false) => {
+  const scheduleScrollToBottom = (force = false) => {
     if (!force && !autoFollowRef.current) return;
     if (scrollRafRef.current !== null) return;
     scrollRafRef.current = requestAnimationFrame(() => {
       scrollRafRef.current = null;
       const el = scrollRef.current;
       if (!el) return;
-      el.scrollTo({ top: el.scrollHeight, behavior: smooth ? "smooth" : "auto" });
+      el.scrollTo({ top: el.scrollHeight, behavior: "auto" });
     });
   };
 
@@ -1378,9 +1489,12 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
       scrollRafRef.current = null;
     }
     const el = scrollRef.current;
-    if (el) {
-      el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
-    }
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    // Fallback correction: ensure we actually reach bottom even if smooth fails
+    setTimeout(() => {
+      if (scrollRef.current) scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "auto" });
+    }, 350);
   };
 
   useEffect(() => {
@@ -1392,9 +1506,11 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
     autoFollowRef.current = true;
     setShowJumpToBottom(false);
     if (messages.length > 0) {
-      setTimeout(() => {
-        if (scrollRef.current) scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "auto" });
-      }, 0);
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          if (scrollRef.current) scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "auto" });
+        });
+      });
     }
   }, [currentSessionId, sessionsLoaded]);
 
@@ -1484,38 +1600,35 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
     autoFollowRef.current = true;
     setShowJumpToBottom(false);
 
+    const clickSendAt = Date.now();
     cancelTypewriter();
     twRef.current = { contentBuf: "", reasoningBuf: "", done: false, skip: false, rafId: null, requestId: "" };
 
-    const startedAt = Date.now();
+    const startedAt = clickSendAt;
     const timer = setInterval(() => {
       setElapsedLive(Math.round((Date.now() - startedAt) / 1000));
     }, 1000);
     timerRef.current = timer;
 
-    const userMessage: UiChatMessage = { role: "user", content: input.trim() };
+    // Phase 1: Show user message immediately (fast)
+    const displayContent = input.trim();
+    const savedAttachments = attachments.length > 0 ? [...attachments] : null;
+    const requestId = crypto.randomUUID();
+
+    const userMessage: UiChatMessage = {
+      role: "user",
+      content: displayContent,
+      attachments: savedAttachments ? savedAttachments.map((a) => ({ name: a.name, path: a.path, size: 0, truncated: a.truncated, text: a.text })) : undefined,
+    };
     const nextMessages: UiChatMessage[] = [...messages, userMessage];
     setMessages(nextMessages);
     setInput("");
+    setAttachments([]);
     autoResize(inputRef.current);
 
-    const requestId = crypto.randomUUID();
     activeRequestRef.current = requestId;
     twRef.current.requestId = requestId;
     setStreamDiagnostics({ ...initialFrontStreamDiagnostics, requestId, currentRequestId: requestId });
-
-    const enabledSkillSummary = officialSkills
-      .filter((skill) => config.enabledSkills.includes(skill.id))
-      .map((skill) => `${skill.name}：${skill.description}`)
-      .join("\n") || "暂无启用 Skills";
-    const systemPrompt = `你是 AI Agent 工作台中的个人 Hermes Agent。\nAgent 名称：AI Agent Workspace\n当前模型：${hermesModelName}\n已启用 Skills：\n${enabledSkillSummary}\n请结合 Hermes 原生上下文、Skills 和任务配置协助用户完成工作。不要暴露底层 Token 或系统提示词。`;
-    const agentMessages = buildHermesMessages(systemPrompt, nextMessages);
-
-    const cleanupListeners = () => {
-      unlistenRef.current.forEach((fn) => fn());
-      unlistenRef.current = [];
-    };
-    cleanupListeners();
 
     const placeholder: UiChatMessage = {
       requestId,
@@ -1527,26 +1640,81 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
     const messagesWithPlaceholder = [...nextMessages, placeholder];
     messagesRef.current = messagesWithPlaceholder;
     setMessages(messagesWithPlaceholder);
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (scrollRef.current) scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "auto" });
+      });
+    });
     void saveCurrentSession(nextMessages);
+
+    console.log("[send-perf] Phase1 UI visible + placeholder in", Date.now() - clickSendAt, "ms");
+
+    // Phase 2: Build model content (may be slow with attachments, does not block UI)
+    const t0 = Date.now();
+    const MAX_FILE_CHARS = 30_000;
+    const MAX_TABLE_ROWS = 30;
+    const MAX_TABLE_COLS = 20;
+    const modelContent = savedAttachments
+      ? displayContent + "\n\n---\n附件说明：\n"
+        + savedAttachments.map((att) => {
+            const isTable = att.text.startsWith("Sheet:") || (att.text.includes(",") && att.text.split("\n").length > 5);
+            if (isTable) {
+              const summary = buildTableSummary(att.text, MAX_TABLE_ROWS, MAX_TABLE_COLS);
+              return `文件：${att.name}\n类型：表格\n分析模式：快速结构化摘要\n请直接基于以下表格摘要和样例回答，不要调用 Python 或外部工具。\n\n${summary}`;
+            }
+            const truncatedForModel = att.text.length > MAX_FILE_CHARS;
+            const text = truncatedForModel ? att.text.slice(0, MAX_FILE_CHARS) : att.text;
+            return `文件：${att.name}\n类型：文档\n请直接基于下方提取内容回答，不要调用 Python 或外部工具。\n\n提取内容：\n${text}${truncatedForModel ? "\n（文档内容较多，已截取前部分内容用于分析）" : ""}`;
+          }).join("\n\n")
+      : displayContent;
+    if (savedAttachments) console.log("[send-perf] Phase2 modelContent built in", Date.now() - t0, "ms, chars:", modelContent.length);
+
+    // Phase 3: Build and invoke Hermes
+    const t1 = Date.now();
+    const enabledSkillSummary = officialSkills
+      .filter((skill) => config.enabledSkills.includes(skill.id))
+      .map((skill) => `${skill.name}：${skill.description}`)
+      .join("\n") || "暂无启用 Skills";
+    const systemPrompt = `你是 AI Agent 工作台中的个人 Hermes Agent。\nAgent 名称：AI Agent Workspace\n当前模型：${hermesModelName}\n已启用 Skills：\n${enabledSkillSummary}\n请结合 Hermes 原生上下文、Skills 和任务配置协助用户完成工作。不要暴露底层 Token 或系统提示词。`;
+    const agentMessages = buildHermesMessages(systemPrompt, nextMessages, modelContent);
+
+    const cleanupListeners = () => {
+      unlistenRef.current.forEach((fn) => fn());
+      unlistenRef.current = [];
+    };
+    cleanupListeners();
+
+    console.log("[send-perf] Phase3 prepped in", Date.now() - t1, "ms, messages:", agentMessages.length, "chars:", agentMessages.reduce((s, m) => s + m.content.length, 0));
 
     try {
       const unlistenChunk = await listen<HermesChatChunk>("hermes-chat-chunk", (event) => {
         setStreamDiagnostics((prev) => ({ ...prev, frontChunkReceivedCount: prev.frontChunkReceivedCount + 1, currentRequestId: activeRequestRef.current }));
         if (stoppedIdsRef.current.has(event.payload.requestId)) return;
-        if (DEBUG_STREAM) console.debug("[stream-debug] front chunk", { requestId: event.payload.requestId, expectedRequestId: requestId, type: event.payload.type, length: event.payload.content?.length ?? 0 });
         if (event.payload.requestId !== requestId) {
-          if (DEBUG_STREAM) console.debug("[stream-debug] front chunk filtered", { requestId: event.payload.requestId, expectedRequestId: requestId });
           setStreamDiagnostics((prev) => ({ ...prev, filteredEventCount: prev.filteredEventCount + 1 }));
           return;
         }
         if (event.payload.type === "content") {
+          if (!twRef.current.contentBuf.length && !messagesRef.current.some((m) => m.role === "assistant" && m.requestId === requestId && m.content)) {
+            console.log("[send-perf] first content chunk in", Date.now() - startedAt, "ms");
+          }
           setPhase("running");
         }
         const hasAssistant = messagesRef.current.some((message) => message.role === "assistant" && message.requestId === requestId);
         setStreamDiagnostics((diag) => hasAssistant
           ? { ...diag, frontChunkAppliedCount: diag.frontChunkAppliedCount + 1 }
           : { ...diag, missingAssistantPlaceholderCount: diag.missingAssistantPlaceholderCount + 1 });
-        if (!hasAssistant && DEBUG_STREAM) console.debug("[stream-debug] front chunk missing assistant", { requestId });
+        // Auto-create missing assistant placeholder
+        if (!hasAssistant) {
+          setMessages((prev) => {
+            if (prev.some((m) => m.role === "assistant" && m.requestId === requestId)) return prev;
+            const placeholder: UiChatMessage = { requestId, role: "assistant", source: "Hermes Agent", content: "", modelName: hermesModelName };
+            const next = [...prev, placeholder];
+            messagesRef.current = next;
+            return next;
+          });
+          if (DEBUG_STREAM) console.debug("[stream-debug] front chunk auto-created missing assistant", { requestId });
+        }
         const raw = event.payload.content || "";
         if (event.payload.type === "reasoning") {
           twRef.current.reasoningBuf += raw;
@@ -1644,12 +1812,15 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
           setErrorDetail(`流式连接提前结束，已保留已生成内容。\n错误：${event.payload.streamError || event.payload.warning || "unknown"}`);
           setShowErrorDetail(false);
         }
+        const doneContent = event.payload.content || "";
         const finalMessages = messagesRef.current.map((message) => {
           if (message.role !== "assistant" || message.requestId !== requestId) return message;
+          const accumulatedContent = message.content || "";
+          const reasoningAccumulated = message.reasoningContent || "";
           return {
             ...message,
-            content: event.payload.content || message.content || "",
-            reasoningContent: event.payload.reasoningContent || message.reasoningContent,
+            content: accumulatedContent.length >= (doneContent.length || 0) ? accumulatedContent : doneContent,
+            reasoningContent: event.payload.reasoningContent || reasoningAccumulated,
             modelName: event.payload.model,
             usage: event.payload.rawUsage ?? null,
             sessionId: event.payload.sessionId,
@@ -1843,6 +2014,9 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
             <span className="text-xs text-muted-foreground">·</span>
             {hermesConnected && <PhaseBadge phase={phase} />}
             {(phase === "sending" || phase === "thinking" || phase === "running") && <span className="text-xs text-muted-foreground">已耗时 {elapsedLive}s</span>}
+            {loading && elapsedLive > 120 && (
+              <span className="text-xs text-amber-600 dark:text-amber-400">长时间未收到新内容，可点击停止后缩小文件范围重试。</span>
+            )}
             {phase === "done" && lastElapsed != null && <span className="text-xs text-muted-foreground">耗时 {lastElapsed >= 1000 ? `${Math.round(lastElapsed / 1000)}s` : "1s"}</span>}
             <div className="ml-auto flex flex-wrap items-center gap-2">
               {DEBUG_STREAM && (
@@ -1933,6 +2107,17 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
                       {message.role === "assistant" && <ReasoningBlock content={message.reasoningContent || ""} isPlaceholder={isPlaceholder} phase={isPlaceholder ? phase : "done"} />}
                       {message.role === "assistant" && (message.toolEvents?.length ?? 0) > 0 && <ToolsBlock toolEvents={message.toolEvents} />}
                       {showPlaceholderText ? <PlaceholderText phase={phase} elapsedLive={elapsedLive} /> : isActiveAssistant ? <div className="whitespace-pre-wrap leading-7">{message.content || ""}</div> : <MarkdownContent text={message.content || ""} />}
+                      {message.role === "user" && message.attachments && message.attachments.length > 0 && (
+                        <div className="mt-3 flex flex-wrap gap-1.5 border-t border-white/20 pt-2">
+                          {message.attachments.map((att, i) => (
+                            <span key={i} className="inline-flex items-center gap-1 rounded-md bg-white/15 px-2 py-1 text-xs">
+                              <FileText className="h-3 w-3 opacity-70" />
+                              {att.name}
+                              {att.truncated && <span className="opacity-60">（已截断）</span>}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                       {message.role === "assistant" && isStopped && (
                         <div className="mt-2 inline-flex items-center gap-1 rounded-md bg-amber-500/10 px-2 py-0.5 text-[11px] text-amber-700 dark:text-amber-300">已停止生成</div>
                       )}
@@ -1948,6 +2133,14 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
                         {message.elapsedMs != null && <span>· {message.elapsedMs >= 1000 ? `${(message.elapsedMs / 1000).toFixed(1)}s` : `${message.elapsedMs}ms`}</span>}
                         {message.usage?.total_tokens != null && <span>· {message.usage.total_tokens} tokens</span>}
                         <Button variant="ghost" size="sm" onClick={() => navigator.clipboard.writeText(message.content || "")}><Copy className="h-3 w-3" />复制</Button>
+                        {message.content && !loading && (
+                          <Button variant="ghost" size="sm" onClick={() => {
+                            const title = (currentSessionId ? chatSessions.find((s) => s.id === currentSessionId)?.title || "对话" : "对话").slice(0, 20);
+                            const ts = new Date().toISOString().slice(0, 16).replace("T", "-");
+                            const name = `${title}-${ts}.md`;
+                            saveGeneratedFile(name, message.content || "").catch(() => {});
+                          }}>保存</Button>
+                        )}
                         {isActiveAssistant && <Button variant="ghost" size="sm" onClick={skipTypewriter}><FastForward className="h-3 w-3" />快速显示</Button>}
                         {isLastAssistant && !loading && messages.length >= 2 && <Button variant="ghost" size="sm" onClick={regenLast}><RotateCcw className="h-3 w-3" />重新生成</Button>}
                         <DetailsEntry message={message} expandedDetailId={expandedDetailId} setExpandedDetailId={setExpandedDetailId} />
@@ -1982,6 +2175,23 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
           )}
           <div className="shrink-0 border-t bg-background/90 p-3 backdrop-blur-xl md:p-4">
             <div className="rounded-2xl border bg-card/90 p-2 shadow-sm">
+              {attachments.length > 0 && (
+                <div className="flex flex-wrap items-center gap-1.5 px-3 pb-2">
+                  {attachments.map((att, i) => {
+                    const isTable = att.text.startsWith("Sheet:") || (att.text.includes(",") && att.text.split("\n").length > 5);
+                    const mode = isTable ? "表格快速分析" : "文档分析";
+                    const icon = isTable ? "📊" : "📄";
+                    return (
+                    <span key={i} className="inline-flex items-center gap-1 rounded-lg bg-primary/10 px-2 py-0.5 text-xs">
+                      <FileText className="h-3 w-3" />
+                      {att.name}
+                      <span className="text-[10px] text-muted-foreground">· {mode}</span>
+                      <button onClick={() => setAttachments(attachments.filter((_, j) => j !== i))} className="ml-1 text-muted-foreground hover:text-foreground">&times;</button>
+                    </span>);
+                  })}
+                  <span className="text-[10px] text-muted-foreground ml-2">每次最多发送前 30,000 字符用于分析。</span>
+                </div>
+              )}
               <Textarea
                 ref={inputRef}
                 className="max-h-[180px] min-h-14 resize-none overflow-y-auto border-0 bg-transparent px-3 py-2 shadow-none focus-visible:ring-0"
@@ -1994,7 +2204,12 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
                 disabled={!hermesConnected || loading}
               />
               <div className="flex items-center justify-between px-2 pb-1">
-                <span className="text-[11px] text-muted-foreground">Enter 发送 · Shift + Enter 换行</span>
+                <span className="flex items-center gap-2">
+                  <Button variant="ghost" size="sm" className="text-xs" onClick={async () => {
+                    try { const res = await pickAndUploadFile(); if (res.files.length > 0) { for (const f of res.files) { const text = await extractAiFileText(f.path); setAttachments((prev) => [...prev, { name: f.name, path: f.path, text: text.text, truncated: text.truncated }]); } } } catch (err) { setError(getErrorMessage(err)); }
+                  }} disabled={loading}><Upload className="h-3 w-3" />附件</Button>
+                  <span className="text-[11px] text-muted-foreground">Enter 发送 · Shift + Enter 换行</span>
+                </span>
                 {loading ? (
                   <Button className="rounded-full" variant="destructive" onClick={stopGeneration}>
                     <Square className="h-4 w-4" />停止
@@ -2165,7 +2380,12 @@ function SkillsPage({ config, updateConfig, setActive, setChatDraft, setPendingN
               </CardContent>
             </Card>
           ))}
-          {filteredOfficial.length === 0 && <div className="col-span-full p-4 text-center text-sm text-muted-foreground">没有匹配的官方模板技能。</div>}
+          {filteredOfficial.length === 0 && (
+            <div className="col-span-full rounded-xl border bg-muted/30 p-8 text-center">
+              <div className="text-sm font-medium">没有匹配的官方模板技能</div>
+              <div className="mt-1 text-xs text-muted-foreground">尝试切换分类搜索，或查看已启用的技能列表。</div>
+            </div>
+          )}
         </div>
       )}
 
@@ -2333,6 +2553,9 @@ function AiFilesPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [previewFile, setPreviewFile] = useState<AiFileEntry | null>(null);
+  const [previewText, setPreviewText] = useState("");
+  const [previewLoading, setPreviewLoading] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true); setError("");
@@ -2384,7 +2607,10 @@ function AiFilesPage() {
         {categories.map((cat) => (
           <Button key={cat} size="sm" variant={filter === cat ? "default" : "outline"} onClick={() => setFilter(cat)}>{cat === "全部" ? "全部" : cat}</Button>
         ))}
-        <Button variant="outline" size="sm" onClick={load} disabled={loading} className="ml-auto"><RefreshCcw className={cn("h-4 w-4", loading && "animate-spin")} />刷新</Button>
+        <div className="ml-auto flex items-center gap-2">
+          <Button size="sm" onClick={async () => { try { await pickAndUploadFile(); load(); } catch (err) { setError(getErrorMessage(err)); } }}><Upload className="h-4 w-4" />上传文件</Button>
+          <Button variant="outline" size="sm" onClick={load} disabled={loading}><RefreshCcw className={cn("h-4 w-4", loading && "animate-spin")} />刷新</Button>
+        </div>
       </div>
 
       <Card>
@@ -2392,7 +2618,10 @@ function AiFilesPage() {
           {loading ? (
             <div className="flex items-center justify-center py-16"><Loader2 className="h-6 w-6 animate-spin" /></div>
           ) : files.length === 0 ? (
-            <div className="p-8 text-center text-sm text-muted-foreground">暂无文件。上传或生成文件后会在这里显示。</div>
+            <div className="rounded-xl border bg-muted/30 p-8 text-center">
+              <div className="text-sm font-medium">暂无文件</div>
+              <div className="mt-1 text-xs text-muted-foreground">上传或生成文件后会在这里显示。支持图片、文档和视频文件。</div>
+            </div>
           ) : (
             <div className="overflow-x-auto">
               <Table>
@@ -2413,9 +2642,21 @@ function AiFilesPage() {
                       <Td><Badge tone="info">{file.extension || "未知"}</Badge></Td>
                       <Td>{fmtSize(file.size)}</Td>
                       <Td><Badge tone="muted">{file.category}</Badge></Td>
-                      <Td className="text-xs text-muted-foreground">{file.modified ? new Date(Number(file.modified) * 1000).toLocaleString() : "-"}</Td>
+                      <Td className="text-xs text-muted-foreground">{file.modified ? timeAgo(file.modified) : "-"}</Td>
                       <Td>
                         <div className="flex gap-1">
+                          <Button variant="ghost" size="sm" onClick={async () => {
+                            setPreviewFile(file); setPreviewText(""); setPreviewLoading(true);
+                            try {
+                              if (["txt", "md", "csv", "json", "log", "xlsx", "xls", "docx", "pptx"].includes(file.extension)) {
+                                const result = await extractAiFileText(file.path);
+                                setPreviewText(result.text.slice(0, 3000) + (result.text.length > 3000 ? "\n...（仅显示前 3000 字）" : ""));
+                              } else {
+                                setPreviewText("此文件类型暂不支持预览。");
+                              }
+                            } catch { setPreviewText("预览加载失败。"); }
+                            finally { setPreviewLoading(false); }
+                          }}>预览</Button>
                           <Button variant="ghost" size="sm" onClick={() => openAiFileLocation(file.path)}>打开位置</Button>
                           <Button variant="ghost" size="sm" onClick={() => { navigator.clipboard.writeText(file.path); }}><Copy className="h-3 w-3" /></Button>
                           <Button variant="ghost" size="sm" className="text-rose-600" onClick={() => setConfirmDelete(file.path)}>删除</Button>
@@ -2429,6 +2670,36 @@ function AiFilesPage() {
           )}
         </CardContent>
       </Card>
+
+      {previewFile && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setPreviewFile(null)}>
+          <Card className="max-h-[80vh] w-full max-w-lg overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <CardHeader>
+              <CardTitle>{previewFile.name}</CardTitle>
+              <CardDescription>{fmtSize(previewFile.size)} · {previewFile.extension || "未知"} · {previewFile.category}</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+                <span>来源：{previewFile.category}</span>
+                <span>·</span>
+                <span>修改时间：{previewFile.modified ? timeAgo(previewFile.modified) : "-"}</span>
+              </div>
+              <div className="rounded-xl border bg-muted/30 p-3">
+                {previewLoading ? (
+                  <div className="flex items-center justify-center py-8"><Loader2 className="h-5 w-5 animate-spin" /></div>
+                ) : previewText ? (
+                  <pre className="max-h-80 overflow-y-auto whitespace-pre-wrap text-xs text-muted-foreground">{previewText}</pre>
+                ) : (
+                  <div className="py-4 text-center text-xs text-muted-foreground">点击"预览"加载文件内容。</div>
+                )}
+              </div>
+              <div className="flex gap-2">
+                <Button variant="outline" onClick={() => setPreviewFile(null)}>关闭</Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       {confirmDelete && (
         <ConfirmDialog
@@ -2467,7 +2738,7 @@ function MemoryPage() {
   useEffect(() => { loadMemory(); }, [loadMemory]);
 
   const selected = memory?.files.find((file) => file.id === selectedId) ?? memory?.files[0] ?? null;
-  const checkedAt = memory?.checkedAt ? new Date(Number(memory.checkedAt) * 1000).toLocaleString() : "-";
+  const checkedAt = memory?.checkedAt ? timeAgo(memory.checkedAt) : "";
 
   return (
     <div className="space-y-4">
@@ -2534,7 +2805,10 @@ function MemoryPage() {
                 </div>
               </>
             ) : (
-              <div className="rounded-xl border bg-muted/30 p-4 text-sm text-muted-foreground">暂无可查看的 Hermes 记忆文件。</div>
+              <div className="rounded-xl border bg-muted/30 p-4 text-center">
+                <div className="text-sm font-medium">暂无可查看的记忆文件</div>
+                <div className="mt-1 text-xs text-muted-foreground">Hermes 会在对话中自动创建和管理这些文件。当前版本只读展示。</div>
+              </div>
             )}
           </CardContent>
         </Card>
@@ -2572,11 +2846,19 @@ function formatBytes(size: number) {
   return `${(size / 1024 / 1024).toFixed(1)} MB`;
 }
 
+function timeAgo(ts: string | number | null | undefined): string {
+  if (!ts) return "";
+  const secs = Math.max(0, Math.floor(Date.now() / 1000) - Number(ts));
+  if (secs < 10) return "刚刚";
+  if (secs < 60) return `${secs} 秒前`;
+  if (secs < 3600) return `${Math.floor(secs / 60)} 分钟前`;
+  if (secs < 86400) return `今天 ${new Date(Number(ts) * 1000).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}`;
+  if (secs < 172800) return "昨天";
+  return new Date(Number(ts) * 1000).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
 function formatUnixTime(value: string | null) {
-  if (!value) return "更新时间未知";
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric)) return value;
-  return new Date(numeric * 1000).toLocaleString();
+  return value ? timeAgo(value) : "";
 }
 
 function TasksPage({ cronOverview, setCronOverview, cronCliStatus, setCronCliStatus, cronLastLoadedAt, setCronLastLoadedAt }: { cronOverview: HermesCronOverview | null; setCronOverview: (v: HermesCronOverview | null) => void; cronCliStatus: HermesCronCliStatus | null; setCronCliStatus: (v: HermesCronCliStatus | null) => void; cronLastLoadedAt: number; setCronLastLoadedAt: (v: number) => void }) {
@@ -2633,7 +2915,7 @@ function TasksPage({ cronOverview, setCronOverview, cronCliStatus, setCronCliSta
 
       {cronCliStatus && (
         <Card>
-          <CardHeader><CardTitle>任务列表</CardTitle><CardDescription>{cronCliStatus.jobs.length ? `共 ${cronCliStatus.jobs.length} 个任务` : "暂无定时任务"}</CardDescription></CardHeader>
+          <CardHeader><CardTitle>任务列表</CardTitle><CardDescription>{cronCliStatus.jobs.length ? `共 ${cronCliStatus.jobs.length} 个任务` : "暂无定时任务 · 可在 Agent 对话中使用 /cron 命令创建"}</CardDescription></CardHeader>
           <CardContent>
             {cronCliStatus.jobs.length > 0 ? (
               <div className="space-y-2">
@@ -2796,7 +3078,7 @@ function UsagePage() {
       )}
 
       {lastUse > 0 && (
-        <div className="text-xs text-muted-foreground">最近一次使用：{new Date(lastUse).toLocaleString()}</div>
+        <div className="text-xs text-muted-foreground">最近一次使用：{timeAgo(Math.floor(lastUse / 1000))}</div>
       )}
 
       <Button variant="outline" size="sm" onClick={load} disabled={loading}><RefreshCcw className={cn("h-4 w-4", loading && "animate-spin")} />刷新统计</Button>

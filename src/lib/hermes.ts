@@ -282,3 +282,15 @@ export async function deleteAiFile(path: string): Promise<{ ok: boolean }> {
 export async function openAiFileLocation(path: string): Promise<{ ok: boolean }> {
   return invoke("open_ai_file_location", { path });
 }
+
+export async function pickAndUploadFile(): Promise<{ files: Array<{ name: string; path: string; size: number }> }> {
+  return invoke("pick_and_upload_file");
+}
+
+export async function extractAiFileText(path: string): Promise<{ text: string; truncated: boolean; fileType: string; fileName: string; rowCount?: number; sheetCount?: number; slideCount?: number }> {
+  return invoke("extract_ai_file_text", { path });
+}
+
+export async function saveGeneratedFile(filename: string, content: string): Promise<{ ok: boolean; path: string }> {
+  return invoke("save_generated_file", { filename, content });
+}
