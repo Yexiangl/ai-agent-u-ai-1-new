@@ -27,6 +27,7 @@ import {
   Search,
   Send,
   Settings2,
+  Sparkles,
   Square,
   Sun,
   Timer,
@@ -70,6 +71,15 @@ interface ExtractCacheEntry {
   truncated: boolean;
   fileType: string;
   extractedAt: number;
+}
+
+interface PreparedAttachment {
+  name: string;
+  path: string;
+  size: number;
+  modified: string | null;
+  text: string;
+  truncated: boolean;
 }
 
 const attachmentExtractCache = new Map<string, ExtractCacheEntry>();
@@ -457,6 +467,7 @@ function App() {
   const [active, setActive] = useState<RouteId>("home");
   const [chatDraft, setChatDraft] = useState("");
   const [pendingNewSessionTitle, setPendingNewSessionTitle] = useState("");
+  const [pendingChatAttachment, setPendingChatAttachment] = useState<PreparedAttachment | null>(null);
   const [dark, setDark] = useState(false);
   const [config, setConfig] = useState<AppConfig>(DEFAULT_CONFIG);
   const [hermesCli, setHermesCli] = useState<HermesStatus | null>(null);
@@ -592,7 +603,7 @@ function App() {
           {!ready ? (
             <div className="flex h-[60vh] items-center justify-center text-muted-foreground"><Loader2 className="mr-2 h-4 w-4 animate-spin" /> 正在加载本地配置</div>
           ) : (
-            <Page active={active} setActive={setActive} chatDraft={chatDraft} setChatDraft={setChatDraft} pendingNewSessionTitle={pendingNewSessionTitle} setPendingNewSessionTitle={setPendingNewSessionTitle} config={config} updateConfig={updateConfig} hermesCli={hermesCli} hermesApi={hermesApi} hermesModelConfig={hermesModelConfig} setHermesModelConfig={setHermesModelConfig} refreshHermesCli={refreshHermesCli} refreshHermesApi={refreshHermesApi} cronOverview={cronOverview} setCronOverview={setCronOverview} cronCliStatus={cronCliStatus} setCronCliStatus={setCronCliStatus} cronLastLoadedAt={cronLastLoadedAt} setCronLastLoadedAt={setCronLastLoadedAt} />
+            <Page active={active} setActive={setActive} chatDraft={chatDraft} setChatDraft={setChatDraft} pendingNewSessionTitle={pendingNewSessionTitle} setPendingNewSessionTitle={setPendingNewSessionTitle} pendingChatAttachment={pendingChatAttachment} setPendingChatAttachment={setPendingChatAttachment} config={config} updateConfig={updateConfig} hermesCli={hermesCli} hermesApi={hermesApi} hermesModelConfig={hermesModelConfig} setHermesModelConfig={setHermesModelConfig} refreshHermesCli={refreshHermesCli} refreshHermesApi={refreshHermesApi} cronOverview={cronOverview} setCronOverview={setCronOverview} cronCliStatus={cronCliStatus} setCronCliStatus={setCronCliStatus} cronLastLoadedAt={cronLastLoadedAt} setCronLastLoadedAt={setCronLastLoadedAt} />
           )}
         </main>
       </div>
@@ -691,15 +702,15 @@ function Onboarding({ config, updateConfig, hermesCli, hermesApi }: { config: Ap
   );
 }
 
-function Page({ active, setActive, chatDraft, setChatDraft, pendingNewSessionTitle, setPendingNewSessionTitle, config, updateConfig, hermesCli, hermesApi, hermesModelConfig, setHermesModelConfig, refreshHermesCli, refreshHermesApi, cronOverview, setCronOverview, cronCliStatus, setCronCliStatus, cronLastLoadedAt, setCronLastLoadedAt }: { active: RouteId; setActive: (id: RouteId) => void; chatDraft: string; setChatDraft: (value: string) => void; pendingNewSessionTitle: string; setPendingNewSessionTitle: (v: string) => void; config: AppConfig; updateConfig: (next: AppConfig) => Promise<void>; hermesCli: HermesStatus | null; hermesApi: HermesApiServerStatus | null; hermesModelConfig: HermesModelConfig | null; setHermesModelConfig: (value: HermesModelConfig | null) => void; refreshHermesCli: () => Promise<HermesStatus>; refreshHermesApi: () => Promise<HermesApiServerStatus>; cronOverview: HermesCronOverview | null; setCronOverview: (v: HermesCronOverview | null) => void; cronCliStatus: HermesCronCliStatus | null; setCronCliStatus: (v: HermesCronCliStatus | null) => void; cronLastLoadedAt: number; setCronLastLoadedAt: (v: number) => void }) {
+function Page({ active, setActive, chatDraft, setChatDraft, pendingNewSessionTitle, setPendingNewSessionTitle, pendingChatAttachment, setPendingChatAttachment, config, updateConfig, hermesCli, hermesApi, hermesModelConfig, setHermesModelConfig, refreshHermesCli, refreshHermesApi, cronOverview, setCronOverview, cronCliStatus, setCronCliStatus, cronLastLoadedAt, setCronLastLoadedAt }: { active: RouteId; setActive: (id: RouteId) => void; chatDraft: string; setChatDraft: (value: string) => void; pendingNewSessionTitle: string; setPendingNewSessionTitle: (v: string) => void; pendingChatAttachment: PreparedAttachment | null; setPendingChatAttachment: (v: PreparedAttachment | null) => void; config: AppConfig; updateConfig: (next: AppConfig) => Promise<void>; hermesCli: HermesStatus | null; hermesApi: HermesApiServerStatus | null; hermesModelConfig: HermesModelConfig | null; setHermesModelConfig: (value: HermesModelConfig | null) => void; refreshHermesCli: () => Promise<HermesStatus>; refreshHermesApi: () => Promise<HermesApiServerStatus>; cronOverview: HermesCronOverview | null; setCronOverview: (v: HermesCronOverview | null) => void; cronCliStatus: HermesCronCliStatus | null; setCronCliStatus: (v: HermesCronCliStatus | null) => void; cronLastLoadedAt: number; setCronLastLoadedAt: (v: number) => void }) {
   if (active === "home") return <HomePage config={config} setActive={setActive} hermesCli={hermesCli} hermesApi={hermesApi} hermesModelConfig={hermesModelConfig} />;
-  if (active === "chat") return <ChatPage config={config} hermesCli={hermesCli} hermesApi={hermesApi} refreshHermesApi={refreshHermesApi} setActive={setActive} initialDraft={chatDraft} onDraftConsumed={() => setChatDraft("")} pendingNewSessionTitle={pendingNewSessionTitle} onNewSessionCreated={() => setPendingNewSessionTitle("")} />;
+  if (active === "chat") return <ChatPage config={config} hermesCli={hermesCli} hermesApi={hermesApi} refreshHermesApi={refreshHermesApi} setActive={setActive} initialDraft={chatDraft} onDraftConsumed={() => setChatDraft("")} pendingNewSessionTitle={pendingNewSessionTitle} onNewSessionCreated={() => setPendingNewSessionTitle("")} pendingAttachment={pendingChatAttachment} onAttachmentConsumed={() => setPendingChatAttachment(null)} />;
   if (active === "engines") return <EnginesPage config={config} updateConfig={updateConfig} hermesCli={hermesCli} hermesApi={hermesApi} hermesModelConfig={hermesModelConfig} setHermesModelConfig={setHermesModelConfig} refreshHermesCli={refreshHermesCli} refreshHermesApi={refreshHermesApi} setActive={setActive} />;
   if (active === "skills") return <SkillsPage config={config} updateConfig={updateConfig} setActive={setActive} setChatDraft={setChatDraft} setPendingNewSessionTitle={setPendingNewSessionTitle} />;
   if (active === "memory") return <MemoryPage />;
   if (active === "tasks") return <TasksPage cronOverview={cronOverview} setCronOverview={setCronOverview} cronCliStatus={cronCliStatus} setCronCliStatus={setCronCliStatus} cronLastLoadedAt={cronLastLoadedAt} setCronLastLoadedAt={setCronLastLoadedAt} />;
   if (active === "usage") return <UsagePage />;
-  if (active === "files") return <AiFilesPage />;
+  if (active === "files") return <AiFilesPage setActive={setActive} setPendingChatAttachment={setPendingChatAttachment} />;
   if (active === "tutorials") return <TutorialsPage config={config} />;
   return <AboutPage config={config} updateConfig={updateConfig} />;
 }
@@ -1177,7 +1188,7 @@ function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelCo
 
 type ChatPhase = "ready" | "sending" | "thinking" | "running" | "done" | "error";
 
-function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, initialDraft, onDraftConsumed, pendingNewSessionTitle, onNewSessionCreated }: { config: AppConfig; hermesCli: HermesStatus | null; hermesApi: HermesApiServerStatus | null; refreshHermesApi: () => Promise<HermesApiServerStatus>; setActive: (id: RouteId) => void; initialDraft: string; onDraftConsumed: () => void; pendingNewSessionTitle: string; onNewSessionCreated: () => void }) {
+function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, initialDraft, onDraftConsumed, pendingNewSessionTitle, onNewSessionCreated, pendingAttachment, onAttachmentConsumed }: { config: AppConfig; hermesCli: HermesStatus | null; hermesApi: HermesApiServerStatus | null; refreshHermesApi: () => Promise<HermesApiServerStatus>; setActive: (id: RouteId) => void; initialDraft: string; onDraftConsumed: () => void; pendingNewSessionTitle: string; onNewSessionCreated: () => void; pendingAttachment: PreparedAttachment | null; onAttachmentConsumed: () => void }) {
   const [input, setInput] = useState(initialDraft);
   const [attachments, setAttachments] = useState<Array<{ name: string; path: string; text: string; truncated: boolean }>>([]);
   const [attachBusy, setAttachBusy] = useState(false);
@@ -1452,6 +1463,52 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
     onNewSessionCreated();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingNewSessionTitle, sessionsLoaded]);
+
+  // Consume pending attachment from AI Files page
+  useEffect(() => {
+    if (!pendingAttachment || !sessionsLoaded) return;
+    const doAttach = async () => {
+      const cacheKey = buildAttachmentCacheKey(pendingAttachment);
+      let text = pendingAttachment.text;
+      let truncated = pendingAttachment.truncated;
+      if (!text) {
+        const cached = attachmentExtractCache.get(cacheKey);
+        if (cached) {
+          text = cached.text;
+          truncated = cached.truncated;
+        } else {
+          try {
+            setAttachBusy(true);
+            const extracted = await extractAiFileText(pendingAttachment.path);
+            text = extracted.text;
+            truncated = extracted.truncated;
+            attachmentExtractCache.set(cacheKey, { text, truncated, fileType: extracted.fileType, extractedAt: Date.now() });
+          } catch {
+            text = "";
+          } finally {
+            setAttachBusy(false);
+          }
+        }
+      }
+      if (!text) return;
+      // Ensure a current session exists
+      const sessions = chatSessionsRef.current;
+      if (sessions.length === 0) {
+        void createSession(`分析：${pendingAttachment.name}`);
+      }
+      const existing = attachments.find((a) => a.path === pendingAttachment.path);
+      if (!existing) {
+        setAttachments((prev) => [...prev, { name: pendingAttachment.name, path: pendingAttachment.path, text, truncated }]);
+      }
+      onAttachmentConsumed();
+      requestAnimationFrame(() => {
+        inputRef.current?.focus();
+        autoResize(inputRef.current);
+      });
+    };
+    void doAttach();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingAttachment, sessionsLoaded]);
 
   useEffect(() => {
     let cancelled = false;
@@ -2599,7 +2656,7 @@ function SkillsPage({ config, updateConfig, setActive, setChatDraft, setPendingN
   );
 }
 
-function AiFilesPage() {
+function AiFilesPage({ setActive, setPendingChatAttachment }: { setActive: (id: RouteId) => void; setPendingChatAttachment: (v: PreparedAttachment | null) => void }) {
   const [files, setFiles] = useState<AiFileEntry[]>([]);
   const [filter, setFilter] = useState("全部");
   const [loading, setLoading] = useState(true);
@@ -2697,6 +2754,14 @@ function AiFilesPage() {
                       <Td className="text-xs text-muted-foreground">{file.modified ? timeAgo(file.modified) : "-"}</Td>
                       <Td>
                         <div className="flex gap-1">
+                          {["txt", "md", "log", "json", "csv", "xlsx", "xls", "docx", "pptx"].includes(file.extension) && (
+                            <Button variant="ghost" size="sm" className="text-blue-600" onClick={async () => {
+                              setPendingChatAttachment({ name: file.name, path: file.path, size: file.size, modified: file.modified, text: "", truncated: false });
+                              setActive("chat");
+                            }}>
+                              <Sparkles className="h-3 w-3" />用于 Agent 分析
+                            </Button>
+                          )}
                           <Button variant="ghost" size="sm" onClick={async () => {
                             setPreviewFile(file); setPreviewText(""); setPreviewLoading(true);
                             try {
