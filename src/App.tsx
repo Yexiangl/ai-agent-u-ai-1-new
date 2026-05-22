@@ -65,6 +65,19 @@ type UiChatMessage = ChatMessage & {
   attachments?: Array<{ name: string; path: string; size: number; truncated: boolean; text: string }>;
 };
 
+interface ExtractCacheEntry {
+  text: string;
+  truncated: boolean;
+  fileType: string;
+  extractedAt: number;
+}
+
+const attachmentExtractCache = new Map<string, ExtractCacheEntry>();
+
+function buildAttachmentCacheKey(file: { path: string; size: number; modified?: string | null }): string {
+  return `${file.path}::${file.size}::${file.modified ?? ""}`;
+}
+
 const DEBUG_STREAM = false;
 
 type FrontStreamDiagnostics = {
@@ -1167,6 +1180,7 @@ type ChatPhase = "ready" | "sending" | "thinking" | "running" | "done" | "error"
 function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, initialDraft, onDraftConsumed, pendingNewSessionTitle, onNewSessionCreated }: { config: AppConfig; hermesCli: HermesStatus | null; hermesApi: HermesApiServerStatus | null; refreshHermesApi: () => Promise<HermesApiServerStatus>; setActive: (id: RouteId) => void; initialDraft: string; onDraftConsumed: () => void; pendingNewSessionTitle: string; onNewSessionCreated: () => void }) {
   const [input, setInput] = useState(initialDraft);
   const [attachments, setAttachments] = useState<Array<{ name: string; path: string; text: string; truncated: boolean }>>([]);
+  const [attachBusy, setAttachBusy] = useState(false);
   const [messages, setMessages] = useState<UiChatMessage[]>([]);
   const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
@@ -2223,9 +2237,29 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
               />
               <div className="flex items-center justify-between px-2 pb-1">
                 <span className="flex items-center gap-2">
-                  <Button variant="ghost" size="sm" className="text-xs" onClick={async () => {
-                    try { const res = await pickAndUploadFile(); if (res.files.length > 0) { for (const f of res.files) { const text = await extractAiFileText(f.path); setAttachments((prev) => [...prev, { name: f.name, path: f.path, text: text.text, truncated: text.truncated }]); } } } catch (err) { setError(getErrorMessage(err)); }
-                  }} disabled={loading}><Upload className="h-3 w-3" />附件</Button>
+                  <Button variant="ghost" size="sm" className="text-xs" disabled={loading || attachBusy} onClick={async () => {
+                    try {
+                      const res = await pickAndUploadFile();
+                      if (res.files.length > 0) {
+                        setAttachBusy(true);
+                        for (const f of res.files) {
+                          const cacheKey = buildAttachmentCacheKey(f);
+                          const cached = attachmentExtractCache.get(cacheKey);
+                          if (cached) {
+                            setAttachments((prev) => [...prev, { name: f.name, path: f.path, text: cached.text, truncated: cached.truncated }]);
+                          } else {
+                            const text = await extractAiFileText(f.path);
+                            attachmentExtractCache.set(cacheKey, { text: text.text, truncated: text.truncated, fileType: text.fileType, extractedAt: Date.now() });
+                            setAttachments((prev) => [...prev, { name: f.name, path: f.path, text: text.text, truncated: text.truncated }]);
+                          }
+                        }
+                        setAttachBusy(false);
+                      }
+                    } catch (err) { setAttachBusy(false); setError(getErrorMessage(err)); }
+                  }}>
+                    <Upload className="h-3 w-3" />
+                    {attachBusy ? "正在准备附件…" : "附件"}
+                  </Button>
                   <span className="text-[11px] text-muted-foreground">Enter 发送 · Shift + Enter 换行</span>
                 </span>
                 {loading ? (
@@ -2667,7 +2701,16 @@ function AiFilesPage() {
                             setPreviewFile(file); setPreviewText(""); setPreviewLoading(true);
                             try {
                               if (["txt", "md", "csv", "json", "log", "xlsx", "xls", "docx", "pptx"].includes(file.extension)) {
-                                const result = await extractAiFileText(file.path);
+                                const cacheKey = buildAttachmentCacheKey(file);
+                                const cached = attachmentExtractCache.get(cacheKey);
+                                let result: { text: string; truncated: boolean; fileType: string };
+                                if (cached) {
+                                  result = cached;
+                                } else {
+                                  const extracted = await extractAiFileText(file.path);
+                                  result = { text: extracted.text, truncated: extracted.truncated, fileType: extracted.fileType };
+                                  attachmentExtractCache.set(cacheKey, { text: result.text, truncated: result.truncated, fileType: result.fileType, extractedAt: Date.now() });
+                                }
                                 setPreviewText(result.text.slice(0, 3000) + (result.text.length > 3000 ? "\n...（仅显示前 3000 字）" : ""));
                               } else {
                                 setPreviewText("此文件类型暂不支持预览。");

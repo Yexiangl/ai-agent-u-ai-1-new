@@ -1712,10 +1712,15 @@ fn pick_and_upload_file(app: tauri::AppHandle) -> Result<serde_json::Value, Stri
         } else { dest };
         fs::copy(&path, &dest).map_err(|e| format!("复制失败：{}", e))?;
         let name = dest.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
+        let dest_modified = dest.metadata().ok()
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+            .map(|d| d.as_secs().to_string());
         results.push(serde_json::json!({
             "name": name,
             "path": dest.display().to_string(),
-            "size": meta.len()
+            "size": meta.len(),
+            "modified": dest_modified
         }));
     }
     Ok(serde_json::json!({ "files": results }))

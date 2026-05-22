@@ -283,7 +283,7 @@ export async function openAiFileLocation(path: string): Promise<{ ok: boolean }>
   return invoke("open_ai_file_location", { path });
 }
 
-export async function pickAndUploadFile(): Promise<{ files: Array<{ name: string; path: string; size: number }> }> {
+export async function pickAndUploadFile(): Promise<{ files: Array<{ name: string; path: string; size: number; modified: string | null }> }> {
   return invoke("pick_and_upload_file");
 }
 
