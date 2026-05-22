@@ -1209,16 +1209,33 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
   const [expandedDetailId, setExpandedDetailId] = useState<string | null>(null);
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
 
-  const persistSessions = async (next: ChatSession[]) => {
-    const sorted = sortSessions(next);
+  const latestSessionsRef = useRef<ChatSession[]>([]);
+  const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
+
+  const updateSessionsView = (nextUnsorted: ChatSession[]) => {
+    const sorted = sortSessions(nextUnsorted);
+    latestSessionsRef.current = sorted;
     chatSessionsRef.current = sorted;
     setChatSessions(sorted);
-    try {
-      await writeChatSessions(sorted);
-      setSessionError("");
-    } catch (err) {
-      setSessionError(`历史会话保存失败：${getErrorMessage(err)}`);
-    }
+  };
+
+  const enqueueWriteSessions = (): Promise<void> => {
+    const promise = saveQueueRef.current.then(async () => {
+      const toWrite = latestSessionsRef.current;
+      try {
+        await writeChatSessions(toWrite);
+        setSessionError("");
+      } catch (err) {
+        setSessionError(`历史会话保存失败：${getErrorMessage(err)}`);
+      }
+    });
+    saveQueueRef.current = promise.catch(() => {});
+    return promise;
+  };
+
+  const persistSessions = async (next: ChatSession[]) => {
+    updateSessionsView(next);
+    await enqueueWriteSessions();
   };
 
   const createSession = async (title?: string) => {
@@ -1232,9 +1249,8 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
       return;
     }
     const next = sortSessions([session, ...existing]);
-    chatSessionsRef.current = next;
+    updateSessionsView(next);
     currentSessionIdRef.current = session.id;
-    setChatSessions(next);
     setCurrentSessionId(session.id);
     currentSessionIdRef.current = session.id;
     setMessages([]);
@@ -1244,8 +1260,7 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
     setPhase("ready");
     setLastElapsed(null);
     setElapsedLive(0);
-    try { await writeChatSessions(next); setSessionError(""); }
-    catch (err) { setSessionError(`历史会话保存失败：${getErrorMessage(err)}`); }
+    void enqueueWriteSessions();
     requestAnimationFrame(() => inputRef.current?.focus());
   };
 
@@ -1267,9 +1282,9 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
     requestAnimationFrame(() => scheduleScrollToBottom(true));
   };
 
-  const saveCurrentSession = async (nextMessages: UiChatMessage[], extra?: Partial<ChatSession>) => {
+  const saveCurrentSession = (nextMessages: UiChatMessage[], extra?: Partial<ChatSession>) => {
     const currentId = currentSessionIdRef.current;
-    const sessions = chatSessionsRef.current;
+    const sessions = latestSessionsRef.current;
     const session = sessions.find((item) => item.id === currentId) ?? createEmptySession("hermes-agent");
     const updated = updateSessionFromMessages(session, nextMessages, extra);
     const next = sessions.some((item) => item.id === updated.id)
@@ -1277,7 +1292,8 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
       : [updated, ...sessions];
     currentSessionIdRef.current = updated.id;
     setCurrentSessionId(updated.id);
-    await persistSessions(next);
+    updateSessionsView(next);
+    void enqueueWriteSessions();
   };
 
   const saveErrorSummary = (requestId: string, summary: string) => {
@@ -1430,6 +1446,7 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
         if (cancelled) return;
         const sorted = sortSessions((stored || []) as ChatSession[]);
         const initial = sorted.length > 0 ? sorted : [createEmptySession("hermes-agent")];
+        latestSessionsRef.current = initial;
         chatSessionsRef.current = initial;
         currentSessionIdRef.current = initial[0]?.id ?? null;
         setChatSessions(initial);
@@ -1439,12 +1456,13 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
         messagesRef.current = initialMessages;
         setSessionsLoaded(true);
         sessionsLoadedRef.current = true;
-        if (sorted.length === 0) void persistSessions(initial);
+        if (sorted.length === 0) void enqueueWriteSessions();
       })
       .catch((err) => {
         console.warn("Failed to read chat sessions", err);
         if (cancelled) return;
         const session = createEmptySession("hermes-agent");
+        latestSessionsRef.current = [session];
         chatSessionsRef.current = [session];
         currentSessionIdRef.current = session.id;
         setChatSessions([session]);

@@ -68,24 +68,75 @@ fn clear_config(app: tauri::AppHandle) -> Result<(), String> {
 #[tauri::command]
 fn read_chat_sessions(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
     let path = chat_sessions_path(&app)?;
-    if !path.exists() {
-        return Ok(serde_json::json!([]));
+
+    // Try reading main file first
+    if path.exists() {
+        let content = fs::read_to_string(&path).map_err(|error| error.to_string())?;
+        if let Ok(value) = serde_json::from_str(&content) {
+            return Ok(value);
+        }
+        eprintln!("chat-sessions.json parse error, trying backups...");
     }
-    let content = fs::read_to_string(path).map_err(|error| error.to_string())?;
-    match serde_json::from_str(&content) {
-        Ok(value) => Ok(value),
-        Err(error) => {
-            eprintln!("chat-sessions.json parse error: {}", error);
-            Ok(serde_json::json!([]))
+
+    // Try recovering from backups (bak.1, bak.2, bak.3)
+    for i in 1..=3 {
+        let bak = path.parent().unwrap().join(format!("chat-sessions.json.bak.{}", i));
+        if bak.exists() {
+            if let Ok(content) = fs::read_to_string(&bak) {
+                if let Ok(value) = serde_json::from_str(&content) {
+                    eprintln!("chat-sessions.json recovered from bak.{}", i);
+                    return Ok(value);
+                }
+            }
         }
     }
+
+    eprintln!("chat-sessions.json all sources corrupt, returning empty");
+    Ok(serde_json::json!([]))
 }
 
 #[tauri::command]
 fn write_chat_sessions(app: tauri::AppHandle, sessions: serde_json::Value) -> Result<(), String> {
     let path = chat_sessions_path(&app)?;
     let content = serde_json::to_string_pretty(&sessions).map_err(|error| error.to_string())?;
-    fs::write(path, content).map_err(|error| error.to_string())
+
+    // Rotate backups before write (keep last 3 copies)
+    rotate_chat_sessions_backups(&path)?;
+
+    // Atomic write: write to temp file, then rename
+    let dir = path.parent().unwrap();
+    let tmp_path = dir.join("chat-sessions.json.tmp");
+    fs::write(&tmp_path, &content).map_err(|error| format!("写入临时文件失败：{}", error))?;
+    std::fs::rename(&tmp_path, &path).map_err(|error| format!("重命名临时文件失败：{}", error))
+}
+
+fn rotate_chat_sessions_backups(path: &PathBuf) -> Result<(), String> {
+    let dir = path.parent().unwrap();
+
+    // Remove bak.3 if exists
+    let bak3 = dir.join("chat-sessions.json.bak.3");
+    if bak3.exists() {
+        fs::remove_file(&bak3).map_err(|e| format!("删除旧备份 bak.3 失败：{}", e))?;
+    }
+
+    // Rotate: bak.2 -> bak.3
+    let bak2 = dir.join("chat-sessions.json.bak.2");
+    if bak2.exists() {
+        fs::rename(&bak2, &bak3).map_err(|e| format!("备份轮转 bak.2 -> bak.3 失败：{}", e))?;
+    }
+
+    // Rotate: bak.1 -> bak.2
+    let bak1 = dir.join("chat-sessions.json.bak.1");
+    if bak1.exists() {
+        fs::rename(&bak1, &bak2).map_err(|e| format!("备份轮转 bak.1 -> bak.2 失败：{}", e))?;
+    }
+
+    // Rotate: current -> bak.1 (only if current exists)
+    if path.exists() {
+        fs::copy(path, &bak1).map_err(|e| format!("创建备份 bak.1 失败：{}", e))?;
+    }
+
+    Ok(())
 }
 
 #[tauri::command]
