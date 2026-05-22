@@ -3207,7 +3207,8 @@ function UsagePage() {
   useEffect(() => { load(); }, [load]);
 
   const stats = useMemo(() => {
-    const allMessages = sessions.flatMap((session) => session.messages);
+    const usedSessions = sessions.filter((session) => (session.messages || []).length > 0);
+    const allMessages = usedSessions.flatMap((session) => session.messages);
     const assistantMsgs = allMessages.filter((message) => message.role === "assistant");
     const userMsgs = allMessages.filter((message) => message.role === "user");
     const totalTokens = assistantMsgs.reduce((sum, message) => sum + (message.usage?.total_tokens ?? 0), 0);
@@ -3217,25 +3218,25 @@ function UsagePage() {
 
     const now = Date.now();
     const dayMs = 86400000;
-    const sessionsToday = sessions.filter((session) => now - Number(session.updatedAt) * 1000 < dayMs);
-    const sessionsWeek = sessions.filter((session) => now - Number(session.updatedAt) * 1000 < 7 * dayMs);
-    const sessionsMonth = sessions.filter((session) => now - Number(session.updatedAt) * 1000 < 30 * dayMs);
+    const sessionsToday = usedSessions.filter((session) => now - Number(session.updatedAt) * 1000 < dayMs);
+    const sessionsWeek = usedSessions.filter((session) => now - Number(session.updatedAt) * 1000 < 7 * dayMs);
+    const sessionsMonth = usedSessions.filter((session) => now - Number(session.updatedAt) * 1000 < 30 * dayMs);
     const todayTokens = sessionsToday.flatMap((session) => session.messages).filter((message) => message.role === "assistant").reduce((sum, message) => sum + (message.usage?.total_tokens ?? 0), 0);
     const weekTokens = sessionsWeek.flatMap((session) => session.messages).filter((message) => message.role === "assistant").reduce((sum, message) => sum + (message.usage?.total_tokens ?? 0), 0);
     const monthTokens = sessionsMonth.flatMap((session) => session.messages).filter((message) => message.role === "assistant").reduce((sum, message) => sum + (message.usage?.total_tokens ?? 0), 0);
 
-    const lastUse = sessions.length > 0 ? sessions.reduce((latest, session) => Math.max(latest, Number(session.updatedAt) * 1000), 0) : 0;
+    const lastUse = usedSessions.length > 0 ? usedSessions.reduce((latest, session) => Math.max(latest, Number(session.updatedAt) * 1000), 0) : 0;
 
     const modelMap = new Map<string, number>();
     assistantMsgs.filter((message) => message.modelName).forEach((message) => {
       modelMap.set(message.modelName!, (modelMap.get(message.modelName!) ?? 0) + (message.usage?.total_tokens ?? 0));
     });
 
-    const topSessions = [...sessions].sort((a, b) => Number(b.updatedAt) - Number(a.updatedAt)).slice(0, 5);
+    const topSessions = [...usedSessions].sort((a, b) => Number(b.updatedAt) - Number(a.updatedAt)).slice(0, 5);
 
     const fmtTokens = (n: number) => n > 10000 ? `${(n / 1000).toFixed(0)}K` : n > 1000 ? `${(n / 1000).toFixed(1)}K` : String(n);
 
-    return { sessions, allMessages, assistantMsgs, userMsgs, totalTokens, promptTokens, completionTokens, avgTokens, todayTokens, weekTokens, monthTokens, lastUse, modelMap, topSessions, fmtTokens };
+    return { sessions: usedSessions, allMessages, assistantMsgs, userMsgs, totalTokens, promptTokens, completionTokens, avgTokens, todayTokens, weekTokens, monthTokens, lastUse, modelMap, topSessions, fmtTokens };
   }, [sessions]);
 
   if (loading) {

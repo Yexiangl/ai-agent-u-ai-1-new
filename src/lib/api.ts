@@ -23,11 +23,11 @@ async function requestJson<T>(url: string, apiKey: string, init?: RequestInit): 
 
   try {
     if (!apiKey.trim()) {
-      return { ok: false, latencyMs: 0, error: "专属模型供应 Token 未填写，请先在模型供应页填写并保存" };
+      return { ok: false, latencyMs: 0, error: "专属模型供应 Token 未填写，请先在 Hermes 管理页填写并保存" };
     }
 
     if (!/^https?:\/\//i.test(url)) {
-      return { ok: false, latencyMs: 0, error: "Base URL 错误，请填写完整地址，例如 https://ai.f1class.icu/v1" };
+      return { ok: false, latencyMs: 0, error: "模型服务配置异常，请联系售后处理" };
     }
 
     const response = await fetch(url, {
@@ -60,8 +60,8 @@ async function requestJson<T>(url: string, apiKey: string, init?: RequestInit): 
       ok: false,
       latencyMs: Math.round(performance.now() - startedAt),
       error: message.includes("abort") || message.includes("Abort")
-        ? "网络请求超时，请检查模型供应服务状态"
-        : "网络错误或 Base URL 不可访问，请检查地址和网络连接"
+        ? "网络请求超时，请检查模型服务状态"
+        : "网络错误或模型服务暂不可用，请检查网络连接"
     };
   } finally {
     window.clearTimeout(timeout);
@@ -70,7 +70,7 @@ async function requestJson<T>(url: string, apiKey: string, init?: RequestInit): 
 
 function formatApiError(status: number, json: unknown) {
   if (status === 401 || status === 403) return `HTTP ${status}: 鉴权失败，请检查专属模型供应 Token 是否正确或是否有模型权限`;
-  if (status === 404) return `HTTP ${status}: Base URL 错误或接口不存在，请确认地址以 /v1 结尾`;
+  if (status === 404) return `HTTP ${status}: 模型服务暂不可用，请联系售后处理`;
 
   if (typeof json === "object" && json) {
     if ("error" in json) {
