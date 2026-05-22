@@ -7,6 +7,7 @@ function mergeConfig(value: Partial<AppConfig> | null): AppConfig {
   return {
     ...DEFAULT_CONFIG,
     ...value,
+    baseUrl: DEFAULT_CONFIG.baseUrl,
     selectedEngine: "hermes",
     tasks: value?.tasks ?? DEFAULT_CONFIG.tasks,
     enabledSkills: value?.enabledSkills ?? DEFAULT_CONFIG.enabledSkills
@@ -27,13 +28,14 @@ export async function loadConfig(): Promise<AppConfig> {
 }
 
 export async function saveConfig(config: AppConfig): Promise<void> {
+  const fixedConfig = { ...config, baseUrl: DEFAULT_CONFIG.baseUrl, selectedEngine: "hermes" as const };
   try {
-    await invoke("write_config", { config });
+    await invoke("write_config", { config: fixedConfig });
     return;
   } catch (error) {
     console.warn("Failed to write Tauri config, falling back to localStorage", error);
   }
-  localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(config));
+  localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(fixedConfig));
 }
 
 export async function clearConfig(): Promise<AppConfig> {

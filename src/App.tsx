@@ -612,14 +612,18 @@ function App() {
 }
 
 function Onboarding({ config, updateConfig, hermesCli, hermesApi }: { config: AppConfig; updateConfig: (next: AppConfig) => Promise<void>; hermesCli: HermesStatus | null; hermesApi: HermesApiServerStatus | null }) {
-  const [draft, setDraft] = useState({ ...config, baseUrl: config.baseUrl || DEFAULT_CONFIG.baseUrl });
+  const [draft, setDraft] = useState({ ...config, baseUrl: DEFAULT_CONFIG.baseUrl });
   const [showToken, setShowToken] = useState(false);
   const [applying, setApplying] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
   const hermesInstalled = hermesCli?.installed;
   const hermesRunning = hermesApi?.running;
 
-  const providerMap: Record<string, string> = { "deepseek-v4-flash": "deepseek", "deepseek-v4-pro": "deepseek", "kimi-k2.6": "kimi-coding" };
+  const modelCards: Array<{ value: AppConfig["defaultModel"]; title: string; name: string; description: string }> = [
+    { value: "deepseek-v4-flash", title: "速度优先", name: "DeepSeek Flash", description: "响应更快，适合日常聊天、简单办公、轻量任务" },
+    { value: "deepseek-v4-pro", title: "质量优先", name: "DeepSeek Pro", description: "适合复杂分析、方案整理、长一点的任务" },
+    { value: "kimi-k2.6", title: "长文本 / 代码", name: "Kimi K2.6", description: "适合长文档、代码和复杂上下文" }
+  ];
 
   const applyAndEnter = async () => {
     setApplying(true);
@@ -627,15 +631,16 @@ function Onboarding({ config, updateConfig, hermesCli, hermesApi }: { config: Ap
     try {
       if (!draft.apiKey.trim()) throw new Error("请填写专属模型供应 Token");
       // Test token first
-      const modelsResult = await listModels(draft.baseUrl, draft.apiKey);
+      const fixedDraft = { ...draft, baseUrl: DEFAULT_CONFIG.baseUrl };
+      const modelsResult = await listModels(fixedDraft.baseUrl, fixedDraft.apiKey);
       if (!modelsResult.ok) throw new Error(modelsResult.error || "Token 连接测试失败");
       // Apply to Hermes if installed
       if (hermesInstalled) {
         try {
-          await applyHermesModelConfig(draft.apiKey, draft.defaultModel);
+          await applyHermesModelConfig(fixedDraft.apiKey, fixedDraft.defaultModel);
         } catch { /* non-fatal: config write failed but we can still enter */ }
       }
-      await updateConfig({ ...draft, selectedEngine: "hermes", hasCompletedOnboarding: true });
+      await updateConfig({ ...fixedDraft, selectedEngine: "hermes", hasCompletedOnboarding: true });
       setResult({ ok: true, message: "配置完成，正在进入工作台…" });
     } catch (error) {
       setResult({ ok: false, message: getErrorMessage(error) });
@@ -645,54 +650,76 @@ function Onboarding({ config, updateConfig, hermesCli, hermesApi }: { config: Ap
   };
 
   return (
-    <div className="min-h-screen bg-background p-4 md:p-8">
-      <div className="mx-auto grid min-h-[calc(100vh-4rem)] max-w-5xl items-center gap-6 lg:grid-cols-[1fr_440px]">
-        <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-[#6366F1] via-[#4F46E5] to-[#06B6D4] p-8 text-white shadow-xl">
+    <div className="min-h-screen bg-background p-3 md:p-5">
+      <div className="mx-auto grid min-h-[calc(100vh-2.5rem)] max-w-6xl items-center gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(460px,520px)]">
+        <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-[#6366F1] via-[#4F46E5] to-[#06B6D4] p-6 text-white shadow-xl md:p-8 lg:p-7">
           <div className="relative space-y-5">
             <Badge className="border-white/30 bg-white/20 text-white">U 盘交付版</Badge>
             <div>
-              <h1 className="text-3xl font-bold tracking-tight">欢迎使用 AI Agent 工作台</h1>
-              <p className="mt-3 text-sm leading-6 text-white/80">你的个人 Hermes Agent 桌面助手。填写 Token、选择模型，即可开始使用。</p>
+              <h1 className="text-3xl font-bold tracking-tight">你的个人 Hermes Agent 工作台</h1>
+              <p className="mt-3 text-sm leading-6 text-white/80">连接模型供应 Token 后，即可使用本地 Agent 对话、文件分析、Skill 工作流。</p>
             </div>
             <div className="grid gap-3 text-sm text-white/85">
               <div className="rounded-xl bg-white/10 p-3">Hermes 是长期运行的个人 Agent，负责对话、记忆和工作流。</div>
-              <div className="rounded-xl bg-white/10 p-3">Token 用于调用 DeepSeek / Kimi 模型服务，额度用完后可联系续费。</div>
+              <div className="rounded-xl bg-white/10 p-3">专属 Token 用于启用你的模型额度，请勿分享给他人。</div>
             </div>
           </div>
         </div>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>初始化配置</CardTitle>
-            <CardDescription>填写 Token、选择模型，点击应用即可完成配置。</CardDescription>
+        <Card className="rounded-2xl border-border/70 bg-card/95 shadow-xl shadow-primary/5">
+          <CardHeader className="gap-2 p-5 pb-3">
+            <CardTitle className="text-xl">初始化配置</CardTitle>
+            <CardDescription>填写专属 Token，选择 Agent 使用的模型，即可开始使用。</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <div className={cn("rounded-xl border p-3 text-sm", hermesRunning ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400" : hermesInstalled ? "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400" : "border-rose-500/30 bg-rose-500/10 text-rose-700 dark:text-rose-400")}>
+          <CardContent className="space-y-4 p-5 pt-0">
+            <div className={cn("rounded-2xl border p-3 text-sm", hermesRunning ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400" : hermesInstalled ? "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400" : "border-rose-500/30 bg-rose-500/10 text-rose-700 dark:text-rose-400")}>
               {!hermesCli
                 ? "正在检测本机 Hermes…"
                 : hermesRunning
-                ? "Hermes 对话服务运行中，可以正常使用。"
+                ? "Hermes 已就绪，可以开始配置。"
                 : hermesInstalled
-                  ? "Hermes 已安装，但对话服务未运行。配置完成后请启动 Hermes。"
+                  ? "未检测到 Hermes 对话服务，请先启动 Hermes。"
                   : "未检测到 Hermes。进入工作台后可通过 Hermes 管理页查看安装方式。"}
             </div>
             <Field label="专属模型供应 Token">
-              <div className="flex gap-2">
-                <Input type={showToken ? "text" : "password"} value={draft.apiKey} onChange={(event) => setDraft({ ...draft, apiKey: event.target.value })} placeholder="请输入 Token" />
-                <Button variant="outline" size="icon" onClick={() => setShowToken(!showToken)}>{showToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</Button>
+              <div className="flex items-center gap-2">
+                <Input className="h-11" type={showToken ? "text" : "password"} value={draft.apiKey} onChange={(event) => setDraft({ ...draft, apiKey: event.target.value })} placeholder="请输入 Token" />
+                <Button variant="outline" size="icon" className="h-11 w-11 shrink-0" onClick={() => setShowToken(!showToken)}>{showToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</Button>
               </div>
+              <p className="mt-2 text-xs text-muted-foreground">用于启用你的专属模型额度，请勿分享给他人。</p>
             </Field>
-            <Field label="Hermes 使用模型">
-              <select className="w-full rounded-xl border bg-background px-3 py-2 text-sm" value={draft.defaultModel} onChange={(e) => setDraft({ ...draft, defaultModel: e.target.value as typeof draft.defaultModel })}>
-                <option value="deepseek-v4-flash">deepseek-v4-flash（快速）</option>
-                <option value="deepseek-v4-pro">deepseek-v4-pro（高质量）</option>
-                <option value="kimi-k2.6">kimi-k2.6（长文本）</option>
-              </select>
-              <p className="mt-1 text-xs text-muted-foreground">Provider：{providerMap[draft.defaultModel] || "custom"}</p>
-            </Field>
-            <div className="grid gap-2 sm:grid-cols-2">
-              <Button className="w-full" disabled={applying || !draft.apiKey.trim()} onClick={applyAndEnter}>{applying && <Loader2 className="h-4 w-4 animate-spin" />}应用并进入</Button>
-              <Button variant="outline" className="w-full" onClick={() => updateConfig({ ...draft, selectedEngine: "hermes", hasCompletedOnboarding: true })}>跳过，直接进入</Button>
+            <div className="space-y-3">
+              <div>
+                <h3 className="text-sm font-medium">选择 Agent 模型</h3>
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">不同模型在速度、质量和长文本能力上有所区别。你可以稍后在 Hermes 管理中切换。</p>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-3">
+                {modelCards.map((model) => {
+                  const selected = draft.defaultModel === model.value;
+                  return (
+                    <button
+                      key={model.value}
+                      type="button"
+                      onClick={() => setDraft({ ...draft, defaultModel: model.value })}
+                      className={cn(
+                        "relative rounded-2xl border p-3 text-left transition-all",
+                        selected
+                          ? "border-primary/70 bg-primary/10 shadow-lg shadow-primary/10"
+                          : "border-border/70 bg-background/70 hover:border-primary/30 hover:bg-primary/5"
+                      )}
+                    >
+                      {selected && <Check className="absolute right-3 top-3 h-4 w-4 text-primary" />}
+                      <div className="pr-5 text-sm font-semibold">{model.title}</div>
+                      <div className="mt-1 text-sm text-foreground">{model.name}</div>
+                      <p className="mt-1.5 text-xs leading-5 text-muted-foreground">{model.description}</p>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+              <Button className="w-full" disabled={applying || !draft.apiKey.trim()} onClick={applyAndEnter}>{applying && <Loader2 className="h-4 w-4 animate-spin" />}{applying ? "正在应用配置…" : draft.apiKey.trim() ? "应用并进入工作台" : "填写 Token 后继续"}</Button>
+              <Button variant="ghost" className="w-full text-muted-foreground sm:w-auto" onClick={() => updateConfig({ ...draft, baseUrl: DEFAULT_CONFIG.baseUrl, selectedEngine: "hermes", hasCompletedOnboarding: true })}>稍后配置</Button>
             </div>
             {result && <div className={cn("rounded-xl border p-3 text-sm", result.ok ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400" : "border-rose-500/30 bg-rose-500/10 text-rose-700 dark:text-rose-400")}>{result.message}</div>}
           </CardContent>
@@ -2149,7 +2176,7 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
         </CardHeader>
         <CardContent className="flex min-h-0 flex-1 flex-col p-0">
           <div className="relative flex-1 min-h-0">
-            <div ref={scrollRef} onScroll={handleMessageScroll} className="h-full space-y-5 overflow-y-auto bg-gradient-to-b from-background to-muted/20 px-5 py-6">
+            <div ref={scrollRef} onScroll={handleMessageScroll} className="h-full space-y-5 overflow-y-auto bg-gradient-to-b from-background to-muted/20 px-5 pt-5 pb-2">
             {messages.length === 0 && (
               <div className="flex min-h-[50vh] flex-col items-center justify-center text-center">
                 <h3 className="text-xl font-semibold">今天想让 Hermes 帮你做什么？</h3>
@@ -2184,6 +2211,7 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
               const showPlaceholderText = isPlaceholder && !message.content && !message.reasoningContent;
               const isActiveAssistant = Boolean(loading && message.role === "assistant" && message.requestId === activeRequestRef.current);
               const isStopped = Boolean(message.partial && message.warning === "已停止生成");
+              const compactElapsed = message.elapsedMs == null ? null : message.elapsedMs < 1000 ? "<1s" : `${Math.round(message.elapsedMs / 1000)}s`;
               return (
                 <div key={message.requestId || index} className={cn("group flex", message.role === "user" ? "justify-end" : "justify-start")}>
                   <div className={cn("flex flex-col", message.role === "user" ? "max-w-[68%] items-end" : "max-w-[720px] items-start")}>
@@ -2217,32 +2245,32 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
                       )}
                     </div>
                     {message.role === "assistant" && (
-                      <div className="mt-1.5 flex flex-wrap items-center gap-2 pl-1 text-[11px] text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100">
-                        <span>Hermes</span>
-                        {message.elapsedMs != null && <span>· {message.elapsedMs >= 1000 ? `${(message.elapsedMs / 1000).toFixed(1)}s` : `${message.elapsedMs}ms`}</span>}
-                        {message.usage?.total_tokens != null && <span>· {message.usage.total_tokens} tokens</span>}
-                        <Button variant="ghost" size="sm" onClick={() => navigator.clipboard.writeText(message.content || "")}><Copy className="h-3 w-3" />复制</Button>
+                      <div className="mt-1.5 flex flex-wrap items-center gap-2 pl-1 text-[11px] text-muted-foreground">
+                        <span>Hermes{compactElapsed ? ` · ${compactElapsed}` : ""}</span>
+                        <div className="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+                        <Button variant="ghost" size="icon" className="h-7 w-7" title="复制" aria-label="复制" onClick={() => navigator.clipboard.writeText(message.content || "")}><Copy className="h-3.5 w-3.5" /></Button>
                         {message.content && !loading && (
-                          <Button variant="ghost" size="sm" onClick={() => {
+                          <Button variant="ghost" size="icon" className="h-7 w-7" title="保存" aria-label="保存" onClick={() => {
                             const title = (currentSessionId ? chatSessions.find((s) => s.id === currentSessionId)?.title || "对话" : "对话").slice(0, 20);
                             const ts = new Date().toISOString().slice(0, 16).replace("T", "-");
                             const name = `${title}-${ts}.md`;
                             saveGeneratedFile(name, message.content || "").catch(() => {});
-                          }}>保存</Button>
+                          }}><Save className="h-3.5 w-3.5" /></Button>
                         )}
-                        {isActiveAssistant && <Button variant="ghost" size="sm" onClick={skipTypewriter}><FastForward className="h-3 w-3" />快速显示</Button>}
-                        {isLastAssistant && !loading && messages.length >= 2 && <Button variant="ghost" size="sm" onClick={regenLast}><RotateCcw className="h-3 w-3" />重新生成</Button>}
+                        {isActiveAssistant && <Button variant="ghost" size="icon" className="h-7 w-7" title="快速显示" aria-label="快速显示" onClick={skipTypewriter}><FastForward className="h-3.5 w-3.5" /></Button>}
+                        {isLastAssistant && !loading && messages.length >= 2 && <Button variant="ghost" size="icon" className="h-7 w-7" title="重新生成" aria-label="重新生成" onClick={regenLast}><RotateCcw className="h-3.5 w-3.5" /></Button>}
                         <DetailsEntry message={message} expandedDetailId={expandedDetailId} setExpandedDetailId={setExpandedDetailId} />
+                        </div>
                       </div>
                     )}
                   </div>
                 </div>
               );
             })}
-            <div ref={endRef} className="h-28 shrink-0" />
+            <div ref={endRef} className="h-4 shrink-0" />
           </div>
           {showJumpToBottom && (
-            <div className="pointer-events-none absolute inset-x-0 bottom-4 z-20 flex justify-center">
+            <div className="pointer-events-none absolute inset-x-0 bottom-3 z-20 flex justify-center">
               <Button className="pointer-events-auto rounded-full shadow-lg" size="sm" onClick={jumpToBottom}>
                 回到底部
               </Button>
@@ -2262,7 +2290,7 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
               )}
             </div>
           )}
-          <div className="shrink-0 border-t bg-background/90 p-3 backdrop-blur-xl md:p-4">
+          <div className="shrink-0 border-t bg-background/90 p-2 backdrop-blur-xl md:p-2.5">
             <div className="rounded-2xl border bg-card/90 p-2 shadow-sm">
               {attachments.length > 0 && (
                 <div className="flex flex-wrap items-center gap-1.5 px-3 pb-2">
@@ -3293,10 +3321,23 @@ function DetailsEntry({ message, expandedDetailId, setExpandedDetailId }: { mess
   if (!message.modelName && !message.sessionId && !message.usage) return null;
   const msgId = message.requestId || message.sessionId || "";
   const open = expandedDetailId === msgId;
+  const detailRef = useRef<HTMLSpanElement | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    const closeOnOutsideClick = (event: PointerEvent) => {
+      if (!detailRef.current?.contains(event.target as Node)) {
+        setExpandedDetailId(null);
+      }
+    };
+    document.addEventListener("pointerdown", closeOnOutsideClick);
+    return () => document.removeEventListener("pointerdown", closeOnOutsideClick);
+  }, [open, setExpandedDetailId]);
   const toggle = () => setExpandedDetailId(open ? null : msgId);
   return (
-    <span className="relative inline-flex items-center gap-1">
-      <button onClick={toggle} className="text-[11px] hover:underline">{open ? "收起详情" : "详情"}</button>
+    <span ref={detailRef} className="relative inline-flex items-center gap-1">
+      <button onClick={toggle} title={open ? "收起详情" : "详情"} aria-label={open ? "收起详情" : "详情"} className="inline-flex h-7 w-7 items-center justify-center rounded-md hover:bg-muted">
+        <MoreHorizontal className="h-3.5 w-3.5" />
+      </button>
       {open && (
         <div className="absolute bottom-full left-0 z-10 mb-1 rounded-xl border bg-card p-2.5 text-xs text-muted-foreground shadow-lg">
           {message.modelName && <div>模型：{message.modelName}</div>}
