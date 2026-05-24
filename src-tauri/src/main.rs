@@ -1,3 +1,5 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 use std::fs;
 use std::collections::HashMap;
 use std::error::Error;
@@ -15,6 +17,18 @@ use tauri::{Emitter, Manager};
 
 type CancelMap = Mutex<HashMap<String, Arc<AtomicBool>>>;
 type TaskMap = Mutex<HashMap<String, tauri::async_runtime::JoinHandle<()>>>;
+
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+#[cfg(windows)]
+fn hide_command_window(command: &mut Command) {
+    use std::os::windows::process::CommandExt;
+    command.creation_flags(CREATE_NO_WINDOW);
+}
+
+#[cfg(not(windows))]
+fn hide_command_window(_command: &mut Command) {}
 
 fn cancel_map() -> &'static CancelMap {
     static MAP: OnceLock<CancelMap> = OnceLock::new();
@@ -269,7 +283,9 @@ fn collect_memory_file(files: &mut Vec<serde_json::Value>, hermes_root: &std::pa
 }
 
 fn run_command_timeout(command: &str, args: &[&str], timeout: Duration) -> Result<String, String> {
-    let mut child = Command::new(command)
+    let mut cmd = Command::new(command);
+    hide_command_window(&mut cmd);
+    let mut child = cmd
         .args(args)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -299,7 +315,9 @@ fn run_command_timeout(command: &str, args: &[&str], timeout: Duration) -> Resul
 }
 
 fn run_command_capture_timeout(command: &str, args: &[&str], timeout: Duration) -> serde_json::Value {
-    let mut child = match Command::new(command)
+    let mut cmd = Command::new(command);
+    hide_command_window(&mut cmd);
+    let mut child = match cmd
         .args(args)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -1317,7 +1335,9 @@ fn apply_hermes_model_config(token: String, model: String) -> Result<serde_json:
     ];
 
     for (key, value) in &config_commands {
-        let output = std::process::Command::new(&hermes_bin)
+        let mut command = Command::new(&hermes_bin);
+        hide_command_window(&mut command);
+        let output = command
             .args(["config", "set", key, value])
             .output();
         match output {
@@ -1408,7 +1428,9 @@ async fn apply_hermes_reasoning_config(effort: String) -> Result<serde_json::Val
             let bak = home.join(".hermes").join(format!("config.yaml.bak-reasoning-{}", chrono_timestamp()));
             let _ = fs::copy(&config_path, &bak);
         }
-        let output = std::process::Command::new(&bin)
+        let mut command = Command::new(&bin);
+        hide_command_window(&mut command);
+        let output = command
             .args(["config", "set", "agent.reasoning_effort", &effort])
             .output();
         match output {
@@ -1434,7 +1456,13 @@ async fn apply_hermes_reasoning_config(effort: String) -> Result<serde_json::Val
 
 fn which_hermes() -> Option<String> {
     // 1. Try PATH via `which hermes` (highest priority)
-    if let Ok(output) = std::process::Command::new("which").arg("hermes").output() {
+    let mut which_cmd = if cfg!(target_os = "windows") {
+        Command::new("where")
+    } else {
+        Command::new("which")
+    };
+    hide_command_window(&mut which_cmd);
+    if let Ok(output) = which_cmd.arg("hermes").output() {
         if output.status.success() {
             let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
             if !path.is_empty() && is_executable_hermes(&path) {
@@ -1474,7 +1502,9 @@ fn is_executable_hermes(path: &str) -> bool {
         return false;
     }
     // Must successfully run --version
-    match std::process::Command::new(path).arg("--version").output() {
+    let mut command = Command::new(path);
+    hide_command_window(&mut command);
+    match command.arg("--version").output() {
         Ok(o) => o.status.success(),
         Err(_) => false,
     }
@@ -1549,7 +1579,9 @@ async fn read_hermes_cron_cli_status() -> Result<serde_json::Value, String> {
 
         let mut scheduler_running = false;
         let mut status_text = String::new();
-        let child = std::process::Command::new(&bin).args(["cron", "status"]).stdout(Stdio::piped()).stderr(Stdio::null()).spawn();
+        let mut status_cmd = Command::new(&bin);
+        hide_command_window(&mut status_cmd);
+        let child = status_cmd.args(["cron", "status"]).stdout(Stdio::piped()).stderr(Stdio::null()).spawn();
         if let Ok(mut child) = child {
             let started = std::time::Instant::now();
             loop {
@@ -1573,7 +1605,9 @@ async fn read_hermes_cron_cli_status() -> Result<serde_json::Value, String> {
         }
 
         let mut jobs: Vec<serde_json::Value> = Vec::new();
-        let child = std::process::Command::new(&bin).args(["cron", "list"]).stdout(Stdio::piped()).stderr(Stdio::null()).spawn();
+        let mut list_cmd = Command::new(&bin);
+        hide_command_window(&mut list_cmd);
+        let child = list_cmd.args(["cron", "list"]).stdout(Stdio::piped()).stderr(Stdio::null()).spawn();
         if let Ok(mut child) = child {
             let started = std::time::Instant::now();
             loop {
