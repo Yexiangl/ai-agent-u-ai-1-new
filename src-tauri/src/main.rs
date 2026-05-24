@@ -1461,7 +1461,6 @@ fn which_hermes() -> Option<String> {
 
 /// Validates that a path is a real executable hermes CLI (not a directory).
 fn is_executable_hermes(path: &str) -> bool {
-    use std::os::unix::fs::PermissionsExt;
     let p = std::path::Path::new(path);
     // Must exist and be a file (not directory)
     let meta = match p.metadata() {
@@ -1471,8 +1470,7 @@ fn is_executable_hermes(path: &str) -> bool {
     if !meta.is_file() {
         return false;
     }
-    // Must have execute permission
-    if meta.permissions().mode() & 0o111 == 0 {
+    if !has_executable_permission(p) {
         return false;
     }
     // Must successfully run --version
@@ -1480,6 +1478,28 @@ fn is_executable_hermes(path: &str) -> bool {
         Ok(o) => o.status.success(),
         Err(_) => false,
     }
+}
+
+#[cfg(unix)]
+fn has_executable_permission(path: &std::path::Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    path.metadata()
+        .map(|m| m.permissions().mode() & 0o111 != 0)
+        .unwrap_or(false)
+}
+
+#[cfg(windows)]
+fn has_executable_permission(path: &std::path::Path) -> bool {
+    if !path.is_file() {
+        return false;
+    }
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or_default();
+    ext.is_empty() || ext.eq_ignore_ascii_case("exe")
+}
+
+#[cfg(not(any(unix, windows)))]
+fn has_executable_permission(path: &std::path::Path) -> bool {
+    path.is_file()
 }
 
 fn chrono_timestamp() -> String {
