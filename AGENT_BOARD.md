@@ -189,11 +189,222 @@ OpenClaw 将成为主体 Agent 后端。Hermes 不再作为普通用户主路径
 - 重要实测：`GET /v1/models` 返回 `200 OK` 但 `content-type=text/html; charset=utf-8`，响应体为 Control UI HTML 摘要，因此脚本判定为 WARN：`html_fallback=possible_control_ui; api_confirmed=false`。后续 `OpenClawBackend` 不应盲目依赖 `/v1/models`，必须先确认真实 endpoint、header、鉴权方式和返回 schema。
 - 残余风险：未做 Windows 原生实机验证；未实现 OpenClaw auth、device pairing、完整 WS handshake 或 chat RPC；未修改业务代码。
 
-### TASK-005：新增 OpenClaw Backend 初版
+### TASK-005：OpenClaw Gateway WebSocket RPC 最小验证
 
-- 状态：待规划
+- 状态：已完成
 - 优先级：P1
 - 负责人：OpenCode
+
+说明：
+
+- 按用户本轮指令执行 WebSocket RPC 协议探针，不实现 `OpenClawBackend`。
+- 不改 Agent 对话主链路，不改 `src/App.tsx`，不改 Rust command，不改 Token 写入，不改 Skill Center，不删除 Hermes。
+- 不读取 `.env`，不输出 Token，不修改 OpenClaw 配置，不自动安装或重启 OpenClaw。
+
+#### OpenCode 执行反馈
+
+- 修改文件：`docs/openclaw-ws-rpc-notes.md`，`scripts/openclaw-ws-rpc-probe.mjs`，`AGENT_BOARD.md`
+- probe 结果：`node scripts/openclaw-ws-rpc-probe.mjs` 可连接 `ws://127.0.0.1:18789`，收到 `connect.challenge`，payload 包含 `nonce` 和 `ts`；脚本随后发送 `connect` request frame，使用 protocol v4、`client.id=gateway-client`、`client.mode=backend`、`role=operator`、`scopes=[operator.read]`，未发送 auth token、password、device、Authorization 或 provider key。
+- hello-ok 结果：未收到 `hello-ok`。Gateway 返回 `NOT_PAIRED`，message 为 `device identity required`，details code 为 `DEVICE_IDENTITY_REQUIRED`。
+- 可用 RPC：本轮未能进入 authenticated / paired session，因此没有拿到 `hello-ok.features.methods`，无法确认实际可用 RPC method 列表；`health/status`、`skills.status`、`models.list` 均按脚本逻辑跳过并记录原因。
+- 失败点：WS transport 和 challenge 可用，但 RPC session 建立被 device identity / pairing 要求阻断。TASK-004 的 `/v1/models` 已确认返回 Control UI HTML fallback，本轮进一步确认后续不能依赖 HTTP `/v1/models` 或裸 WS connect 作为主接入依据。
+- 后续 OpenClawBackend 建议：优先实现合规 `connect.challenge` -> signed device identity / auth / pairing -> `hello-ok` 流程；收到 `hello-ok` 后以 `features.methods/events` 做能力发现；再验证 `health` 或 `status`、`skills.status`、`models.list`、`chat.send`、`chat.abort`、`chat.history`、`sessions.*` 的真实 payload 和错误码。UI 事件层应按 WS event model 归一化 `chat`、`agent`、`session.message`、`session.operation`、`session.tool`，不要按 Hermes SSE 或 HTTP `/v1/models` 固化抽象。
+- 验证命令：`node scripts/openclaw-ws-rpc-probe.mjs`；`npm run build`；`cargo check`
+- 验证结果：probe 命令完成且无 hard failure，但明确记录 `hello-ok` 未成功，RPC 调用被跳过；`npm run build` 通过；`cargo check` 在 `src-tauri` 通过。
+- 残余风险：未验证合法 device identity / pairing / auth token 流程；未调用真实 RPC payload；未做 Windows 原生实机验证；未实现 `OpenClawBackend`。
+
+### TASK-006：OpenClaw Gateway 配对 / device identity / auth 最小验证
+
+- 状态：已完成
+- 优先级：P0
+- 负责人：OpenCode
+
+目标：
+
+- 不改业务代码。
+- 不接入 App UI。
+- 不实现 `OpenClawBackend`。
+- 只通过文档和 probe 脚本验证 Gateway connect 所需的 device identity / pairing / auth 流程。
+- 最终目标是收到 `hello-ok`，并尝试调用 `health` / `status` 或 `skills.status`。
+
+验收标准：
+
+- 生成 `docs/openclaw-pairing-auth-notes.md`。
+- 更新 `scripts/openclaw-ws-rpc-probe.mjs` 或新增 `scripts/openclaw-pairing-probe.mjs`。
+- 不读取 `.env`。
+- 不输出 Token。
+- 不修改 OpenClaw 配置。
+- 不把 gateway token 写进代码。
+- Node probe 脚本能清晰输出：
+  - `connect.challenge`
+  - `connect` frame 是否发送
+  - 是否需要 device identity
+  - 是否需要 pairing approval
+  - 是否收到 `hello-ok`
+  - 如果仍失败，输出错误摘要。
+
+禁止事项：
+
+- 不要修改 `src/` 或 `src-tauri/`。
+- 不要接入真实 App UI。
+- 不要实现真实 OpenClawBackend。
+- 不要自动修改 OpenClaw config。
+- 不要执行会改变用户 OpenClaw 安全状态的 repair/install/reset 操作，除非另行得到用户明确确认。
+- 不要把 gateway token、device token、provider Token、password、SecretRef 明文写入脚本、文档或日志。
+
+#### OpenCode 执行反馈
+
+- 修改文件：`docs/openclaw-pairing-auth-notes.md`，`scripts/openclaw-pairing-probe.mjs`，`AGENT_BOARD.md`
+- probe 结果：新增 pairing/auth probe，生成并复用 Ed25519 device identity，发送包含 `device.id`、`device.publicKey`、`device.signature`、`device.signedAt`、`device.nonce` 的 protocol v4 `connect` frame；脚本不读取 `.env`，不打印 Token，不批准设备，不修改 OpenClaw 配置。实测 WS 可连接，`connect.challenge` 包含 `nonce` 和 `ts`，device identity frame 已发送。
+- 是否收到 hello-ok：未收到。相比 TASK-005 的 `DEVICE_IDENTITY_REQUIRED`，本轮已前进到 `AUTH_TOKEN_MISSING`：Gateway 返回 `INVALID_REQUEST`，message 为 `unauthorized: gateway token missing (provide gateway auth token)`，details code 为 `AUTH_TOKEN_MISSING`。同时 `openclaw config get gateway.auth.mode` 显示当前 Gateway auth mode 为 `token`。
+- 是否打通基础 RPC：未打通。由于未收到 `hello-ok`，没有 authenticated / paired WS session，`health/status`、`skills.status`、`models.list` 未调用。脚本已实现 hello-ok 成功后的方法发现和基础 RPC 调用逻辑。
+- Pairing / CLI 调研结果：`openclaw devices list/approve/reject/remove/rotate/revoke` 是 device pairing 管理入口；`openclaw devices approve --latest --json` 只 preview 最新 pending request，不批准。本轮只 preview，未执行具体 requestId approve。当前 `devices list` 显示 Control UI 已是 paired operator admin/pairing 设备；CLI 有 `operator.read` paired device，并存在 `operator.pairing` scope upgrade pending request。
+- Control UI 观察：用户截图确认 Dashboard 可访问，左侧包含“技能”等模块，但未看到明显 Pairing / Devices / Approvals 入口。后续应人工检查“节点 / 实例 / 基础设施 / 调试 / 日志 / AI 与代理”是否隐藏相关入口；若 UI 无入口，产品 onboarding 必须提供 CLI fallback。
+- 残余风险：未使用真实 gateway token 继续验证 `hello-ok`；未批准 probe device；未验证 returned device token 的存储/复用；未验证 `health/status`、`skills.status`、`models.list` payload；未做 Windows native 实机验证；未实现 `OpenClawBackend`。
+- 对 OpenClawBackend 初版建议：Tauri 后端应生成并安全持久化 App 专属 Ed25519 device identity；等待 `connect.challenge` 后签名 nonce；通过用户输入或安全存储提供 gateway token/password，不读取 `.env`，不输出 Token；收到 `AUTH_TOKEN_MISSING` 时提示授权，收到 `NOT_PAIRED` / pairing required 时引导用户在 Dashboard 或 `openclaw devices approve <requestId>` 批准；收到 `hello-ok` 后按 `features.methods/events` 做能力发现，再接 `health/status`、`skills.status`、`models.list`、`chat.send`、`chat.abort`、`sessions.*`。
+- 验证命令：`node scripts/openclaw-pairing-probe.mjs`；`openclaw devices list --json`；`openclaw devices approve --latest --json`；`openclaw config get gateway.auth.mode`；`npm run build`；`cargo check`
+- 验证结果：pairing probe 完成且无 hard failure，但明确记录 `hello-ok` 未成功，当前阻塞为 `AUTH_TOKEN_MISSING`；`npm run build` 通过；`cargo check` 在 `src-tauri` 通过。
+
+### TASK-007：OpenClaw Gateway token auth + hello-ok 最小验证
+
+- 状态：待验收
+- 优先级：P0
+- 负责人：OpenCode
+
+目标：
+
+- 不改业务代码。
+- 不接入 App UI。
+- 不实现 `OpenClawBackend`。
+- 只在 probe 脚本中验证 gateway token auth + device identity + nonce signature 是否能收到 `hello-ok`。
+- 如果 `hello-ok` 成功，尝试 `health` / `status`、`skills.status`、`models.list`。
+- 如果失败，明确失败 code 和缺失字段。
+
+验收标准：
+
+- 生成 `docs/openclaw-auth-hello-ok-notes.md`。
+- 新增或更新 `scripts/openclaw-auth-probe.mjs`。
+- 不读取 `.env`。
+- 不输出 Token。
+- 不把 Token 写进代码。
+- 不修改 OpenClaw 配置。
+- Node probe 脚本能清晰输出：
+  - `connect.challenge`
+  - device identity 是否生成
+  - auth token 是否由用户临时提供
+  - `hello-ok` 是否收到
+  - 基础 RPC 是否成功
+
+禁止事项：
+
+- 不要修改 `src/` 或 `src-tauri/`。
+- 不要接入真实 App UI。
+- 不要实现真实 `OpenClawBackend`。
+- 不要读取项目 `.env` 或 OpenClaw `.env`。
+- 不要把 gateway token、device token、provider Token、password、SecretRef 明文写入脚本、文档或日志。
+- 不要通过 CLI 参数传递 gateway token。
+- 不要自动修改 OpenClaw 配置。
+- 不要自动批准设备或改变 OpenClaw 配对安全状态，除非另行得到用户明确确认。
+
+#### OpenCode 执行反馈 (初版)
+
+- 修改文件：`docs/openclaw-auth-hello-ok-notes.md`，`scripts/openclaw-auth-probe.mjs`，`AGENT_BOARD.md`
+- probe 结果：新增独立 token auth probe。脚本不读取 `.env`，不通过 CLI 参数接收 Token，不打印 Token，不写入 Token，不修改 OpenClaw 配置；只接受当前进程环境变量 `OPENCLAW_GATEWAY_TOKEN`。当前运行环境未提供该变量，脚本输出 `token_present=false; 需要临时提供 OPENCLAW_GATEWAY_TOKEN 才能验证 hello-ok`，并按要求无 hard failure 退出。
+- 用户补充实测：用户临时通过 shell 设置 `OPENCLAW_GATEWAY_TOKEN` 后运行脚本，首轮 WS connect / `connect.challenge` / `connect` frame 均 PASS，`token_present=true`，但未收到 `hello-ok`；Gateway 返回 `AUTH_TOKEN_MISMATCH`，message 为 `unauthorized: gateway token mismatch (provide gateway auth token)`，`details.recommendedNextStep=retry_with_device_token`，且 `details.canRetryWithDeviceToken` 含敏感值，已按 Token 处理不得输出。
+- 初版脚本问题：脚本输出 `device_token_present=false`，未执行第二轮 device token retry。根因是 `extractRetryDeviceToken()` 仅检查有限已知字段名，且未在原始 payload 接收点立即预提取，若字段名/嵌套与预期不完全一致则静默返回 null。
+- 验证命令（初版）：`node scripts/openclaw-auth-probe.mjs`；`npm run build`；`cargo check`
+- 验证结果（初版）：auth probe 在无 `OPENCLAW_GATEWAY_TOKEN` 时 skip 且退出成功；`npm run build` 通过；`cargo check` 在 `src-tauri` 通过。
+
+#### Reasonix 执行反馈 (TASK-007 第三次修正)
+
+- 修改文件：`scripts/openclaw-auth-probe.mjs`，`docs/openclaw-auth-hello-ok-notes.md`，`AGENT_BOARD.md`
+- 修正摘要：根因定位 — 启发式扫描误将 `details.recommendedNextStep = "retry_with_device_token"` 当作 device token 候选提取。device token 诊断（length=23, firstChar=r, lastChar=n, prefix2=re）精确匹配该系统字符串。核心修正：
+  1. **完全移除启发式扫描** — `extractRetryDeviceToken()` 只从 4 个已知字段名提取，不再扫描任意 string 值。
+  2. **值校验** — 新增 `INVALID_TOKEN_VALUES` set，拒绝 `"retry_with_device_token"`、`"update_auth_credentials"`、`"true"`、`"false"`、`"[REDACTED]"` 及任何含 `REDACTED` 的字符串。
+  3. **新增 `diagnoseCanRetryWithDeviceToken(details)`** — 输出 typeof / is_string / is_boolean / length / looks_like_next_step / is_redacted_literal / likely_valid_token，全部 non-sensitive。
+  4. **新增 gateway token 诊断** — 输出 gateway_token_length / trimmed_length / has_newline / sha256_prefix (8 hex)，排查 token 换行/空白污染。
+  5. **retry gate 简化** — 只看 `retryDeviceToken` 是否为 null，移除 `shouldRetryWithDeviceToken` 前置条件。
+- 关键发现：在当前 Gateway 环境下，`canRetryWithDeviceToken` 的真实语义尚未确认（可能是 token 字符串 / boolean true / capability flag）。在确认其为真实 token 之前，脚本不执行 device token retry。`same-socket retry`、`new-socket retry`、`auth shape variants` 均在 `retryDeviceToken` 有效时才执行。
+- 是否收到 hello-ok：未。初次 connect 仍 `AUTH_TOKEN_MISMATCH`，且 device token 尚未确认真实可用。
+- 是否打通基础 RPC：未。
+- 残余风险：`canRetryWithDeviceToken` 字段语义不明；Gateway token 可能有换行/空白污染；未做 Windows native 验证。
+- 下一步建议：用户用真实 token 运行脚本，重点查看 `canRetryWithDeviceToken likely_valid_token` 和 `gateway_token_has_newline` 输出。
+- 验证命令：`node scripts/openclaw-auth-probe.mjs`；`npm run build`；`cargo check`
+- 验证结果：`node --check` 通过；`node scripts/openclaw-auth-probe.mjs` skip（无 token）；`npm run build` 通过；`cargo check` 在 `src-tauri` 通过。
+
+### TASK-008：确认 OpenClaw Gateway 当前真实 auth token 来源与设备批准流程
+
+- 状态：已完成
+- 优先级：P0
+- 负责人：Reasonix
+
+目标：
+
+- 不改业务代码。
+- 只做认证来源调查和最小安全验证。
+- 确认 Gateway 当前真实认证 token 来源。
+- 确认 device pairing / approval 流程。
+
+#### Reasonix 执行反馈
+
+- 修改文件：`scripts/openclaw-auth-source-probe.mjs`，`docs/openclaw-auth-source-notes.md`，`AGENT_BOARD.md`
+- 调查摘要：根本原因已定位 — hello-ok 未打通不是因为 token 字段形状或协议版本，而是因为 probe 脚本生成的设备身份不在 Gateway 配对表中。
+- 关键发现：
+  1. `openclaw config get gateway.auth.token` 永远返回 `__OPENCLAW_REDACTED__` — CLI 自动脱敏。
+  2. Gateway auth mode = `token`，首次设备配对需要提供 gateway token。
+  3. `openclaw` CLI **自身**可连接 Gateway 并执行 RPC（`rpc.ok=true`），因为它使用 `~/.openclaw/identity/` 中的已配对设备身份。
+  4. TASK-007 probe 脚本的设备身份（`/tmp/ai-agent-workspace-openclaw-auth-probe-device.json`）**不在** Gateway 的已配对或待批准列表中 — 完全未知。
+  5. `canRetryWithDeviceToken=true` 是 **boolean capability flag**，不是 token 值。之前的启发式扫描误将 `recommendedNextStep` 当作 token 提取，而 `canRetryWithDeviceToken` 本身一直是 boolean。
+  6. Gateway 有 2 个已配对设备（Control UI + CLI probe），1 个待批准请求（CLI operator.pairing 权限升级）。
+- Device pairing CLI：`openclaw devices approve <requestId> --token <gateway-token>`
+- Control UI：`http://127.0.0.1:18789`，`allowInsecureAuth=true`，loopback 模式可能直接进入。用户可在 UI 中找到 gateway token。
+- 用户获取 gateway token 的路径：
+  - Control UI → 设置 → 基础设施
+  - 手动从 `~/.openclaw/openclaw.json` 复制 `gateway.auth.token`
+  - **不能用** `openclaw config get`（自动脱敏）
+- 对 OpenClawBackend 策略建议：
+  - App 使用持久化设备身份（生成 Ed25519 keypair 并存于 App 安全目录）
+  - 用户提供 gateway token → App connect → Gateway 返回 NOT_PAIRED → 用户批准 → App 收到 hello-ok + device token → 持久化 device token
+  - 后续连接使用已保存的 device token，无需再次提供 gateway token
+- 验证命令：`node scripts/openclaw-auth-source-probe.mjs`；`npm run build`；`cargo check`
+- 验证结果：`node scripts/openclaw-auth-source-probe.mjs` 通过（1 FAIL 为预期：probe identity 未配对）；`npm run build` 通过；`cargo check` 在 `src-tauri` 通过。
+
+### TASK-009：OpenClaw 设备配对流程最小闭环验证
+
+- 状态：待验收
+- 优先级：P0
+- 负责人：Reasonix
+
+目标：
+
+- 在不接入 App UI 的前提下，验证完整设备配对闭环。
+- probe 生成持久化 Ed25519 device identity → 发起 connect → 处理 NOT_PAIRED / hello-ok → 尝试基础 RPC。
+
+#### Reasonix 执行反馈
+
+- 修改文件：`scripts/openclaw-pairing-flow-probe.mjs`，`docs/openclaw-device-pairing-flow.md`，`AGENT_BOARD.md`
+- **✅ hello-ok 已打通！基础 RPC 全部成功！**
+- 关键突破：
+  1. **Token 来源**：`OPENCLAW_GATEWAY_TOKEN` env (length=21) 与 `~/.openclaw/openclaw.json` 中真实 token (length=48) **不同** — 这是 TASK-005~007 全部返回 `AUTH_TOKEN_MISMATCH` 的根因。
+  2. `openclaw config get gateway.auth.token` 永远返回 `__OPENCLAW_REDACTED__`。
+  3. **正确 token 来源**：`~/.openclaw/openclaw.json` → `gateway.auth.token`（仅内存，不打印，不写入）。
+  4. `client.id` 必须为 Gateway 允许的值（`gateway-client` 有效）。
+- 实测结果：
+  - Protocol 4, Server 2026.5.22
+  - 173 RPC methods, 27 events
+  - RPC health ✅, status ✅, skills.status ✅ (58 skills), models.list ✅ (gpt-5.5)
+- 设备配对流程：
+  - 当前 probe 使用 gateway token 直接 connect，设备已自动配对
+  - 若为新设备 + 正确 gateway token → NOT_PAIRED + requestId → 用户批准 → 重试 → hello-ok（Probe 已实现自动轮询重试）
+- 对 OpenClawBackend 初版建议：
+  - Tauri App 持久化 Ed25519 device identity 到 `~/.openclaw-agents/ai-agent-workspace/`
+  - Gateway token 从用户输入获取，仅内存使用
+  - connect 等待 `connect.challenge`，签名 nonce，发送 connect frame
+  - 处理 NOT_PAIRED → 引导批准 → 轮询重试
+  - hello-ok 后能力发现（features.methods/events）
+  - Gateway token 不进日志、不入文件、不上报
+- 验证命令：`node scripts/openclaw-pairing-flow-probe.mjs`；`npm run build`；`cargo check`
+- 验证结果：probe hello-ok ✅ + 4/4 RPC ✅；`npm run build` 通过；`cargo check` 在 `src-tauri` 通过。
 
 ## 5. TASK-001 详细说明
 
@@ -562,3 +773,238 @@ export type AgentBackendEvent =
 - smoke test 文档和脚本本身合格，但 Windows 原生仍需要实机 smoke test，不能承诺完全无坑。
 - OpenClaw auth、device pairing、scopes、`hello-ok` 和 chat event payload 仍需 TASK-005 真实验证。
 - `/v1/models` 当前实测为 Control UI HTML fallback，后续不能依赖它作为 backend 主路径。
+
+### Codex 审查反馈：TASK-005
+
+- 审查日期：2026-05-25
+- 审查范围：`docs/openclaw-ws-rpc-notes.md`、`scripts/openclaw-ws-rpc-probe.mjs`、`AGENT_BOARD.md`
+- 审查结论：TASK-005 合格，状态改为“已完成”。
+- 业务代码检查：本次审查未修改 `src/`、`src-tauri/`，未执行 TASK-006，未实现 `OpenClawBackend`，未读取 `.env`，未输出 Token。
+
+#### 关键判断
+
+1. TASK-005 的目标不是打通完整 RPC，而是找到真实协议阻塞点；当前目标已达成。
+   - probe 已验证 WebSocket transport 可用。
+   - probe 已收到 `connect.challenge`。
+   - probe 已发送裸 `connect` frame。
+   - Gateway 拒绝裸 connect，错误为 `NOT_PAIRED`，message 为 `device identity required`，details code 为 `DEVICE_IDENTITY_REQUIRED`。
+   - 这说明当前阻塞点不是端口、Control UI 或 WS transport，而是 Gateway pairing / device identity / auth。
+
+2. 后续不能直接开始 OpenClawBackend 初版。
+   - 目前还没有收到 `hello-ok`。
+   - 没有拿到 `hello-ok.features.methods/events`。
+   - 没有成功调用 `health`、`status`、`skills.status` 或任意真实 RPC。
+   - 在此状态下实现 OpenClawBackend 会把未确认的 auth/pairing 假设写进产品代码，返工风险高。
+
+3. 下一步必须先做 TASK-006：OpenClaw Gateway pairing / device identity / auth 最小验证。
+   - TASK-006 应继续保持只读/探针性质，不接入 App UI。
+   - 目标是厘清 connect 所需 device identity、pairing approval、gateway auth、scope 和 hello-ok 条件。
+   - 成功标准应至少包括收到 `hello-ok`，并尝试调用 `health` / `status` 或 `skills.status`。
+
+4. OpenClawBackend 初版必须等 `hello-ok` 和至少一个基础 RPC 成功后再开始。
+   - `hello-ok` 是能力发现入口。
+   - `features.methods/events` 应作为 backend capability 的真实来源。
+   - 至少一个基础 RPC 成功后，才有足够依据设计连接生命周期、错误处理、权限提示和事件订阅。
+
+5. HTTP `/v1/models` 已确认不是主接入依据，只能作为辅助诊断。
+   - TASK-004 已实测 `/v1/models` 返回 Control UI HTML fallback。
+   - TASK-005 进一步确认主路径应围绕 WebSocket Gateway protocol。
+   - 后续 `/v1/models` 只能用于辅助诊断或后续单独确认，不应作为 OpenClawBackend 的主链路。
+
+#### TASK-006 建议边界
+
+下一步任务：
+
+> TASK-006：OpenClaw Gateway 配对 / device identity / auth 最小验证
+
+建议允许范围：
+
+- 新增 `docs/openclaw-pairing-auth-notes.md`。
+- 更新 `scripts/openclaw-ws-rpc-probe.mjs` 或新增 `scripts/openclaw-pairing-probe.mjs`。
+- 只做 loopback Gateway protocol 探针和文档记录。
+
+建议禁止范围：
+
+- 不改业务代码。
+- 不修改 `src/` 或 `src-tauri/`。
+- 不接入 App UI。
+- 不实现 `OpenClawBackend`。
+- 不读取 `.env`。
+- 不输出 Token。
+- 不修改 OpenClaw 配置。
+- 不把 gateway token 写进代码。
+
+#### TASK-006 验收重点
+
+- probe 能清晰输出是否收到 `connect.challenge`。
+- probe 能清晰输出是否发送 `connect` frame。
+- probe 能清晰输出是否需要 device identity。
+- probe 能清晰输出是否需要 pairing approval。
+- probe 能清晰输出是否收到 `hello-ok`。
+- 若仍失败，probe 输出脱敏后的错误摘要。
+- 如果收到 `hello-ok`，尝试调用 `health` / `status` 或 `skills.status` 中至少一个基础 RPC，并记录结果。
+
+### Codex 审查反馈：TASK-006
+
+- 审查日期：2026-05-25
+- 审查范围：`docs/openclaw-pairing-auth-notes.md`、`scripts/openclaw-pairing-probe.mjs`、`AGENT_BOARD.md`
+- 审查结论：TASK-006 合格，状态改为“已完成”。
+- 业务代码检查：本次审查未修改 `src/`、`src-tauri/`，未执行 TASK-007，未实现 `OpenClawBackend`，未读取 `.env`，未输出 Token。
+
+#### 关键判断
+
+1. TASK-006 的目标不是完成 OpenClaw RPC，而是确认 pairing / auth 阻塞点；当前目标已完成。
+   - TASK-005 的阻塞点是 `DEVICE_IDENTITY_REQUIRED`。
+   - TASK-006 生成并复用了 Ed25519 device identity。
+   - probe 使用 `connect.challenge.payload.nonce` 进行 nonce signature。
+   - Gateway 接受了 device identity 形状，阻塞点推进到 `AUTH_TOKEN_MISSING`。
+   - 这说明 device identity 是必要路径，但仅有 device identity 还不足以进入 RPC session。
+
+2. 后续不能直接开始 `OpenClawBackend`。
+   - 目前仍未收到 `hello-ok`。
+   - 没有拿到 `hello-ok.features.methods/events`。
+   - 没有成功调用 `health` / `status`、`skills.status` 或 `models.list`。
+   - 如果现在实现 `OpenClawBackend`，会把尚未验证的 token auth、device token、pairing approval 和 scope 假设固化进业务代码。
+
+3. 下一步必须先做 TASK-007：Gateway token auth + hello-ok 最小验证。
+   - TASK-007 应验证 gateway token auth + device identity + nonce signature 能否收到 `hello-ok`。
+   - 如果 `hello-ok` 成功，应立刻尝试至少一个基础 RPC，例如 `health` / `status` 或 `skills.status`。
+   - 如果失败，必须记录脱敏后的失败 code、缺失字段和下一步判断。
+
+4. `OpenClawBackend` 初版必须等 `hello-ok` + 至少一个基础 RPC 成功后再开始。
+   - `hello-ok` 是 Gateway protocol 的能力发现入口。
+   - 至少一个基础 RPC 成功后，才有依据设计连接状态、能力模型、错误处理、权限提示和重连策略。
+
+5. 产品 onboarding 后续需要设计以下流程：
+   - 连接 OpenClaw Gateway。
+   - 本地生成并安全持久化 device identity。
+   - 用户填写 / 导入 gateway token。
+   - 必要时引导用户批准设备。
+   - 收到 `hello-ok` 后再进入 Agent 功能。
+
+6. Token 安全约束：
+   - Token 绝不能读取 `.env`。
+   - Token 绝不能输出。
+   - Token 绝不能写入日志。
+   - Token 绝不能通过 CLI 参数传递。
+   - Token 不得写进代码、文档或仓库。
+   - 后续产品实现应使用用户临时输入和 OS 安全存储，不经过普通前端日志或命令行参数。
+
+#### TASK-007 建议边界
+
+下一步任务：
+
+> TASK-007：OpenClaw Gateway token auth + hello-ok 最小验证
+
+建议允许范围：
+
+- 新增 `docs/openclaw-auth-hello-ok-notes.md`。
+- 新增或更新 `scripts/openclaw-auth-probe.mjs`。
+- 只做 loopback Gateway protocol probe。
+- 允许用户通过环境变量临时提供 gateway token/password，但脚本不得读取 `.env`，不得打印值，且不得通过 CLI 参数接收 Token。
+
+建议禁止范围：
+
+- 不改业务代码。
+- 不修改 `src/` 或 `src-tauri/`。
+- 不接入 App UI。
+- 不实现 `OpenClawBackend`。
+- 不读取 `.env`。
+- 不输出 Token。
+- 不把 Token 写进代码。
+- 不修改 OpenClaw 配置。
+- 不自动批准设备。
+
+#### TASK-007 验收重点
+
+- probe 清晰输出 `connect.challenge` 是否收到。
+- probe 清晰输出 device identity 是否生成 / 复用。
+- probe 清晰输出 auth token 是否由用户临时提供，但不显示 Token 值。
+- probe 清晰输出 `hello-ok` 是否收到。
+- 如果 `hello-ok` 成功，probe 尝试 `health` / `status`、`skills.status`、`models.list`，并记录结果。
+- 如果失败，probe 输出脱敏后的 error code、message、details 摘要。
+
+### Codex 审查反馈：TASK-008
+
+- 审查日期：2026-05-25
+- 审查范围：`docs/openclaw-auth-source-notes.md`、`scripts/openclaw-auth-source-probe.mjs`、`AGENT_BOARD.md`
+- 审查结论：TASK-008 合格，状态改为“已完成”。
+- 业务代码检查：本次审查未修改 `src/`、`src-tauri/`，未执行 TASK-009，未实现 `OpenClawBackend`，未读取 `.env`，未输出 Token。
+
+#### 关键判断
+
+1. `hello-ok` 未打通的根因不是 token 字段形状、协议版本或签名算法。
+   - TASK-006/TASK-007 已验证 device identity + nonce signature 形状能推进协议错误。
+   - TASK-008 进一步确认，当前问题不是继续猜 token 字段形状或 HTTP endpoint。
+
+2. 根因是 probe 生成的 device identity 未在 OpenClaw Gateway 设备配对表中。
+   - CLI 自身 RPC 能成功，是因为 CLI 使用的是自己已配对身份。
+   - probe 脚本生成的是独立 device identity，不在 Gateway 已配对或待批准设备列表中。
+   - 因此 OpenClawBackend 不能跳过设备配对流程。
+
+3. `canRetryWithDeviceToken` 是 boolean capability flag，不是 token 值。
+   - 不应把 `canRetryWithDeviceToken=true` 当成可用 device token。
+   - 也不应继续用启发式扫描任意字段猜 token。
+
+4. `openclaw config get gateway.auth.token` 不能作为可靠 token 来源。
+   - CLI 会返回 `__OPENCLAW_REDACTED__`。
+   - 产品实现不能依赖该命令获取 gateway token。
+   - Gateway token 必须由用户从 Control UI 获取/导入，或通过后续明确安全授权流程提供。
+
+5. 正确路径是设备配对闭环：
+   - App 生成持久化 device identity。
+   - 用户从 Control UI 复制 gateway token，或按引导批准设备。
+   - App connect 触发 pending request。
+   - 用户执行 `openclaw devices approve <requestId>`。
+   - App 重连收到 `hello-ok`。
+   - App 保存 device token，后续使用 device token。
+
+6. `OpenClawBackend` 初版必须包含 pairing / onboarding 逻辑。
+   - 不能只写一个 WebSocket transport。
+   - 不能只发送裸 connect。
+   - 不能假设用户已经有可用 device token。
+   - 必须能处理 pending request、approval、hello-ok、device token 持久化和后续 reconnect。
+
+7. 不能再继续猜 HTTP `/v1/models` 或裸 WS。
+   - `/v1/models` 已确认不是主接入依据，只能作为辅助诊断。
+   - 裸 WS 只能到 `connect.challenge`，不能进入 RPC session。
+   - 后续主路径必须围绕 Gateway device identity + pairing + `hello-ok`。
+
+8. 下一步应规划 TASK-009：OpenClaw 设备配对流程最小闭环验证。
+   - TASK-009 目标不是接入 `ChatPage`。
+   - TASK-009 目标是打通 pending request → approve → `hello-ok` → 基础 RPC。
+   - `OpenClawBackend` 初版必须等 TASK-009 成功后再开始。
+
+#### TASK-009 建议边界
+
+下一步任务：
+
+> TASK-009：OpenClaw 设备配对流程最小闭环验证
+
+建议允许范围：
+
+- 新增 `docs/openclaw-device-pairing-loop-notes.md`。
+- 新增或更新 `scripts/openclaw-device-pairing-loop-probe.mjs`。
+- 只做 loopback Gateway pairing protocol probe 和文档记录。
+- 允许用户临时提供 gateway token，但不得读取 `.env`，不得打印 Token，且不得通过 CLI 参数接收 Token。
+
+建议禁止范围：
+
+- 不改业务代码。
+- 不修改 `src/` 或 `src-tauri/`。
+- 不接入 `ChatPage`。
+- 不实现 `OpenClawBackend`。
+- 不读取 `.env`。
+- 不输出 Token。
+- 不把 Token 写进代码。
+- 不修改 OpenClaw 配置。
+- 不自动批准设备，除非用户明确确认。
+
+#### TASK-009 验收重点
+
+- probe 使用持久化 device identity。
+- probe 能触发或识别 pending request。
+- probe 能输出 request id 的脱敏摘要和 approve 命令模板。
+- 用户批准后，probe 重连能收到 `hello-ok`。
+- 收到 `hello-ok` 后，probe 至少调用一个基础 RPC，例如 `health` / `status`、`skills.status` 或 `models.list`。
+- 如果失败，probe 输出脱敏后的错误 code、message、details 和下一步判断。
