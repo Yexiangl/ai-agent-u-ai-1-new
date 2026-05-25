@@ -169,7 +169,7 @@ OpenClaw 将成为主体 Agent 后端。Hermes 不再作为普通用户主路径
 
 ### TASK-004：OpenClaw Gateway smoke test
 
-- 状态：待验收
+- 状态：已完成
 - 优先级：P1
 - 负责人：OpenCode
 
@@ -500,3 +500,65 @@ export type AgentBackendEvent =
 5. ClawHub 第三方技能安装有安全风险。短期 Skill Center 只保留内置模板和 OpenClaw skill 状态读取，不开放任意第三方 skill 一键安装。
 6. Windows 原生 OpenClaw 虽可用，但仍需 smoke test，不应承诺完全无坑。
 7. 下一步建议执行 TASK-002：Agent Backend 抽象层，不改 UI 大逻辑、不删除 Hermes、不接真实 OpenClaw。
+
+### Codex 审查反馈：TASK-004
+
+- 审查日期：2026-05-25
+- 审查范围：`docs/openclaw-smoke-test.md`、`scripts/openclaw-smoke-test.mjs`、`AGENT_BOARD.md`
+- 审查结论：TASK-004 合格，建议状态改为“已完成”。
+- 业务代码检查：本次审查未修改 `src/`、`src-tauri/`，未执行 TASK-005，未读取 `.env`，未输出 Token。
+
+#### 关键判断
+
+1. smoke test 是否正确区分 Gateway 可达、Control UI 可达、OpenAI-compatible API 可用？
+   - 结论：区分正确。
+   - 依据：文档明确写出 Gateway 可达不等于 OpenAI-compatible API 可用，Control UI 可达也不等于 `/v1/models` 可用；脚本分别检查 HTTP root、`GET /v1/models` 和 WebSocket。
+
+2. `/v1/models` 返回 `text/html` fallback 时是否被判定为 WARN，而不是误判成功？
+   - 结论：是。
+   - 依据：脚本检查 `content-type` 和响应体中的 Control UI 标记；命中 `text/html` / `openclaw-app` / `OpenClaw Control UI` 时记录 `WARN`，并标注 `api_confirmed=false`。
+
+3. WebSocket `connect.challenge` 是否作为后续 `OpenClawBackend` 的主要依据？
+   - 结论：是。
+   - 依据：文档明确指出 WebSocket RPC 的 `connect.challenge` / `hello-ok` 行为比 HTTP `/v1/models` 更关键；脚本将收到 `connect.challenge` 作为 WebSocket PASS 条件。
+
+4. 脚本是否没有读取 `.env`、没有输出 Token、没有修改 OpenClaw 配置？
+   - 结论：符合要求。
+   - 依据：脚本未读取 `.env` 文件，未写入 OpenClaw config，未执行 repair/install 类命令；只调用 `openclaw --version`、`openclaw gateway status`、HTTP 探测和 WebSocket 探测。输出经过 `sanitize()` 脱敏。注意：脚本会把当前 `process.env` 传给 `openclaw` 子进程，这是正常 CLI 执行环境，不等于读取项目 `.env`。
+
+5. 是否可以将 TASK-004 标记为已完成？
+   - 结论：可以。
+   - 原因：文档和脚本覆盖了 macOS、Windows 原生、Gateway、Control UI、`/v1/models` fallback、WebSocket challenge、常见问题和后续接入前必须确认项；没有发现需要 OpenCode 立即补充的问题。
+
+6. 下一步是否应该设计 OpenClawBackend 初版，且优先走 WebSocket RPC，而不是 HTTP `/v1/models`？
+   - 结论：是，但应分成小任务。
+   - 建议：下一步可以规划 OpenClawBackend 初版，优先验证 WebSocket `connect.challenge`、完整 handshake、`chat.send`、event subscription、`chat.abort`。HTTP `/v1/models` 只能作为辅助能力探测，不能作为主接入依据。
+
+#### TASK-005 建议边界
+
+建议将 TASK-005 细化为：
+
+> TASK-005：OpenClawBackend 初版设计与最小 WebSocket RPC 接入验证
+
+建议目标：
+
+- 不改大 UI，不替换主路径为 OpenClaw-only。
+- 新增 OpenClaw backend 的最小连接层，优先走 Gateway WebSocket RPC。
+- 实现或验证 `connect.challenge`、`connect` handshake、基础 status、send message、event subscription、abort run。
+- `/v1/models` 只作为辅助诊断；若返回 Control UI HTML，必须保留 WARN，不得当作 models API 成功。
+- 不开放 ClawHub 第三方 skill 一键安装。
+- 不读取 `.env`，不输出 Token，不修改 OpenClaw 配置。
+
+建议暂不做：
+
+- 不做 OpenClaw-only 重构。
+- 不迁移全部 Skill Center。
+- 不做 provider/baseUrl 普通 UI。
+- 不做 Windows WSL2 自动配置。
+- 不实现第三方 skill 安装。
+
+#### 残余风险
+
+- smoke test 文档和脚本本身合格，但 Windows 原生仍需要实机 smoke test，不能承诺完全无坑。
+- OpenClaw auth、device pairing、scopes、`hello-ok` 和 chat event payload 仍需 TASK-005 真实验证。
+- `/v1/models` 当前实测为 Control UI HTML fallback，后续不能依赖它作为 backend 主路径。
