@@ -36,8 +36,9 @@ import {
 import { listModels, type ChatMessage } from "@/lib/api";
 import { DEFAULT_CONFIG, type AppConfig } from "@/lib/config";
 import { clearConfig, loadConfig, saveConfig } from "@/lib/storage";
-import { applyHermesModelConfig, applyHermesReasoningConfig, cancelHermesChatCompletion, checkHermes, checkHermesApiServer, deleteAiFile, ensureAiFilesDirs, extractAiFileText, hermesChatCompletion, listAiFiles, openAiFileLocation, pickAndUploadFile, readChatSessions, readHermesCronCliStatus, readHermesCronOverview, readHermesModelConfig, readHermesNativeMemory, saveGeneratedFile, writeChatSessions, type AiFileEntry, type ChatSession, type HermesApiServerStatus, type HermesChatChunk, type HermesChatDone, type HermesChatError, type HermesCronCliStatus, type HermesCronOverview, type HermesModelConfig, type HermesNativeMemoryFile, type HermesNativeMemoryResult, type HermesStatus, type HermesStreamDiagnostics, type HermesToolProgress } from "@/lib/hermes";
+import { applyHermesModelConfig, applyHermesReasoningConfig, deleteAiFile, ensureAiFilesDirs, extractAiFileText, listAiFiles, openAiFileLocation, pickAndUploadFile, readChatSessions, readHermesCronCliStatus, readHermesCronOverview, readHermesModelConfig, readHermesNativeMemory, saveGeneratedFile, writeChatSessions, type AiFileEntry, type ChatSession, type HermesApiServerStatus, type HermesChatChunk, type HermesChatDone, type HermesChatError, type HermesCronCliStatus, type HermesCronOverview, type HermesModelConfig, type HermesNativeMemoryFile, type HermesNativeMemoryResult, type HermesStatus, type HermesStreamDiagnostics, type HermesToolProgress } from "@/lib/hermes";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { hermesLegacyBackend } from "@/lib/agentBackend";
 import { cn, getErrorMessage } from "@/lib/utils";
 import { officialSkills, officialCategories, hermesHubSkills, hermesHubCategories, type OfficialSkill, type HermesHubSkill } from "@/data/skills";
 import { tutorials } from "@/data/tutorials";
@@ -345,77 +346,80 @@ function updateSessionFromMessages(session: ChatSession, messages: UiChatMessage
   };
 }
 
-function MarkdownContent({ text }: { text: string }) {
-  if (!text) return null;
+function MarkdownContent({ text, streaming = false }: { text: string; streaming?: boolean }) {
   const [copiedIdx, setCopiedIdx] = useState(-1);
-  const lines = text.split("\n");
-  const elements: ReactNode[] = [];
-  let i = 0;
-  let key = 0;
 
-  const parseInline = (s: string): ReactNode[] => {
-    const parts: ReactNode[] = [];
-    const pattern = /(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*)/g;
-    let last = 0;
-    let k = 0;
-    for (const match of s.matchAll(pattern)) {
-      const token = match[0];
-      const index = match.index ?? 0;
-      if (index > last) parts.push(<span key={k++}>{s.slice(last, index)}</span>);
-      if (token.startsWith("`")) {
-        parts.push(<code key={k++} className="rounded bg-muted px-1 py-0.5 font-mono text-[13px]">{token.slice(1, -1)}</code>);
-      } else if (token.startsWith("**")) {
-        parts.push(<strong key={k++}>{token.slice(2, -2)}</strong>);
-      } else {
-        parts.push(<em key={k++}>{token.slice(1, -1)}</em>);
+  const elements = useMemo(() => {
+    if (!text) return [];
+    const lines = text.split("\n");
+    const elements: ReactNode[] = [];
+    let i = 0;
+    let key = 0;
+
+    const parseInline = (s: string): ReactNode[] => {
+      const parts: ReactNode[] = [];
+      const pattern = /(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*)/g;
+      let last = 0;
+      let k = 0;
+      for (const match of s.matchAll(pattern)) {
+        const token = match[0];
+        const index = match.index ?? 0;
+        if (index > last) parts.push(<span key={k++}>{s.slice(last, index)}</span>);
+        if (token.startsWith("`")) {
+          parts.push(<code key={k++} className="rounded bg-muted px-1 py-0.5 font-mono text-[13px]">{token.slice(1, -1)}</code>);
+        } else if (token.startsWith("**")) {
+          parts.push(<strong key={k++}>{token.slice(2, -2)}</strong>);
+        } else {
+          parts.push(<em key={k++}>{token.slice(1, -1)}</em>);
+        }
+        last = index + token.length;
       }
-      last = index + token.length;
-    }
-    if (last < s.length) parts.push(<span key={k++}>{s.slice(last)}</span>);
-    return parts;
-  };
+      if (last < s.length) parts.push(<span key={k++}>{s.slice(last)}</span>);
+      return parts;
+    };
 
-  while (i < lines.length) {
-    const line = lines[i]!;
+    while (i < lines.length) {
+      const line = lines[i]!;
 
-    // code block
-    if (line.trim().startsWith("```")) {
-      const lang = line.trim().slice(3).trim();
-      i++;
-      const codeLines: string[] = [];
-      while (i < lines.length && !lines[i]!.trim().startsWith("```")) {
-        codeLines.push(lines[i]!);
+      // code block; while streaming, an unclosed fence still renders as a stable pre block.
+      if (line.trim().startsWith("```")) {
+        const lang = line.trim().slice(3).trim();
         i++;
+        const codeLines: string[] = [];
+        while (i < lines.length && !lines[i]!.trim().startsWith("```")) {
+          codeLines.push(lines[i]!);
+          i++;
+        }
+        if (i < lines.length) i++;
+        const codeText = codeLines.join("\n");
+        elements.push(
+          <pre key={key} className={cn("group relative my-2 overflow-x-auto rounded-lg bg-zinc-950 p-3 text-[13px] leading-relaxed text-zinc-100 dark:bg-zinc-900", streaming && "border border-zinc-800/80")}>
+            {lang && <div className="mb-1 text-[10px] text-zinc-500">{lang}</div>}
+            <code>{codeText}</code>
+            <button
+              className="absolute right-2 top-2 rounded p-1 text-zinc-500 opacity-0 transition hover:text-zinc-300 group-hover:opacity-100"
+              onClick={() => { navigator.clipboard.writeText(codeText); setCopiedIdx(key); setTimeout(() => setCopiedIdx(-1), 2000); }}
+            >
+              {copiedIdx === key ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
+            </button>
+          </pre>
+        );
+        key++;
+        continue;
       }
-      i++; // closing ```
-      const codeText = codeLines.join("\n");
-      elements.push(
-        <pre key={key} className="group relative my-2 overflow-x-auto rounded-lg bg-zinc-950 p-3 text-[13px] leading-relaxed text-zinc-100 dark:bg-zinc-900">
-          {lang && <div className="mb-1 text-[10px] text-zinc-500">{lang}</div>}
-          <code>{codeText}</code>
-          <button
-            className="absolute right-2 top-2 rounded p-1 text-zinc-500 opacity-0 transition hover:text-zinc-300 group-hover:opacity-100"
-            onClick={() => { navigator.clipboard.writeText(codeText); setCopiedIdx(key); setTimeout(() => setCopiedIdx(-1), 2000); }}
-          >
-            {copiedIdx === key ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
-          </button>
-        </pre>
-      );
-      key++;
-    }
 
-    // heading
-    const hMatch = line.trim().match(/^(#{1,3})\s+(.+)/);
-    if (hMatch) {
+      // heading
+      const hMatch = line.trim().match(/^(#{1,3})\s+(.+)/);
+      if (hMatch) {
       const level = hMatch[1]!.length;
       const Tag = level === 1 ? "h2" : level === 2 ? "h3" : "h4";
       elements.push(<Tag key={key++} className={level === 1 ? "mt-4 mb-1 text-base font-semibold" : level === 2 ? "mt-3 mb-1 text-sm font-semibold" : "mt-2 mb-1 text-sm font-medium"}>{parseInline(hMatch[2]!)}</Tag>);
       i++;
       continue;
-    }
+      }
 
-    // unordered list
-    if (/^[\s]*[-*]\s+/.test(line)) {
+      // unordered list
+      if (/^[\s]*[-*]\s+/.test(line)) {
       const items: string[] = [];
       while (i < lines.length && /^[\s]*[-*]\s+/.test(lines[i] ?? "")) {
         items.push(lines[i]!.replace(/^[\s]*[-*]\s+/, ""));
@@ -427,10 +431,10 @@ function MarkdownContent({ text }: { text: string }) {
         </ul>
       );
       continue;
-    }
+      }
 
-    // ordered list
-    if (/^[\s]*\d+\.\s+/.test(line)) {
+      // ordered list
+      if (/^[\s]*\d+\.\s+/.test(line)) {
       const items: string[] = [];
       while (i < lines.length && /^[\s]*\d+\.\s+/.test(lines[i] ?? "")) {
         items.push(lines[i]!.replace(/^[\s]*\d+\.\s+/, ""));
@@ -442,10 +446,10 @@ function MarkdownContent({ text }: { text: string }) {
         </ol>
       );
       continue;
-    }
+      }
 
-    // blockquote
-    if (line.startsWith(">")) {
+      // blockquote
+      if (line.startsWith(">")) {
       const qLines: string[] = [];
       while (i < lines.length && (lines[i] ?? "").startsWith(">")) {
         qLines.push(lines[i]!.replace(/^>\s?/, ""));
@@ -457,10 +461,10 @@ function MarkdownContent({ text }: { text: string }) {
         </blockquote>
       );
       continue;
-    }
+      }
 
-    // table (GFM)
-    if (line.includes("|") && i + 1 < lines.length && /^\|?[\s:]*-+[\s:]*\|/.test(lines[i + 1] ?? "")) {
+      // table (GFM). Incomplete separator rows stay as text until they are complete.
+      if (line.includes("|") && i + 1 < lines.length && /^\|?[\s:]*-+[\s:]*\|/.test(lines[i + 1] ?? "")) {
       const tableLines: string[] = [];
       while (i < lines.length && (lines[i] ?? "").includes("|")) {
         tableLines.push(lines[i]!);
@@ -488,35 +492,44 @@ function MarkdownContent({ text }: { text: string }) {
         </div>
       );
       continue;
-    }
+      }
 
-    // hr
-    if (/^---+$/.test(line.trim()) || /^\*\*\*+$/.test(line.trim())) {
+      // hr
+      if (/^---+$/.test(line.trim()) || /^\*\*\*+$/.test(line.trim())) {
       elements.push(<hr key={key++} className="my-3 border-border/50" />);
       i++;
       continue;
-    }
+      }
 
-    // empty line → paragraph break
-    if (line.trim() === "") {
+      // empty line → paragraph break
+      if (line.trim() === "") {
       if (elements.length > 0 && typeof elements[elements.length - 1] === "object") {
         i++;
         continue;
       }
       i++;
       continue;
+      }
+
+      // paragraph
+      const pLines: string[] = [];
+      while (i < lines.length && (lines[i] ?? "").trim() !== "" && !/^[\s]*[-*]\s+/.test(lines[i] ?? "") && !/^[\s]*\d+\.\s+/.test(lines[i] ?? "") && !(lines[i] ?? "").startsWith(">") && !(lines[i] ?? "").trim().startsWith("```") && !(lines[i] ?? "").trim().match(/^#{1,3}\s+/) && !((lines[i] ?? "").includes("|") && i + 1 < lines.length && /^\|?[\s:]*-+[\s:]*\|/.test(lines[i + 1] ?? "")) && !/^---+$/.test((lines[i] ?? "").trim()) && !/^\*\*\*+$/.test((lines[i] ?? "").trim())) {
+        pLines.push(lines[i]!);
+        i++;
+      }
+      elements.push(<p key={key++} className="leading-relaxed">{parseInline(pLines.join("\n"))}</p>);
     }
 
-    // paragraph
-    const pLines: string[] = [];
-    while (i < lines.length && (lines[i] ?? "").trim() !== "" && !/^[\s]*[-*]\s+/.test(lines[i] ?? "") && !/^[\s]*\d+\.\s+/.test(lines[i] ?? "") && !(lines[i] ?? "").startsWith(">") && !(lines[i] ?? "").trim().startsWith("```") && !(lines[i] ?? "").trim().match(/^#{1,3}\s+/) && !((lines[i] ?? "").includes("|") && i + 1 < lines.length && /^\|?[\s:]*-+[\s:]*\|/.test(lines[i + 1] ?? "")) && !/^---+$/.test((lines[i] ?? "").trim()) && !/^\*\*\*+$/.test((lines[i] ?? "").trim())) {
-      pLines.push(lines[i]!);
-      i++;
-    }
-    elements.push(<p key={key++} className="leading-relaxed">{parseInline(pLines.join("\n"))}</p>);
-  }
+    return elements;
+  }, [text, streaming, copiedIdx]);
 
-  return <div className="space-y-1">{elements}</div>;
+  if (!text) return null;
+
+  return <div className={cn("space-y-1", streaming && "[&_table]:transition-none")}>{elements}</div>;
+}
+
+function StreamingMarkdownContent({ text }: { text: string }) {
+  return <MarkdownContent text={text} streaming />;
 }
 
 const navItems = [
@@ -559,11 +572,11 @@ function App() {
     let cancelled = false;
     const detect = async () => {
       try {
-        const cli = await checkHermes();
+        const cli = await hermesLegacyBackend.checkHermesInstalled();
         if (!cancelled) setHermesCli(cli);
       } catch { /* ignore */ }
       try {
-        const api = await checkHermesApiServer();
+        const api = await hermesLegacyBackend.checkHermesApiServer();
         if (!cancelled) setHermesApi(api);
       } catch { /* ignore */ }
       try {
@@ -575,7 +588,7 @@ function App() {
     const interval = window.setInterval(async () => {
       if (cancelled) return;
       try {
-        const api = await checkHermesApiServer();
+          const api = await hermesLegacyBackend.checkHermesApiServer();
         if (!cancelled) setHermesApi(api);
       } catch { /* ignore */ }
     }, 30_000);
@@ -591,13 +604,13 @@ function App() {
   };
 
   const refreshHermesApi = async () => {
-    const status = await checkHermesApiServer();
+    const status = await hermesLegacyBackend.checkHermesApiServer();
     setHermesApi(status);
     return status;
   };
 
   const refreshHermesCli = async () => {
-    const status = await checkHermes();
+    const status = await hermesLegacyBackend.checkHermesInstalled();
     setHermesCli(status);
     return status;
   };
@@ -2060,12 +2073,13 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
       }
 
       setPhase("thinking");
-      const result = await hermesChatCompletion(requestId, hermesModelName, agentMessages);
-      if (!result.success) {
+      const runHandle = await hermesLegacyBackend.startChat({ requestId, model: hermesModelName, messages: agentMessages });
+      const result = runHandle.raw as import("@/lib/hermes").HermesChatResult | undefined;
+      if (!result?.success) {
         if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
         cancelTypewriter();
-        setError(result.error || "请求提交失败");
-        saveErrorSummary(requestId, result.error || "请求提交失败");
+        setError(result?.error || "请求提交失败");
+        saveErrorSummary(requestId, result?.error || "请求提交失败");
         setPhase("error");
         setLoading(false);
         activeRequestRef.current = null;
@@ -2115,7 +2129,7 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
     // Save session with stopped content
     void saveCurrentSession(messagesRef.current);
     // Tell Rust to stop (best effort, non-blocking)
-    void cancelHermesChatCompletion(rid).catch(() => {});
+    void hermesLegacyBackend.cancelChat({ requestId: rid }).catch(() => {});
   };
 
   const regenLast = () => {
@@ -2296,7 +2310,7 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
                     )}>
                       {message.role === "assistant" && <ReasoningBlock content={message.reasoningContent || ""} isPlaceholder={isPlaceholder} phase={isPlaceholder ? phase : "done"} />}
                       {message.role === "assistant" && (message.toolEvents?.length ?? 0) > 0 && <ToolsBlock toolEvents={message.toolEvents} />}
-                      {showPlaceholderText ? <PlaceholderText phase={phase} elapsedLive={elapsedLive} /> : isActiveAssistant ? <div className="whitespace-pre-wrap leading-7">{message.content || ""}</div> : <MarkdownContent text={message.content || ""} />}
+                      {showPlaceholderText ? <PlaceholderText phase={phase} elapsedLive={elapsedLive} /> : isActiveAssistant ? <StreamingMarkdownContent text={message.content || ""} /> : <MarkdownContent text={message.content || ""} />}
                       {message.role === "user" && message.attachments && message.attachments.length > 0 && (
                         <div className="mt-3 flex flex-wrap gap-1.5 border-t border-white/20 pt-2">
                           {message.attachments.map((att, i) => (

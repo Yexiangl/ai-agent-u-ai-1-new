@@ -128,7 +128,7 @@ OpenClaw 将成为主体 Agent 后端。Hermes 不再作为普通用户主路径
 
 ### TASK-002：建立 Agent Backend 抽象层，不改变现有行为
 
-- 状态：待规划
+- 状态：待验收
 - 优先级：P0
 - 负责人：OpenCode
 
@@ -136,7 +136,15 @@ OpenClaw 将成为主体 Agent 后端。Hermes 不再作为普通用户主路径
 
 - 必须等 TASK-001 调研完成后再细化。
 - `AgentBackend` 接口应根据 OpenClaw 实际调用方式设计，不要盲目照搬 Hermes。
-- 当前不要让 OpenCode 执行本任务。
+- 已在用户确认后由 OpenCode 执行本任务。
+
+#### OpenCode 执行反馈
+
+- 修改文件：`src/lib/agentBackend.ts`，`src/App.tsx`，`AGENT_BOARD.md`
+- 修改摘要：新增 `AgentBackend` 抽象类型与能力模型，包含 `AgentBackendType`、`AgentBackendStatus`、`AgentBackendCapabilities`、`AgentChatMessage`、`AgentChatRequest`、`AgentRunHandle`、`AgentEvent`、`AgentBackend`；新增 `HermesLegacyBackend`，包装现有 Hermes installed/status/chat/cancel 能力，并预留事件桥接接口以适配 OpenClaw Gateway/WebSocket event model；`ChatPage` 仅将 Hermes 状态检测、提交对话和停止生成改为调用 `HermesLegacyBackend`，保留原有 Tauri 事件监听、流式输出、附件分析、Skill 进入对话和 UI 行为。
+- 验证命令：`npm run build`；`cargo check`
+- 验证结果：通过。`npm run build` 完成 `tsc && vite build`；`cargo check` 在 `src-tauri` 通过。未修改 Rust command，未接 OpenClaw 真实调用，未删除 Hermes，未改 Token 写入逻辑。
+- 残余风险：未做真实 GUI 人工点击验证；需验收 Agent 普通对话、停止生成、文件附件分析、Skill 运行生成指令后进入对话是否仍正常。`OpenClawBackend` 仅保留 TODO，真实接入应在后续 TASK-005 执行。
 
 ### TASK-003：删除普通导航中的定时任务页面
 
@@ -159,11 +167,27 @@ OpenClaw 将成为主体 Agent 后端。Hermes 不再作为普通用户主路径
 - 验证结果：`npm run build` 通过；`cargo check` 通过；`src/App.tsx` 中不再存在 `tasks` 导航项、`tasks` 页面分支或 `Timer` 导航图标引用；`src-tauri/src/main.rs` 中 `read_hermes_cron_overview`、`read_hermes_cron_cli_status` 和 invoke handler 仍保留。
 - 残余风险：未删除未引用的前端 `TasksPage` 组件，避免本轮扩大改动；未做真实 GUI 点击检查，人工验收时仍需确认 App 不白屏、Agent 对话、Skill Center、AI 文件库、使用概况均正常。
 
-### TASK-004：Onboarding 文案从 Hermes-only 改成 Agent 引擎初始化
+### TASK-004：OpenClaw Gateway smoke test
 
-- 状态：待规划
+- 状态：待验收
 - 优先级：P1
 - 负责人：OpenCode
+
+说明：
+
+- 按用户本轮指令执行 OpenClaw Gateway smoke test，不执行旧 Onboarding 文案任务。
+- 不修改 `src/` 或 `src-tauri/`。
+- 不读取 `.env`，不输出 Token，不修改 OpenClaw 配置，不执行 `openclaw doctor --repair`。
+
+#### OpenCode 执行反馈
+
+- 修改文件：`docs/openclaw-smoke-test.md`，`scripts/openclaw-smoke-test.mjs`，`AGENT_BOARD.md`
+- 修改摘要：新增 OpenClaw Gateway smoke test 文档和只读 Node 脚本；覆盖 macOS、Windows 原生、Gateway `18789`、`/v1/models`、WebSocket、常见问题和接入 `OpenClawBackend` 前必须确认的 API 行为。脚本只使用 Node 内置能力，执行 `openclaw --version`、`openclaw gateway status`、Gateway HTTP 探测、`GET /v1/models`、WebSocket 探测；不读取 `.env`，不发送或输出 gateway token，不修改配置。
+- 关键判断：Gateway 可达不等于 OpenAI-compatible API 可用，Control UI 可达不等于 `/v1/models` 可用；`/v1/models` 必须区分 JSON、`401` / `403` 鉴权失败、`text/html` / Control UI fallback。WebSocket RPC `connect.challenge` / hello-ok 行为应作为后续 `OpenClawBackend` 接入重点验证对象。
+- 验证命令：`npm run build`；`cargo check`；`node scripts/openclaw-smoke-test.mjs`
+- 验证结果：`npm run build` 通过；`cargo check` 在 `src-tauri` 通过；smoke test 无 hard failure。实测 OpenClaw `2026.5.22`，Gateway runtime running，监听 `127.0.0.1:18789`，HTTP root 返回 `200 OK`，WebSocket 成功连接并收到 `connect.challenge`。
+- 重要实测：`GET /v1/models` 返回 `200 OK` 但 `content-type=text/html; charset=utf-8`，响应体为 Control UI HTML 摘要，因此脚本判定为 WARN：`html_fallback=possible_control_ui; api_confirmed=false`。后续 `OpenClawBackend` 不应盲目依赖 `/v1/models`，必须先确认真实 endpoint、header、鉴权方式和返回 schema。
+- 残余风险：未做 Windows 原生实机验证；未实现 OpenClaw auth、device pairing、完整 WS handshake 或 chat RPC；未修改业务代码。
 
 ### TASK-005：新增 OpenClaw Backend 初版
 
