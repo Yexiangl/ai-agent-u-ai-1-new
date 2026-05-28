@@ -987,11 +987,13 @@ function Page({ active, setActive, chatDraft, setChatDraft, pendingNewSessionTit
   return <AboutPage config={config} updateConfig={updateConfig} />;
 }
 
-// TASK-025B: Format OpenClaw primary model for display (no token/provider)
+// TASK-025B/TASK-032D: Format model name for display (de-internalize routing IDs)
 function formatDisplayModel(raw?: string | null): string {
   if (!raw) return "";
+  if (raw === "openclaw/default") return "默认模型";
+  if (raw === "hermes-agent") return "AI 助手";
   const last = raw.split("/").pop() || raw;
-  return last;
+  return last || "";
 }
 
 function HomePage({ config, updateConfig, setActive, hermesCli, hermesApi, hermesModelConfig, chatState }: { config: AppConfig; updateConfig: (next: AppConfig) => Promise<void>; setActive: (id: RouteId) => void; hermesCli: HermesStatus | null; hermesApi: HermesApiServerStatus | null; hermesModelConfig: HermesModelConfig | null; chatState: ChatPageState }) {
@@ -1578,7 +1580,7 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
   chatState: ChatPageState;
 }) {
   const { messages, setMessages, messagesRef, chatSessions, setChatSessions, chatSessionsRef, latestSessionsRef, currentSessionId, setCurrentSessionId, currentSessionIdRef, loading, setLoading, phase, setPhase, error, setError, errorDetail, setErrorDetail, activeRequestRef, stoppedIdsRef, timerRef, unlistenRef, elapsedLive, setElapsedLive, lastElapsed, setLastElapsed, streamDiagnostics, setStreamDiagnostics, sessionsLoaded, setSessionsLoaded, sessionsLoadedRef, sessionError, setSessionError, saveQueueRef, runsRef, activeRuns: _activeRuns, hasRunningRun, setHasRunningRun, openclawConnected, setOpenclawConnected, openclawChecked, setOpenclawChecked, ocPrimaryModel, setOcPrimaryModel } = chatState;
-  const displayModel = formatDisplayModel(ocPrimaryModel) || "openclaw/default";
+  const displayModel = formatDisplayModel(ocPrimaryModel) || "模型信息待同步";
 
   const [input, setInput] = useState(initialDraft);
   const [attachments, setAttachments] = useState<PreparedAttachment[]>([]);
@@ -3017,7 +3019,7 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
                     {message.role === "assistant" && (
                       <div className="mt-1.5 flex flex-wrap items-center gap-2 pl-1 text-[10px] text-muted-foreground/40">
                         <span>{message.source || (USE_OPENCLAW_BACKEND ? "OpenClaw Agent" : "Hermes")}</span>
-                        {message.modelName && <span>{message.modelName}</span>}
+                        {message.modelName && <span>{formatDisplayModel(message.modelName)}</span>}
                         {compactElapsed && <span>{compactElapsed}</span>}
                         <div className="flex items-center gap-0.5 opacity-40 transition-opacity group-hover:opacity-100">
                         <Button variant="ghost" size="icon" className="h-7 w-7" title="复制" aria-label="复制" onClick={() => navigator.clipboard.writeText(message.content || "")}><Copy className="h-3.5 w-3.5" /></Button>
@@ -4101,12 +4103,8 @@ function UsagePage() {
     return { sessions: usedSessions, allMessages, assistantMsgs, userMsgs, totalTokens, promptTokens, completionTokens, avgTokens, todayTokens, weekTokens, lastUse, modelMap, topSessions, fmtTokens, fmtTokensOrNA, hasTokenUsage, usageMessageCount };
   }, [sessions]);
 
-  // TASK-032C: format model name for display (de-internalize openclaw/default)
-  const formatModelName = (name: string) => {
-    if (name === "openclaw/default") return "默认模型";
-    if (!name) return "模型信息待同步";
-    return name;
-  };
+  // TASK-032C: de-internalize model names via formatDisplayModel
+  const displayModelName = (name?: string | null) => formatDisplayModel(name) || "模型信息待同步";
 
   if (loading) {
     return <div className="flex items-center justify-center py-16"><Loader2 className="h-6 w-6 animate-spin" /></div>;
@@ -4159,7 +4157,7 @@ function UsagePage() {
                 <div className="space-y-2">
                   {[...modelMap.entries()].sort((a, b) => b[1] - a[1]).map(([model, tokens]) => (
                     <div key={model} className="flex items-center justify-between rounded-xl border bg-muted/30 px-4 py-3">
-                      <span className="font-medium">{formatModelName(model)}</span>
+                      <span className="font-medium">{displayModelName(model)}</span>
                       <span className="text-sm text-muted-foreground">{hasTokenUsage ? `${fmtTokens(tokens)} tokens` : "暂未提供"}</span>
                     </div>
                   ))}

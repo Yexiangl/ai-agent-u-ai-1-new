@@ -211,14 +211,20 @@ usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: num
 | 3 | Token 为 0 时标记为 "暂未统计" 而非 "0" | 避免误导 |
 | 4 | 模型用量分布中 `openclaw/default` 使用 `formatDisplayModel()` 美化 | 显示 "default" 更友好 |
 
-### 5.3 TASK-032D：模型名去内部化（P2，预计 1h）
+### 5.3 TASK-032D：模型名去内部化 ✅ 已完成（2026-05-28）
 
-| 步骤 | 文件 | 改动 |
-|---|---|---|
-| 1 | `App.tsx:2222,2499,2628,2636,2674` | `modelName` 优先使用 `result.model` 或 `ocPrimaryModel`，再 fallback |
-| 2 | `openclawBackend.ts:28` | 注释说明 `CHAT_MODEL` 为路由 ID |
-| 3 | `App.tsx:334` | 新会话默认模型使用 `ocPrimaryModel` |
-| 4 | UsagePage | 模型分布使用 `formatDisplayModel()` 展示 |
+**实现**：
+
+| 改动 | 说明 |
+|---|---|
+| `formatDisplayModel` 增强 | `openclaw/default` → "默认模型"，`hermes-agent` → "AI 助手" |
+| ChatPage 消息 footer modelName | 应用 `formatDisplayModel` |
+| ChatPage top bar fallback | `\|\| "openclaw/default"` → `\|\| "模型信息待同步"` |
+| UsagePage 模型分布 | 使用全局 `formatDisplayModel`（替换本地 formatter） |
+
+**剩余 `openclaw/default` 位置**：均为内部路由 ID / API 请求参数 / 系统提示词 / 高级诊断，非普通 UI。被 `formatDisplayModel` 过滤后才显示为用户可读文案。
+
+**不变量**：不改请求 model、不改 config、不改模型供应逻辑。
 
 ---
 
