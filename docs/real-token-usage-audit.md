@@ -155,7 +155,26 @@ usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: num
 
 ## 5. 推荐实现方案
 
-### 5.1 TASK-032B：保存真实 usage（P1，预计 1h）
+### 5.1 TASK-032B：保存真实 usage ✅ 已完成（2026-05-28）
+
+**实现**：
+
+| 文件 | 位置 | 改动 |
+|---|---|---|
+| `openclawBackend.ts:22` | `usage: false` → `usage: true` | 能力声明 |
+| `openclawBackend.ts:91` | `raw` 增加 `usage: result.usage` | Backend 透传 usage |
+| `App.tsx:2492` | `raw` 类型增加 `usage?: unknown` | 类型标注 |
+| `App.tsx:2499` | 消息写入增加 `usage: raw?.usage` | 前台保存 |
+| `App.tsx:2674` | 消息写入增加 `usage: raw?.usage` | 后台 run 保存 |
+
+**链路**：API → Rust → HttpClient → Backend.raw → App.tsx message.usage ✅
+
+**不变量**：
+- 只对 assistant message 保存 usage
+- usage 不存在时保持 undefined，不伪造 0
+- 不改 chat-sessions 数据结构（`UiChatMessage.usage` 类型已存在）
+- 不做本地 token 估算
+- 不改用量概览 UI
 
 **前置条件**：API 已返回 usage（已证实 ✅）
 

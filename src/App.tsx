@@ -2489,14 +2489,14 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
           const run = runsRef.current.get(requestId);
           if (run?.localCancel) return; // cancelled, ignore result
 
-          const raw = runHandle.raw as { content?: string; model?: string } | undefined;
+          const raw = runHandle.raw as { content?: string; model?: string; usage?: unknown } | undefined;
           const content = raw?.content || "";
           cleanupTimers();
 
           // TASK-021C: write full content via App-level refs (survives page switches)
           messagesRef.current = messagesRef.current.map((m) =>
             m.requestId === requestId
-              ? { ...m, content: (m.content || "") + (content || ""), modelName: raw?.model || "openclaw/default" }
+? { ...m, content: (m.content || "") + (content || ""), modelName: raw?.model || "openclaw/default", usage: raw?.usage as UiChatMessage["usage"] }
               : m
           );
           setMessages(messagesRef.current);
@@ -2666,12 +2666,12 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
     })().then((runHandle) => {
       const run = runsRef.current.get(newRequestId);
       if (run?.localCancel) return;
-      const raw = runHandle.raw as { content?: string; model?: string } | undefined;
+      const raw = runHandle.raw as { content?: string; model?: string; usage?: unknown } | undefined;
       const content = raw?.content || "";
       cleanupTimers();
       messagesRef.current = messagesRef.current.map((m) =>
         m.requestId === newRequestId
-          ? { ...m, content: (m.content || "") + (content || ""), modelName: raw?.model || "openclaw/default" }
+          ? { ...m, content: (m.content || "") + (content || ""), modelName: raw?.model || "openclaw/default", usage: raw?.usage as UiChatMessage["usage"] }
           : m
       );
       setMessages(messagesRef.current);

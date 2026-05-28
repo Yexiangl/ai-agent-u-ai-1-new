@@ -19,7 +19,7 @@ export const openclawCapabilities: AgentBackendCapabilities = {
   sessions: false,   // HTTP-first: stateless
   attachments: false,
   skills: false,     // HTTP-first: no skills.status
-  usage: false,
+  usage: true,
   memory: false,
   cron: false,
   tools: false,
@@ -88,7 +88,7 @@ export class OpenClawBackend implements AgentBackend {
       requestId: request.requestId,
       sessionId: request.sessionId ?? null,
       accepted: true,
-      raw: { content: result.content, model: result.model },
+      raw: { content: result.content, model: result.model, usage: result.usage },
     };
   }
 

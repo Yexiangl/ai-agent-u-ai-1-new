@@ -221,7 +221,7 @@ OpenClaw 将成为主体 Agent 后端。Hermes 不再作为普通用户主路径
 | TASK-031F | ✅ 待验收 | P2 | 全项目 UI 文案回归测试 | 确认旧文案清除、新文案正确、敏感信息未暴露、功能未误伤。P1 修复：tutorials.ts 残留旧文案。 |
 | TASK-032 | 审计中 | P0 | 用量概览真实性与统计体系 | 父任务：审计数据来源、修复 Token 统计、模型名去内部化。 |
 | TASK-032A | ✅ 待验收 | P0 | 真实 Token usage 字段审计 | 审计完成：`docs/real-token-usage-audit.md`。确认 API 返回完整 usage（prompt/completion/total_tokens），Rust 层正确提取并返回，瓶颈在 `openclawBackend.ts:91` 丢弃了 `result.usage`。修复极简（3 位置传递已有数据）。建议直接进入 TASK-032B。 |
-| TASK-032B | 待规划 | P1 | 保存真实 usage | `openclawBackend.startChat()` raw 增加 usage + App.tsx 消息写入 usage。 |
+| TASK-032B | ✅ 待验收 | P1 | 保存真实 usage | `openclawBackend.startChat()` raw 增加 usage + App.tsx 消息写入 usage（前台 + 后台 run）。已在 `95bb80a`（TASK-032A）测试通过后执行。 |
 | TASK-032C | 待规划 | P0 | 用量概览 UI 修正 | 标题→本地用量概览，Token 标记，模型名去内部化。 |
 | TASK-032D | 待规划 | P2 | 模型名去内部化 | modelName 使用真实模型名替代 openclaw/default。 |
 | TASK-028 | 进行中（阶段性完成） | P2 | Portable / U 盘 A+B 模式可行性审计 | A+B 可行性、data mode、runtime 探针、Windows/macOS 启动方案和安全策略文档均已完成；仍等待实现类子任务。 |
@@ -322,6 +322,7 @@ OpenClaw 将成为主体 Agent 后端。Hermes 不再作为普通用户主路径
 - TASK-031D 已执行（2026-05-28）：摸鱼中心文案 polish 完成。修改文件：`src/App.tsx`（MoyuCenterPage）、`docs/moyu-center-design.md`。改动：(1) 副标题：不耽误正事 → 给自己充个电；(2) Hero：不算摆烂算系统维护 → 让状态慢慢回来；(3) 别直接下线 → 别彻底掉线；但还能交付 → 但还能继续；(4) 桌宠：嘴上嫌弃 → 轻轻吐槽；合理装死 → 合理放空三分钟；(5) 今日摸鱼任务 → 今日休息任务；(6) 健康摸鱼任务 → 健康休息任务；(7) 离谱 → 轻松；把小事封成 → 把今天的小进展变成。模块名"摸鱼中心"不变，行为未变（仍只 setChatDraft + setActive("chat")）。`npm run build` ✅ `cargo check` ✅ `probe.mjs` ✅ `test-redaction` 21/21 ✅。人工验收脚本见下方。
 - TASK-031F 已执行（2026-05-28）：全项目 UI 文案回归测试完成。源码旧文案全清；新文案全部到位；敏感信息未暴露；功能无明显误伤。P1 修复：`src/data/tutorials.ts` 中残留旧文案（"模型供应 Token"→"模型访问密钥"、"应用 OpenClaw 配置"→"保存配置"、"重启 OpenClaw Gateway"→"重启本地服务"）。`npm run build` ✅ `cargo check` ✅ `probe.mjs` ✅ `test-redaction` 21/21 ✅。下一步建议人工验收 TASK-031 全系列后收口提交。
 - TASK-032A 已执行（2026-05-28）：真实 Token usage 字段审计完成。输出 `docs/real-token-usage-audit.md`。通过本地 probe 证实 OpenClaw HTTP `/v1/chat/completions` 响应包含完整 usage 对象（prompt_tokens + completion_tokens + total_tokens）。Rust 层正确提取并返回 usage，TypeScript 客户端类型完整，瓶颈唯一在 `openclawBackend.ts:91` 丢弃了 `result.usage`。修复极简：Backend raw 加 1 字段 + App.tsx 消息保存加 1 字段 + 能力声明改 true。`UiChatMessage.usage` 字段已定义，无需改数据结构。建议直接进入 TASK-032B。
+- TASK-032B 已执行（2026-05-28）：真实 usage 数据链路打通。修改：`openclawBackend.ts:22`（能力声明 true）、`:91`（raw 增加 usage）、`App.tsx:2492`（raw 类型增加 usage）、`:2499`（前台消息保存 usage）、`:2674`（后台 run 消息保存 usage）。usage 不存在时保持 undefined，不伪造 0。不改用量概览 UI。`npm run build` ✅ `cargo check` ✅ `probe.mjs` ✅ `test-redaction` 21/21 ✅。下一步建议 TASK-032C（用量概览 UI 修正）。
 - TASK-031D 终审通过（2026-05-28）：摸鱼中心文案 polish 合格。旧词（摆烂/装死/系统维护/别直接下线/嘴上嫌弃）已全部清除。新文案保持轻松但不低级（充电/放空/状态恢复/轻轻吐槽/别彻底掉线）。"摸鱼中心"模块名保留。"今日摸鱼任务"→"今日休息任务"合理。prompt 保留"不刷短视频/不沉迷/不影响正事/不是医学或心理诊断"。行为未变（setChatDraft+setActive）。TASK-031 主线 A/B/C/D/E 全部完成，仅剩 F 回归测试。下一步建议 TASK-031F 或直接提交。
 - TASK-031C 终审通过（2026-05-28）：Badge/按钮/安全提示/错误提示统一合格。Badge：内置/插件/工作流/未验证。按钮：使用/暂未开放/开始对话/生成桌宠。错误提示：本地服务未运行/请求异常/密钥未配置（OpenClaw/Gateway 已清除）。安全提示精简不甩锅。TASK-031E P1 观察项（错误消息 OpenClaw）已在本任务修复。功能逻辑未变。下一步建议 TASK-031D 摸鱼中心文案 polish。
 - TASK-031E 终审通过（2026-05-28）：AI 助手页普通视图技术词弱化合格。旧词（模型供应配置/Token/应用到 OpenClaw 配置/Gateway token 未配置/HTTP 对话接口未启用）已全部替换为用户化表达（模型配置/密钥/保存配置/密钥未配置/本地服务未连接）。高级诊断保留 Gateway/HTTP/Legacy 合理。P1 观察项：错误消息（line 1095/2461/2523）仍有 OpenClaw/Gateway 字样，建议后续 TASK-031C 一并处理。未改功能逻辑/config/Token 写入/install/run store/portable。下一步建议 TASK-031C Badge/按钮/安全提示统一。
