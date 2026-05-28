@@ -203,8 +203,11 @@ OpenClaw 将成为主体 Agent 后端。Hermes 不再作为普通用户主路径
 | TASK-029A | 待验收 | P1 | 阶段性版本测试与发布说明 | 已完成：4 项构建验证通过，敏感信息检索无新增暴露，stage-release-notes.md 和 release-checklist §20 已输出。 |
 | TASK-030 | 进行中 | P1 | 摸鱼中心 / 轻养成模块 | 父任务：独立一级模块，不做 Skill Center 分类页，不做常驻桌宠/通知/计时器。 |
 | TASK-030A | 已完成 | P1 | 摸鱼中心产品方案与信息架构 | 已审查通过：独立一级模块定位清楚，5 卡片信息架构合理，行为统一（prompt→跳转→不自动发送），安全边界充分（非医学、不读文件/隐私、不常驻进程），后续任务拆分合理。 |
-| TASK-030B | 待规划 | P1 | 摸鱼中心独立页面 UI | 合并执行：独立页面 + prompt 跳转骨架。 |
-| TASK-030C | 待规划 | P1 | 首批摸鱼 prompt 工作流接入 | 与 030B 合并执行。 |
+| TASK-030B | 已完成 | P1 | 摸鱼中心独立页面 UI | 已审查通过：独立一级页面 + 左侧导航"摸鱼中心" + 5 卡片布局（Hero/桌宠/任务/底部三卡）+ 安全提示条。 |
+| TASK-030C | 已完成 | P1 | 首批摸鱼 prompt 工作流接入 | 已审查通过：5 个 prompt + jumpToChat (setChatDraft+setActive) + 不自动发送 + 不读文件 + 含非医学免责。 |
+| TASK-030C-P1 | 已完成 | P1 | 摸鱼中心 UI 产品感优化 | 已收口至 030B/C。 |
+| TASK-030C-P2 | 已完成 | P2 | 摸鱼中心 UI 紧凑化与视觉精修 | 已收口至 030B/C。 |
+| TASK-030C-P3 | 已完成 | P2 | 摸鱼中心 UI 细节收尾 | 已收口至 030B/C。 |
 | TASK-030D | 待规划 | P2 | AI 桌宠设定卡 polish | 后置。 |
 | TASK-030E | 待规划 | P2 | 今日成就轻养成雏形 | 后置。 |
 | TASK-030F | 待规划 | P2 | 摸鱼中心回归测试与安全边界 | 后置。 |
@@ -299,6 +302,7 @@ OpenClaw 将成为主体 Agent 后端。Hermes 不再作为普通用户主路径
 - TASK-027C-G 终审通过（2026-05-28）：能力排行合格。本地 curated 排行（9 项 + rankGroup 标签），tabs 筛选（全部/热门/趋势/新上架/高风险）。免责说明"排行不代表安全，安装前请查看风险和权限。当前为内置目录排序"。排行不绕过安装确认框，高风险仍需 checkbox。无外部 API 调用。TASK-027C 主线 A-G 全量完成。TASK-027 主线（A/B/C/D/E）全量完成。
 - TASK-029A 已完成（2026-05-28）：阶段性版本测试与发布说明。4 项构建验证全部通过。敏感信息检索无新增暴露（Authorization/Bearer 仅 redaction 测试和 Rust 内部 HTTP；localStorage 仅 legacy fallback；console.log 仅 send-perf 计时）。docs/stage-release-notes.md 已输出。release-checklist §20 已补充。已知限制：streaming 未支持、外部目录为 mock、Windows 打包未执行。建议下一步 TASK-028H-2 或 Windows 打包测试。
 - TASK-030A 终审通过（2026-05-28）：docs/moyu-center-design.md 产品方案合格。独立一级模块（不是 Skill Center 分类）。5 卡片：今日状态/今日摸鱼任务/AI 桌宠/随机冷知识/今日成就。行为统一：填入 prompt→跳转对话页→不自动发送。安全边界充分：非医学诊断、不读文件/隐私/.env、不常驻进程/通知/计时器、不做排行/抽卡/氪金。moyu-preferences.json 后置合理。未修改业务代码。下一步建议 TASK-030B+C 合并执行。
+- TASK-030B/C 终审通过（含 P1/P2/P3 收口）（2026-05-28）：摸鱼中心独立一级页面合格。左侧导航"摸鱼中心"(Sparkles icon)。MoyuCenterPage 5 卡片：Hero 今日摸鱼状态 + AI 桌宠 + 今日摸鱼任务 + 底部三卡（今日状态/随机冷知识/今日成就）。所有按钮统一 jumpToChat=setChatDraft+setActive("chat")，不自动发送。安全提示条明确"不是医学或心理诊断，不会自动发送，不会读取文件或隐私数据"。无 timer/notification/setInterval/常驻进程。未改 install/config/Token/run store/portable。下一步建议 TASK-030D 或先提交当前改动。
 - TASK-027A 已审查通过并标记为“已完成”。
 - TASK-027B 已审查通过并标记为“已完成”。
 - TASK-027C 暂不直接进入安装接入；ClawHub / OpenClaw plugins 后续必须先做安全策略和只读能力摘要。
