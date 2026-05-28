@@ -307,3 +307,69 @@
 - [ ] portable_runtime_status 不返回敏感信息
 - [ ] system mode 默认可用
 - [ ] workspace_root Windows/macOS 推导正确
+
+## 20. 阶段性版本测试 (TASK-029A, v0.2.0-stage)
+
+### 构建
+
+- [ ] `npm run build` 通过
+- [ ] `cargo check` 通过
+- [ ] `node scripts/openclaw-http-api-probe.mjs` 通过
+- [ ] `node scripts/test-redaction.mjs` 21/21 通过
+
+### 首次启动
+
+- [ ] 首次启动显示 Onboarding（4 步）
+- [ ] 跳过后不再弹出
+- [ ] 首页"新手引导"可重开
+
+### 首页
+
+- [ ] 快速入口可用
+- [ ] 最近会话显示
+- [ ] AI 助手状态卡正常
+- [ ] 不显示 Token/baseUrl/provider
+
+### Agent 对话
+
+- [ ] 发送消息正常
+- [ ] 后台 run 切页面不丢消息
+- [ ] 停止/重试/重新生成正常
+- [ ] 会话/项目侧栏正常
+
+### Skill Center
+
+- [ ] 内置工作流可用
+- [ ] 外部目录 9 项显示
+- [ ] 排行 tabs 筛选正常
+- [ ] 安装确认框完整（名称/来源/风险/权限/免责）
+- [ ] 高风险需 checkbox
+- [ ] 安装后显示"卸载"
+- [ ] 卸载后恢复"安装"
+- [ ] 刷新后安装状态持久
+
+### 文件/数据工作流
+
+- [ ] 文件总结可运行
+- [ ] 表格分析可运行
+- [ ] 条款提取含法律免责
+
+### 娱乐工作流
+
+- [ ] 随机冷知识可运行
+- [ ] 精神状态诊断含非医学免责
+- [ ] 今日摸鱼任务含"不刷短视频"
+
+### Portable
+
+- [ ] portable_data_status 返回正常
+- [ ] portable_runtime_status 返回正常
+- [ ] 不暴露敏感信息
+
+### 敏感信息
+
+- [ ] 普通 UI 不显示 Token/baseUrl/provider/API URL
+- [ ] 高级诊断不暴露 Token
+- [ ] 安装记录不含 Token
+- [ ] console.log 不含 Token
+- [ ] localStorage 仅 legacy fallback

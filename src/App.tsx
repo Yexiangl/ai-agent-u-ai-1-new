@@ -3173,6 +3173,7 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
 function SkillsPage({ config, updateConfig, setActive, setChatDraft, setPendingNewSessionTitle }: { config: AppConfig; updateConfig: (next: AppConfig) => Promise<void>; setActive: (id: RouteId) => void; setChatDraft: (value: string) => void; setPendingNewSessionTitle: (v: string) => void }) {
   const [category, setCategory] = useState<string>("全部");
   const [search, setSearch] = useState("");
+  const [rankTab, setRankTab] = useState<string>("全部");  // TASK-027C-G: 全部/热门/趋势/新上架/高风险
   const [runSkill, setRunSkill] = useState<OfficialSkill | null>(null);
   const [formValues, setFormValues] = useState<Record<string, string>>({});
   const [showPreview, setShowPreview] = useState(false);
@@ -3381,28 +3382,42 @@ function SkillsPage({ config, updateConfig, setActive, setChatDraft, setPendingN
         </div>
       )}
 
-      {/* TASK-027C-B: External capability catalog */}
+      {/* TASK-027C-G: Ranked external capability catalog */}
       <div className="space-y-3 pt-4 border-t">
         <div>
-          <h3 className="text-sm font-medium">外部能力目录</h3>
-          <p className="text-xs text-muted-foreground mt-0.5">浏览可接入的 Skill/Plugin，安装功能将在权限确认和安全审计后开放。高风险能力需要二次确认。</p>
+          <h3 className="text-sm font-medium">能力排行</h3>
+          <p className="text-xs text-muted-foreground mt-0.5">按热度、趋势和上架时间浏览可安装能力。排行不代表安全，安装前请查看风险和权限。当前为内置目录排序，后续将接入真实商店数据。</p>
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          {["全部","热门","趋势","新上架","高风险"].map(tab => (
+            <button key={tab}
+              onClick={() => setRankTab(tab)}
+              className={cn("rounded-full px-3 py-1 text-xs transition-colors",
+                rankTab === tab ? "bg-primary/10 text-primary font-medium" : "text-muted-foreground hover:bg-muted")}>
+              {tab}
+            </button>
+          ))}
         </div>
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {[
-            { id:"ext-file-summary", name:"文件总结", desc:"自动总结文档/PDF/文本核心内容", source:"clawhub" as const, kind:"skill" as const, category:"文件处理", risk:"medium" as const, perms:["file_read"], publisher:"ClawHub" },
-            { id:"ext-table-analyze", name:"表格分析", desc:"CSV/Excel 数据清洗和洞察提取", source:"clawhub" as const, kind:"skill" as const, category:"数据处理", risk:"medium" as const, perms:["file_read"], publisher:"ClawHub" },
-            { id:"ext-web-research", name:"网页资料整理", desc:"搜索并汇总网页资料为结构化笔记", source:"clawhub" as const, kind:"skill" as const, category:"文件处理", risk:"medium" as const, perms:["file_read","network"], publisher:"ClawHub" },
-            { id:"ext-github-helper", name:"GitHub 辅助", desc:"管理 Issue、PR 和代码审查摘要", source:"skillhub" as const, kind:"plugin" as const, category:"开发调试", risk:"high" as const, perms:["network","shell"], publisher:"SkillHub" },
-            { id:"ext-browser-auto", name:"浏览器自动化", desc:"Playwright 网页操作和截图", source:"skillhub" as const, kind:"plugin" as const, category:"开发调试", risk:"high" as const, perms:["network","shell"], publisher:"SkillHub" },
-            { id:"ext-memory-kb", name:"知识库记忆", desc:"本地向量检索和长期记忆", source:"openclaw" as const, kind:"plugin" as const, category:"文件处理", risk:"medium" as const, perms:["file_read","file_write"], publisher:"OpenClaw" },
-            { id:"ext-data-api", name:"数据 API 查询", desc:"连接 REST/GraphQL API 获取数据", source:"clawhub" as const, kind:"skill" as const, category:"数据处理", risk:"medium" as const, perms:["network"], publisher:"ClawHub" },
-            { id:"ext-fun-fact", name:"随机冷知识", desc:"每天一条有趣的冷知识", source:"curated" as const, kind:"skill" as const, category:"娱乐摸鱼", risk:"low" as const, perms:[], publisher:"Curated" },
-            { id:"ext-countdown", name:"下班倒计时", desc:"显示距离下班的剩余时间", source:"curated" as const, kind:"skill" as const, category:"娱乐摸鱼", risk:"low" as const, perms:[], publisher:"Curated" },
-          ].map(item => (
+            { id:"ext-file-summary", name:"文件总结", desc:"自动总结文档/PDF/文本核心内容", source:"clawhub" as const, kind:"skill" as const, category:"文件处理", risk:"medium" as const, perms:["file_read"], publisher:"ClawHub", rank:1, rankGroup:"hot" as const },
+            { id:"ext-table-analyze", name:"表格分析", desc:"CSV/Excel 数据清洗和洞察提取", source:"clawhub" as const, kind:"skill" as const, category:"数据处理", risk:"medium" as const, perms:["file_read"], publisher:"ClawHub", rank:2, rankGroup:"trending" as const },
+            { id:"ext-web-research", name:"网页资料整理", desc:"搜索并汇总网页资料为结构化笔记", source:"clawhub" as const, kind:"skill" as const, category:"文件处理", risk:"medium" as const, perms:["file_read","network"], publisher:"ClawHub", rank:3, rankGroup:"hot" as const },
+            { id:"ext-github-helper", name:"GitHub 辅助", desc:"管理 Issue、PR 和代码审查摘要", source:"skillhub" as const, kind:"plugin" as const, category:"开发调试", risk:"high" as const, perms:["network","shell"], publisher:"SkillHub", rank:4, rankGroup:"high_risk" as const },
+            { id:"ext-browser-auto", name:"浏览器自动化", desc:"Playwright 网页操作和截图", source:"skillhub" as const, kind:"plugin" as const, category:"开发调试", risk:"high" as const, perms:["network","shell"], publisher:"SkillHub", rank:5, rankGroup:"high_risk" as const },
+            { id:"ext-memory-kb", name:"知识库记忆", desc:"本地向量检索和长期记忆", source:"openclaw" as const, kind:"plugin" as const, category:"文件处理", risk:"medium" as const, perms:["file_read","file_write"], publisher:"OpenClaw", rank:6, rankGroup:"trending" as const },
+            { id:"ext-data-api", name:"数据 API 查询", desc:"连接 REST/GraphQL API 获取数据", source:"clawhub" as const, kind:"skill" as const, category:"数据处理", risk:"medium" as const, perms:["network"], publisher:"ClawHub", rank:7, rankGroup:"new" as const },
+            { id:"ext-fun-fact", name:"随机冷知识", desc:"每天一条有趣的冷知识", source:"curated" as const, kind:"skill" as const, category:"娱乐摸鱼", risk:"low" as const, perms:[], publisher:"Curated", rank:8, rankGroup:"new" as const },
+            { id:"ext-countdown", name:"下班倒计时", desc:"显示距离下班的剩余时间", source:"curated" as const, kind:"skill" as const, category:"娱乐摸鱼", risk:"low" as const, perms:[], publisher:"Curated", rank:9, rankGroup:"trending" as const },
+          ].filter(item => rankTab === "全部" || (rankTab === "热门" && item.rankGroup === "hot") || (rankTab === "趋势" && item.rankGroup === "trending") || (rankTab === "新上架" && item.rankGroup === "new") || (rankTab === "高风险" && item.rankGroup === "high_risk"))
+          .map(item => (
             <Card key={item.id} className="group flex flex-col transition-colors hover:border-primary/20">
               <CardHeader className="pb-2">
                 <div className="flex items-start justify-between gap-2">
-                  <CardTitle className="text-sm">{item.name}</CardTitle>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[10px] font-bold text-muted-foreground/50">#{item.rank}</span>
+                    <CardTitle className="text-sm">{item.name}</CardTitle>
+                  </div>
                 </div>
                 <CardDescription className="line-clamp-2 text-xs">{item.desc}</CardDescription>
               </CardHeader>
@@ -3414,8 +3429,12 @@ function SkillsPage({ config, updateConfig, setActive, setChatDraft, setPendingN
                   </Badge>
                   <Badge tone={item.kind === "skill" ? "info" : "warning"}>{item.kind === "skill" ? "Skill" : "Plugin"}</Badge>
                   <Badge tone={riskTone(item.risk)}>{riskLabel(item.risk)}</Badge>
+                  <Badge tone={item.rankGroup === "hot" ? "danger" : item.rankGroup === "trending" ? "warning" : item.rankGroup === "new" ? "info" : item.rankGroup === "high_risk" ? "danger" : "muted"}>
+                    {item.rankGroup === "hot" ? "热门" : item.rankGroup === "trending" ? "趋势" : item.rankGroup === "new" ? "新上架" : item.rankGroup === "high_risk" ? "需谨慎" : ""}
+                  </Badge>
                 </div>
                 {item.perms.length > 0 && <p className="text-[11px] text-muted-foreground">权限：{item.perms.map(permLabel).join("、")}</p>}
+                {item.risk === "high" && <p className="text-[10px] text-rose-600 dark:text-rose-400">安装前需二次确认</p>}
                 <div className="flex gap-2 pt-1">
                   {installedIds.has(item.id) ? (
                     <Button size="sm" variant="outline" disabled={installingId === item.id}

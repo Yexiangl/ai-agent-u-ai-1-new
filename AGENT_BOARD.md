@@ -197,9 +197,18 @@ OpenClaw 将成为主体 Agent 后端。Hermes 不再作为普通用户主路径
 | TASK-027C-D | 已完成 | P1 | 全量一键安装最小闭环 | 已审查通过：allowlist 9 项、.arg() 无 shell 注入、高风险二次确认、安装记录持久化 P1 修复合格（前端按 flat array 读取 catalogId）。 |
 | TASK-027C-E | 已完成 | P1 | 卸载最小闭环 | 已审查通过：只卸载 installedByApp 记录、使用 CLI uninstall、无 remove_dir_all、卸载后状态恢复合格。 |
 | TASK-027C-F | 已完成 | P1 | 权限提示 / 风险等级 / 日志脱敏 | 已审查通过：riskLevel low/medium/high/unknown + permLabel 9 项权限标签 + 安全说明区 + 风险 Badge。无真实安装/卸载按钮，无外部命令执行。 |
-| TASK-027C-G | 待规划 | P2 | 推荐白名单 Skill | curated 安全列表 |
+| TASK-027C-G | 已完成 | P2 | Skill 商店排行 / 热门榜单 | 已审查通过：本地 curated 排行（全部/热门/趋势/新上架/高风险），免责说明"排行不代表安全"，不绕过安装确认，无外部 API 调用。 |
 | TASK-027D | 已完成 | P1 | 文件 / 数据处理 Skills 首批落地 | 已审查通过：8 个纯 prompt 内置工作流，引导用户粘贴内容而非自动读取文件，riskLevel low 合理，条款提取含法律免责声明。 |
 | TASK-027E | 已完成 | P1 | 娱乐摸鱼 / 养成系能力方案 | 已审查通过：6 个纯 prompt 娱乐工作流，全部 low 风险无权限，精神状态含非医学免责，摸鱼任务含"不刷短视频不沉迷"，无计时器/通知/常驻进程。 |
+| TASK-029A | 待验收 | P1 | 阶段性版本测试与发布说明 | 已完成：4 项构建验证通过，敏感信息检索无新增暴露，stage-release-notes.md 和 release-checklist §20 已输出。 |
+| TASK-030 | 进行中 | P1 | 摸鱼中心 / 轻养成模块 | 父任务：独立一级模块，不做 Skill Center 分类页，不做常驻桌宠/通知/计时器。 |
+| TASK-030A | 已完成 | P1 | 摸鱼中心产品方案与信息架构 | 已审查通过：独立一级模块定位清楚，5 卡片信息架构合理，行为统一（prompt→跳转→不自动发送），安全边界充分（非医学、不读文件/隐私、不常驻进程），后续任务拆分合理。 |
+| TASK-030B | 待规划 | P1 | 摸鱼中心独立页面 UI | 合并执行：独立页面 + prompt 跳转骨架。 |
+| TASK-030C | 待规划 | P1 | 首批摸鱼 prompt 工作流接入 | 与 030B 合并执行。 |
+| TASK-030D | 待规划 | P2 | AI 桌宠设定卡 polish | 后置。 |
+| TASK-030E | 待规划 | P2 | 今日成就轻养成雏形 | 后置。 |
+| TASK-030F | 待规划 | P2 | 摸鱼中心回归测试与安全边界 | 后置。 |
+| TASK-030G | 待规划 | P2 | 轻量偏好存储 | 后置。 |
 | TASK-028 | 进行中（阶段性完成） | P2 | Portable / U 盘 A+B 模式可行性审计 | A+B 可行性、data mode、runtime 探针、Windows/macOS 启动方案和安全策略文档均已完成；仍等待实现类子任务。 |
 | TASK-028A | 已完成 | P2 | Portable / U 盘 A+B 模式可行性审计 | 已审查通过：A 模式优先，chatProjects localStorage 为 P0 portable 风险，B runtime 后置。 |
 | TASK-028B | 已完成 | P0 | Portable data 目录设计与路径检测 | 已审查通过：目录结构、system/portable mode、portable.json 触发和 chatProjects 迁移前置设计合格。 |
@@ -219,11 +228,11 @@ OpenClaw 将成为主体 Agent 后端。Hermes 不再作为普通用户主路径
 
 ### 状态分组
 
-- 已完成：TASK-001、TASK-003、TASK-004、TASK-005、TASK-006、TASK-007、TASK-008、TASK-009、TASK-010、TASK-012、TASK-013、TASK-014、TASK-015、TASK-016、TASK-017、TASK-018、TASK-019、TASK-020A、TASK-020B、TASK-020C、TASK-021A、TASK-021B、TASK-021C、TASK-021D、TASK-021E、TASK-021F、TASK-022、TASK-022A、TASK-022B、TASK-022C、TASK-023A、TASK-023B、TASK-023C、TASK-023C-A、TASK-023C-B、TASK-023C-C、TASK-023C-D、TASK-024A、TASK-025、TASK-025A、TASK-025B、TASK-025C、TASK-025D、TASK-025E、TASK-025F、TASK-026A、TASK-026B、TASK-026、TASK-027A、TASK-027B、TASK-027C-A、TASK-027C-B、TASK-027C-C、TASK-027C-D、TASK-027C-E、TASK-027C-F、TASK-027D、TASK-027E、TASK-028A、TASK-028B、TASK-028C、TASK-028D、TASK-028E、TASK-028F、TASK-028G、TASK-028G-1、TASK-028H、TASK-028H-1。
-- 待验收：TASK-002。
-- 已完成（阶段性）：TASK-027C（A-F 完成，仅剩 G 推荐白名单）、TASK-028（A-H-1 完成，等待 H-2..H-5/F-1）。
-- 进行中：TASK-027。
-- 待规划：TASK-020、TASK-021、TASK-027C-G、TASK-028H-2、TASK-028H-3、TASK-028H-4、TASK-028H-5、TASK-028F-1。
+- 已完成：TASK-001、TASK-003、TASK-004、TASK-005、TASK-006、TASK-007、TASK-008、TASK-009、TASK-010、TASK-012、TASK-013、TASK-014、TASK-015、TASK-016、TASK-017、TASK-018、TASK-019、TASK-020A、TASK-020B、TASK-020C、TASK-021A、TASK-021B、TASK-021C、TASK-021D、TASK-021E、TASK-021F、TASK-022、TASK-022A、TASK-022B、TASK-022C、TASK-023A、TASK-023B、TASK-023C、TASK-023C-A、TASK-023C-B、TASK-023C-C、TASK-023C-D、TASK-024A、TASK-025、TASK-025A、TASK-025B、TASK-025C、TASK-025D、TASK-025E、TASK-025F、TASK-026A、TASK-026B、TASK-026、TASK-027A、TASK-027B、TASK-027C-A、TASK-027C-B、TASK-027C-C、TASK-027C-D、TASK-027C-E、TASK-027C-F、TASK-027C-G、TASK-027D、TASK-027E、TASK-028A、TASK-028B、TASK-028C、TASK-028D、TASK-028E、TASK-028F、TASK-028G、TASK-028G-1、TASK-028H、TASK-028H-1。
+- 待验收：TASK-002、TASK-029A。
+- 已完成（阶段性）：TASK-027（A-E + C 全量完成）、TASK-027C（A-G 全量完成）、TASK-028（A-H-1 完成，等待 H-2..H-5/F-1）。
+- 进行中：无。
+- 待规划：TASK-020、TASK-021、TASK-028H-2、TASK-028H-3、TASK-028H-4、TASK-028H-5、TASK-028F-1。
 - 方向已变更 / 覆盖：TASK-011。
 
 ### 看板一致性检查
@@ -287,6 +296,9 @@ OpenClaw 将成为主体 Agent 后端。Hermes 不再作为普通用户主路径
 - TASK-020C 终审通过（2026-05-28）：4 步轻量 Onboarding 合格。文案用户化（"AI Agent 工作台"/"AI 助手已准备好"），无 OpenClaw/Gateway/provider/Token/baseUrl 技术术语。hasCompletedOnboarding 通过 updateConfig→saveConfig 持久化到 config.json，重启不再弹。首页"新手引导"可重开（设 false）不清数据。Step 3 四入口点击后完成 onboarding 但不跳转对应页面（P2 观察项，用户仍在首页可手动导航）。未改 config/Token/run store/portable/Skill 逻辑。
 - TASK-027D 终审通过（2026-05-28）：8 个文件/数据处理内置工作流合格。全部为纯 prompt 模板（requiredPermissions:[]），引导用户"粘贴"内容而非自动读取文件，riskLevel low 合理。条款提取含"不替代专业法律意见"免责。使用工作流仍只填 prompt + 跳转对话页，不自动发送、不读文件、不执行外部 Skill。未改 install/uninstall/config/Token/run store/portable。
 - TASK-027E 终审通过（2026-05-28）：6 个娱乐摸鱼内置工作流合格。全部纯 prompt（requiredPermissions:[]，riskLevel:low）。精神状态诊断含"不是医学或心理诊断"。今日摸鱼任务含"不刷短视频、不沉迷"。无计时器/通知/常驻进程/积分系统。使用工作流仍只填 prompt + 跳转对话页。未改 install/config/Token/run store/portable。
+- TASK-027C-G 终审通过（2026-05-28）：能力排行合格。本地 curated 排行（9 项 + rankGroup 标签），tabs 筛选（全部/热门/趋势/新上架/高风险）。免责说明"排行不代表安全，安装前请查看风险和权限。当前为内置目录排序"。排行不绕过安装确认框，高风险仍需 checkbox。无外部 API 调用。TASK-027C 主线 A-G 全量完成。TASK-027 主线（A/B/C/D/E）全量完成。
+- TASK-029A 已完成（2026-05-28）：阶段性版本测试与发布说明。4 项构建验证全部通过。敏感信息检索无新增暴露（Authorization/Bearer 仅 redaction 测试和 Rust 内部 HTTP；localStorage 仅 legacy fallback；console.log 仅 send-perf 计时）。docs/stage-release-notes.md 已输出。release-checklist §20 已补充。已知限制：streaming 未支持、外部目录为 mock、Windows 打包未执行。建议下一步 TASK-028H-2 或 Windows 打包测试。
+- TASK-030A 终审通过（2026-05-28）：docs/moyu-center-design.md 产品方案合格。独立一级模块（不是 Skill Center 分类）。5 卡片：今日状态/今日摸鱼任务/AI 桌宠/随机冷知识/今日成就。行为统一：填入 prompt→跳转对话页→不自动发送。安全边界充分：非医学诊断、不读文件/隐私/.env、不常驻进程/通知/计时器、不做排行/抽卡/氪金。moyu-preferences.json 后置合理。未修改业务代码。下一步建议 TASK-030B+C 合并执行。
 - TASK-027A 已审查通过并标记为“已完成”。
 - TASK-027B 已审查通过并标记为“已完成”。
 - TASK-027C 暂不直接进入安装接入；ClawHub / OpenClaw plugins 后续必须先做安全策略和只读能力摘要。
