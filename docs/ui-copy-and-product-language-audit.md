@@ -319,7 +319,41 @@ TASK-031A | 日期：2026-05-28 | 本轮只做审计，不改业务代码。
 
 ### 验证
 - `npm run build` ✅ | `cargo check` ✅ | `probe.mjs` ✅ | `test-redaction` 21/21 ✅
-- 功能逻辑未变；install/uninstall 流程不变
 
-### 验证
+---
+
+## 十一、TASK-031F 回归测试结果（2026-05-28）
+
+### 旧文案检索（源码 src/）
+
+所有旧 UI 文案已在源文件中清除：
+- 导航旧命名（Agent 对话/Agent 引擎/Skill Center/Agent 记忆/AI 文件库）：0 hits
+- AI 助手页旧标签（模型供应配置/应用到 OpenClaw 配置/重新检测/需检查）：0 hits
+- 能力中心旧标签（内置工作流/OpenClaw 插件/未审计/使用工作流/接入规划中）：0 hits
+- 摸鱼中心旧文案（合理装死/摆烂/系统维护/别直接下线）：0 hits
+- 普通错误旧提示（HTTP 对话接口未启用/Gateway token 未配置/OpenClaw Gateway 未运行/OpenClaw 请求异常/OpenClaw 配置）：0 hits
+
+### 新文案确认（源码 src/）
+
+- 导航：AI 对话 / AI 助手 / 能力中心 / 助手记忆 / 用量概览 / 文件库 ✅
+- AI 助手页：模型配置 / 模型访问密钥 / 保存配置 / 重新检查 / 需要检查 / 本地服务未连接 / 密钥未配置 ✅
+- 能力中心：未验证 / 暂未开放 / 开始对话 / 工作流 / 插件 ✅
+- 摸鱼中心：给自己充个电 / 别彻底掉线 / 合理放空 / 今日休息任务 / 健康休息任务 ✅
+
+### P1 修复
+
+- `src/data/tutorials.ts`：教程步骤中残留旧文案，已在本轮修复为统一命名
+
+### 敏感信息
+
+- 普通 UI 不暴露 Token / provider / baseUrl / API URL / Authorization / Bearer ✅
+- localStorage 仅 legacy fallback ✅
+- setTimeout / setInterval 均为既有 UI 逻辑（聊天持久化 / 复制按钮），非新通知 / 计时器 ✅
+
+### 文档残留
+
+docs/ 和 AGENT_BOARD.md 中仍有旧文案出现在历史记录和任务描述中，均为文档引用，不属于普通 UI 问题。
+
+### 总体验证
 - `npm run build` ✅ | `cargo check` ✅ | `probe.mjs` ✅ | `test-redaction` 21/21 ✅
+- TASK-031 全系列完成 ✅
