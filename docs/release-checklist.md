@@ -30,9 +30,9 @@
 - [ ] Token 不写入 AppConfig.apiKey / localStorage / sessionStorage
 - [ ] 不显示 baseUrl / provider / API URL
 
-## 3. Agent 引擎页
+## 3. AI 助手页
 
-- [ ] 标题为 "Agent 引擎"
+- [ ] 标题为 "AI 助手"
 - [ ] 状态检测显示：配置文件 / Gateway Token / HTTP 对话接口 / 对话状态
 - [ ] 可用模型列表显示 openclaw, openclaw/default, openclaw/main
 - [ ] 默认模型显示 openclaw/default
@@ -46,7 +46,7 @@
 - [ ] Legacy 引擎诊断入口为 "售后诊断" 小字链接（默认隐藏）
 - [ ] Legacy 诊断弹窗显示 Legacy 引擎状态/路径/配置（不显示 Token）
 
-## 4. Agent 对话 (OpenClaw HTTP-first)
+## 4. AI 对话 (OpenClaw HTTP-first)
 
 - [ ] 对话页默认使用 OpenClaw HTTP-first
 - [ ] 输入框 placeholder: "向 AI Agent 发送消息..."
@@ -76,7 +76,7 @@
 - [ ] 备份文件 `bak.1` / `bak.2` / `bak.3` 存在
 - [ ] 历史不保存 provider Token
 
-## 6. Skill Center
+## 6. 能力中心
 
 - [ ] 官方模板可搜索
 - [ ] 校园副业 / 通用办公 / 自媒体 / 学习资料 / 编程辅助 分类筛选正常
@@ -95,7 +95,7 @@
 - [ ] 工作汇报拆解技能可运行
 - [ ] 表格数据解释技能可运行
 
-## 7. AI 文件库
+## 7. 文件库
 
 - [ ] 上传 txt / md / csv / json / log 正常
 - [ ] 上传 xlsx / xls 正常
@@ -108,7 +108,7 @@
 - [ ] 复制路径正常
 - [ ] 保存回复到 generated 正常
 - [ ] "用于 Agent 分析"按钮对支持文件类型显示
-- [ ] "用于 Agent 分析"点击后跳转到 Agent 对话页
+- [ ] "用于 Agent 分析"点击后跳转到 AI 对话页
 - [ ] 跳转后附件显示在输入区
 - [ ] 不支持文件类型不显示"用于 Agent 分析"按钮
 
@@ -133,9 +133,9 @@
 - [ ] Token 统计大致合理
 - [ ] 本地估算说明清楚
 
-## 10. Agent 记忆
+## 10. 助手记忆
 
-- [ ] 页面标题为 "Agent 记忆"
+- [ ] 页面标题为 "助手记忆"
 - [ ] 记忆文件列表正常（MEMORY / USER / SOUL）
 - [ ] 记忆内容可查看
 - [ ] 明确标注"只读"
@@ -154,7 +154,7 @@
 - [ ] 左侧导航不显示 "Hermes 管理"
 - [ ] 左侧导航不显示 "Hermes 记忆"
 - [ ] 左侧导航不显示 "定时任务"
-- [ ] 左侧导航显示 "Agent 引擎" / "Agent 记忆"
+- [ ] 左侧导航显示 "AI 助手" / "助手记忆"
 - [ ] 移动端页面选择器无 Hermes 入口
 - [ ] Legacy 引擎诊断信息在 "售后诊断" 折叠区（默认隐藏）
 - [ ] HermesLegacyBackend 代码保留未删除
@@ -231,7 +231,7 @@
 
 - [ ] 发送后切页面 → 回复写回原会话
 - [ ] 跨页面完成 → 回到对话页可见完整回复
-- [ ] 左侧 Agent 对话导航显示 running spinner
+- [ ] 左侧 AI 对话导航显示 running spinner
 - [ ] 非 ChatPage 时显示 "AI Agent 正在处理消息" 横幅
 - [ ] 点击横幅"查看"回到对话页
 - [ ] 完成/失败后 running 指示消失
@@ -255,7 +255,7 @@
 - [ ] 不显示 Token/API URL/provider/baseUrl
 - [ ] 当前模型显示真实 primary model，不显示 openclaw/default
 
-### Agent 对话页 ChatPage
+### AI 对话页 ChatPage
 
 - [ ] 1280px 下 260px sidebar + 弹性聊天区可用
 - [ ] 项目 pill / 会话列表 / 搜索框不溢出
@@ -279,7 +279,7 @@
 - [ ] chatProjects 主路径为 chat-projects.json
 - [ ] running spinner 不挤爆标题
 
-### Agent 引擎页
+### AI 助手页
 
 - [ ] 普通视图用户化，显示真实模型
 - [ ] 不显示思考强度 / 显示思考过程
@@ -330,14 +330,14 @@
 - [ ] AI 助手状态卡正常
 - [ ] 不显示 Token/baseUrl/provider
 
-### Agent 对话
+### AI 对话
 
 - [ ] 发送消息正常
 - [ ] 后台 run 切页面不丢消息
 - [ ] 停止/重试/重新生成正常
 - [ ] 会话/项目侧栏正常
 
-### Skill Center
+### 能力中心
 
 - [ ] 内置工作流可用
 - [ ] 外部目录 9 项显示
@@ -373,3 +373,10 @@
 - [ ] 安装记录不含 Token
 - [ ] console.log 不含 Token
 - [ ] localStorage 仅 legacy fallback
+
+### 导航命名 (TASK-031B)
+
+- [ ] 左侧显示：首页 / AI 对话 / AI 助手 / 能力中心 / 摸鱼中心 / 助手记忆 / 用量概览 / 文件库 / 教程 / 关于
+- [ ] 点击每个导航，页面正常切换，不出现空白页
+- [ ] 导航文案无中英文混杂（无 "Skill Center" "Agent 对话" "Agent 引擎" 等旧文案）
+- [ ] RouteId 未变，功能逻辑不受影响

@@ -568,13 +568,13 @@ function StreamingMarkdownContent({ text }: { text: string }) {
 
 const navItems = [
   { id: "home", label: "首页", icon: Home },
-  { id: "chat", label: "Agent 对话", icon: MessageSquare },
-  { id: "engines", label: "Agent 引擎", icon: Bot },
-  { id: "skills", label: "Skill Center", icon: PackageOpen },
+  { id: "chat", label: "AI 对话", icon: MessageSquare },
+  { id: "engines", label: "AI 助手", icon: Bot },
+  { id: "skills", label: "能力中心", icon: PackageOpen },
   { id: "moyu", label: "摸鱼中心", icon: Sparkles },
-  { id: "memory", label: "Agent 记忆", icon: FileText },
-  { id: "usage", label: "使用情况", icon: Bot },
-  { id: "files", label: "AI 文件库", icon: FolderOpen },
+  { id: "memory", label: "助手记忆", icon: FileText },
+  { id: "usage", label: "用量概览", icon: Bot },
+  { id: "files", label: "文件库", icon: FolderOpen },
   { id: "tutorials", label: "教程", icon: BookOpen },
   { id: "about", label: "关于", icon: KeyRound }
 ] as const;
@@ -1009,7 +1009,7 @@ function HomePage({ config, updateConfig, setActive, hermesCli, hermesApi, herme
         <p className="text-muted-foreground">让本地 AI Agent 帮你处理对话、文件和任务。</p>
         <div className="flex items-center justify-center gap-3 pt-1">
           <Button size="lg" onClick={() => setActive("chat")}><MessageSquare className="h-4 w-4" />开始对话</Button>
-          <Button variant="outline" size="lg" onClick={() => setActive("engines")}><Settings2 className="h-4 w-4" />配置 Agent 引擎</Button>
+          <Button variant="outline" size="lg" onClick={() => setActive("engines")}><Settings2 className="h-4 w-4" />配置 AI 助手</Button>
         </div>
       </div>
 
@@ -1018,8 +1018,8 @@ function HomePage({ config, updateConfig, setActive, hermesCli, hermesApi, herme
         {[
           { icon: MessageSquare, title: "开始对话", desc: "和 AI Agent 直接对话", route: "chat" as RouteId },
           { icon: Upload, title: "分析文件", desc: "上传内容，让 Agent 帮你整理", route: "files" as RouteId },
-          { icon: PackageOpen, title: "Skill Center", desc: "使用可复用的 Agent 能力", route: "skills" as RouteId },
-          { icon: FileText, title: "Agent 记忆", desc: "查看本地记忆和上下文", route: "memory" as RouteId },
+          { icon: PackageOpen, title: "能力中心", desc: "使用可复用的 Agent 能力", route: "skills" as RouteId },
+          { icon: FileText, title: "助手记忆", desc: "查看本地记忆和上下文", route: "memory" as RouteId },
         ].map((item) => (
           <button key={item.title} onClick={() => setActive(item.route)} className="flex flex-col items-start gap-1.5 rounded-xl border border-border/50 bg-card/80 p-4 text-left transition-colors hover:border-primary/30 hover:bg-primary/5">
             <item.icon className="h-5 w-5 text-primary" />
@@ -1091,8 +1091,8 @@ function HomePage({ config, updateConfig, setActive, hermesCli, hermesApi, herme
       {/* Conditional warnings */}
       {!agentConnected && chatState.openclawChecked && (
         <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4">
-          <p className="text-sm font-medium">Agent 引擎尚未就绪</p>
-          <p className="mt-1 text-xs text-muted-foreground">请前往 Agent 引擎页完成 OpenClaw 配置。</p>
+          <p className="text-sm font-medium">AI 助手尚未就绪</p>
+          <p className="mt-1 text-xs text-muted-foreground">请前往 AI 助手页完成 OpenClaw 配置。</p>
           <Button size="sm" className="mt-3" onClick={() => setActive("engines")}><Settings2 className="h-3.5 w-3.5" />前往配置</Button>
         </div>
       )}
@@ -1492,8 +1492,8 @@ function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelCo
                       </div>
                       <div className="text-xs text-emerald-600/70 dark:text-emerald-400/70">新建会话将使用新模型，当前会话不受影响。</div>
                       <div className="flex gap-2 pt-1">
-                        <Button size="sm" onClick={() => { setShowApplyPreview(false); setApplyDone(false); setActive("chat"); }}>进入 Agent 对话</Button>
-                        <Button variant="outline" size="sm" onClick={() => { setShowApplyPreview(false); setApplyDone(false); }}>留在 Agent 引擎</Button>
+                        <Button size="sm" onClick={() => { setShowApplyPreview(false); setApplyDone(false); setActive("chat"); }}>进入 AI 对话</Button>
+                        <Button variant="outline" size="sm" onClick={() => { setShowApplyPreview(false); setApplyDone(false); }}>留在 AI 助手</Button>
                       </div>
                     </div>
                   )}
@@ -2172,7 +2172,7 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
     if (!input.trim() || loading) return;
     if (hasRunningRun) { setError("AI Agent 正在处理上一条消息，请等待完成后再发送。"); return; }
     if (!USE_OPENCLAW_BACKEND && !hermesConnected) {
-      setError("Agent 引擎未运行。");
+      setError("AI 助手未运行。");
       return;
     }
     setError("");
@@ -2458,7 +2458,7 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
         if (!latestHermesApi?.running || !latestHermesApi.baseUrl) {
           if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
           cancelTypewriter();
-          setError("OpenClaw Gateway 未运行。请先前往 Agent 引擎页启动或配置。");
+          setError("OpenClaw Gateway 未运行。请先前往 AI 助手页启动或配置。");
           setErrorDetail(`请求目标：Legacy 引擎对话服务\nURL：http://127.0.0.1:8642/v1/chat/completions\n模型：${hermesModelName}\nHTTP 状态：unavailable\n错误：Legacy 引擎 API Server 未运行`);
           saveErrorSummary(requestId, "Legacy 引擎 API Server 未运行");
           setPhase("error");
@@ -2879,7 +2879,7 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
               <Button variant="outline" size="sm" onClick={resetSession}><Plus className="h-4 w-4" />新会话</Button>
             </div>
           </div>
-          {openclawChecked && !openclawConnected && <Button className="mt-2" variant="outline" size="sm" onClick={() => setActive("engines")}>配置 Agent 引擎</Button>}
+          {openclawChecked && !openclawConnected && <Button className="mt-2" variant="outline" size="sm" onClick={() => setActive("engines")}>配置 AI 助手</Button>}
           <div className="mt-3 lg:hidden">
             <Button variant="ghost" size="sm" onClick={() => setMobileHistoryOpen(!mobileHistoryOpen)}>
               {mobileHistoryOpen ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
@@ -3091,7 +3091,7 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
                 onCompositionStart={() => { setIsComposing(true); isComposingRef.current = true; }}
                 onCompositionEnd={() => { setIsComposing(false); isComposingRef.current = false; }}
                 onKeyDown={handleKeyDown}
-                placeholder={openclawConnected || hermesConnected ? "向 AI Agent 发送消息..." : "Agent 引擎未连接"}
+                placeholder={openclawConnected || hermesConnected ? "向 AI Agent 发送消息..." : "AI 助手未连接"}
                 disabled={(!openclawConnected && !hermesConnected) || loading}
               />
               <div className="flex items-center justify-between px-2 pb-1">
@@ -3557,7 +3557,7 @@ function AiFilesPage({ setActive, setPendingChatAttachment }: { setActive: (id: 
     <div className="space-y-4">
       <Card>
         <CardHeader>
-          <CardTitle>AI 文件库</CardTitle>
+          <CardTitle>文件库</CardTitle>
           <CardDescription>统一管理 AI 生成、上传和导出的文件。文件保存在本机应用数据目录。</CardDescription>
         </CardHeader>
       </Card>
@@ -3802,7 +3802,7 @@ function MoyuCenterPage({ setActive, setChatDraft }: { setActive: (id: RouteId) 
 
       {/* Safety disclaimer — compact */}
       <div className="rounded-lg border bg-muted/40 px-3 py-2 text-center text-[10px] text-muted-foreground">
-        所有内容仅为轻松娱乐，不是医学或心理诊断。点击按钮后只会填入 Agent 对话输入框，不会自动发送，也不会读取文件或隐私数据。
+        所有内容仅为轻松娱乐，不是医学或心理诊断。点击按钮后只会填入 AI 对话输入框，不会自动发送，也不会读取文件或隐私数据。
       </div>
     </div>
   );
@@ -3839,14 +3839,14 @@ function MemoryPage() {
         <CardHeader>
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <CardTitle>Agent 记忆</CardTitle>
+              <CardTitle>助手记忆</CardTitle>
               <CardDescription>这里显示 Agent 的原生记忆文件。Agent 会在对话中自动使用这些记忆，本页面当前只提供查看，不会修改文件。</CardDescription>
             </div>
             <Button variant="outline" onClick={loadMemory} disabled={loadingMemory}><RefreshCcw className={cn("h-4 w-4", loadingMemory && "animate-spin")} />重新扫描</Button>
           </div>
         </CardHeader>
         <CardContent className="grid gap-3 md:grid-cols-3">
-          <Metric label="Agent 记忆目录" value={memory?.found ? "已检测到" : "未检测到"} tone={memory?.found ? "success" : "warning"} />
+          <Metric label="助手记忆目录" value={memory?.found ? "已检测到" : "未检测到"} tone={memory?.found ? "success" : "warning"} />
           <Metric label="已发现记忆文件" value={String(memory?.files.length ?? 0)} tone={(memory?.files.length ?? 0) > 0 ? "success" : "muted"} />
           <Metric label="最近扫描" value={checkedAt} tone="info" />
           {memoryError && <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-rose-700 dark:text-rose-400 md:col-span-3">{memoryError}</div>}
@@ -3855,7 +3855,7 @@ function MemoryPage() {
 
       <div className="grid gap-4 xl:grid-cols-[380px_1fr]">
         <Card>
-          <CardHeader><CardTitle>文件列表</CardTitle><CardDescription>扫描 Agent 记忆目录下的记忆文件。</CardDescription></CardHeader>
+          <CardHeader><CardTitle>文件列表</CardTitle><CardDescription>扫描助手记忆目录下的记忆文件。</CardDescription></CardHeader>
           <CardContent className="space-y-2">
             {loadingMemory && <div className="text-sm text-muted-foreground"><Loader2 className="mr-2 inline h-4 w-4 animate-spin" />正在扫描 Agent 原生记忆…</div>}
             {!loadingMemory && memory?.files.length === 0 && <div className="rounded-xl border bg-muted/30 p-3 text-sm text-muted-foreground">未发现记忆文件。不同版本可能路径不同，文件不存在不会视为错误。</div>}
@@ -4008,14 +4008,14 @@ function TasksPage({ cronOverview, setCronOverview, cronCliStatus, setCronCliSta
 
       {cronCliStatus && (
         <Card>
-          <CardHeader><CardTitle>任务列表</CardTitle><CardDescription>{cronCliStatus.jobs.length ? `共 ${cronCliStatus.jobs.length} 个任务` : "暂无定时任务 · 可在 Agent 对话中使用 /cron 命令创建"}</CardDescription></CardHeader>
+          <CardHeader><CardTitle>任务列表</CardTitle><CardDescription>{cronCliStatus.jobs.length ? `共 ${cronCliStatus.jobs.length} 个任务` : "暂无定时任务 · 可在 AI 对话中使用 /cron 命令创建"}</CardDescription></CardHeader>
           <CardContent>
             {cronCliStatus.jobs.length > 0 ? (
               <div className="space-y-2">
                 {cronCliStatus.jobs.map((job, i) => <div key={i} className="rounded-xl border bg-muted/30 p-3 text-sm font-mono">{job.raw}</div>)}
               </div>
             ) : (
-              <div className="text-sm text-muted-foreground">当前没有定时任务。可在 Agent 对话中使用 /cron 命令创建。</div>
+              <div className="text-sm text-muted-foreground">当前没有定时任务。可在 AI 对话中使用 /cron 命令创建。</div>
             )}
           </CardContent>
         </Card>
@@ -4117,7 +4117,7 @@ function UsagePage() {
 
       {!hasUsage ? (
         <div className="rounded-xl border bg-muted/30 p-8 text-center text-sm text-muted-foreground">
-          暂无使用数据，开始一次 Agent 对话后这里会自动统计。本页仅做本地估算，不代表真实账单。
+          暂无使用数据，开始一次 AI 对话后这里会自动统计。本页仅做本地估算，不代表真实账单。
         </div>
       ) : (
         <>
@@ -4187,7 +4187,7 @@ function TutorialsPage({ config }: { config: AppConfig }) {
 
 function AboutPage({ config, updateConfig }: { config: AppConfig; updateConfig: (next: AppConfig) => Promise<void> }) {
   const [confirm, setConfirm] = useState(false);
-  return <div className="space-y-4"><Card><CardHeader><CardTitle>AI Agent 工作台 U盘版</CardTitle><CardDescription>AI Agent Workspace v0.1.1</CardDescription></CardHeader><CardContent className="grid gap-3 text-sm"><Metric label="Agent 服务" value="本机 OpenClaw Gateway" tone="info" /><Metric label="对话模型" value="OpenClaw Agent" tone="success" /></CardContent></Card><Card><CardHeader><CardTitle>使用步骤</CardTitle><CardDescription>购买 U盘会赠送初始额度，用完后可联系续费。</CardDescription></CardHeader><CardContent className="space-y-3 text-sm text-muted-foreground">{["插入 U盘", "打开 AI Agent Workspace", "在 Agent 引擎页配置 Token 和模型", "确认 OpenClaw Gateway 运行中", "开始和 AI Agent 对话"].map((step, index) => <div key={step} className="flex gap-3"><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-primary text-xs text-primary-foreground">{index + 1}</span>{step}</div>)}</CardContent></Card><Card><CardContent className="pt-4"><button onClick={() => setConfirm(true)} className="text-[11px] text-muted-foreground underline-offset-2 hover:underline">清除本地配置（重置 Token 和设置）</button></CardContent></Card><ConfirmDialog open={confirm} onClose={() => setConfirm(false)} title="确认清除" description="此操作会清除本地保存的 Token 和配置，不会影响 Agent 记忆文件。" confirmLabel="确认清除" onConfirm={() => clearConfig().then(updateConfig)} /></div>;
+  return <div className="space-y-4"><Card><CardHeader><CardTitle>AI Agent 工作台 U盘版</CardTitle><CardDescription>AI Agent Workspace v0.1.1</CardDescription></CardHeader><CardContent className="grid gap-3 text-sm"><Metric label="Agent 服务" value="本机 OpenClaw Gateway" tone="info" /><Metric label="对话模型" value="OpenClaw Agent" tone="success" /></CardContent></Card><Card><CardHeader><CardTitle>使用步骤</CardTitle><CardDescription>购买 U盘会赠送初始额度，用完后可联系续费。</CardDescription></CardHeader><CardContent className="space-y-3 text-sm text-muted-foreground">{["插入 U盘", "打开 AI Agent Workspace", "在 AI 助手页配置 Token 和模型", "确认 OpenClaw Gateway 运行中", "开始和 AI Agent 对话"].map((step, index) => <div key={step} className="flex gap-3"><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-primary text-xs text-primary-foreground">{index + 1}</span>{step}</div>)}</CardContent></Card><Card><CardContent className="pt-4"><button onClick={() => setConfirm(true)} className="text-[11px] text-muted-foreground underline-offset-2 hover:underline">清除本地配置（重置 Token 和设置）</button></CardContent></Card><ConfirmDialog open={confirm} onClose={() => setConfirm(false)} title="确认清除" description="此操作会清除本地保存的 Token 和配置，不会影响助手记忆文件。" confirmLabel="确认清除" onConfirm={() => clearConfig().then(updateConfig)} /></div>;
 }
 
 function PhaseBadge({ phase }: { phase: ChatPhase }) {

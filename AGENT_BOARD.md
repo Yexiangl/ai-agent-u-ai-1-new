@@ -212,6 +212,13 @@ OpenClaw 将成为主体 Agent 后端。Hermes 不再作为普通用户主路径
 | TASK-030E | 待规划 | P2 | 今日成就轻养成雏形 | 后置。 |
 | TASK-030F | 待规划 | P2 | 摸鱼中心回归测试与安全边界 | 后置。 |
 | TASK-030G | 待规划 | P2 | 轻量偏好存储 | 后置。 |
+| TASK-031 | 进行中 | P0 | 全项目 UI 文案与产品语言优化 | 父任务：统一导航命名、去技术词、Badge 中文化、摸鱼文案 polish。 |
+| TASK-031A | 待验收 | P0 | UI 文案与产品语言审计 | 已完成：docs/ui-copy-and-product-language-audit.md，6 项 P0 + 10 项 P1 + 8 项 P2 改动建议。 |
+| TASK-031B | ✅ 待验收 | P0 | 导航与模块命名统一 | Skill Center→能力中心，Agent 引擎→AI 助手，Agent 对话→AI 对话，见下方执行说明。 |
+| TASK-031C | 待规划 | P1 | 按钮 / Badge / 安全提示文案统一 | Badge 中文化 + 按钮精简 + 安全提示精简。 |
+| TASK-031D | 待规划 | P1 | 摸鱼中心文案 polish | "装死"→"放空"，"系统维护"→"充电"。 |
+| TASK-031E | 待规划 | P0 | Agent 引擎页技术词弱化 | 普通视图隐藏 Gateway/Token/OpenClaw。 |
+| TASK-031F | 待规划 | P2 | 全项目 UI 文案回归测试 | 确认改动不破坏功能。 |
 | TASK-028 | 进行中（阶段性完成） | P2 | Portable / U 盘 A+B 模式可行性审计 | A+B 可行性、data mode、runtime 探针、Windows/macOS 启动方案和安全策略文档均已完成；仍等待实现类子任务。 |
 | TASK-028A | 已完成 | P2 | Portable / U 盘 A+B 模式可行性审计 | 已审查通过：A 模式优先，chatProjects localStorage 为 P0 portable 风险，B runtime 后置。 |
 | TASK-028B | 已完成 | P0 | Portable data 目录设计与路径检测 | 已审查通过：目录结构、system/portable mode、portable.json 触发和 chatProjects 迁移前置设计合格。 |
@@ -303,6 +310,8 @@ OpenClaw 将成为主体 Agent 后端。Hermes 不再作为普通用户主路径
 - TASK-029A 已完成（2026-05-28）：阶段性版本测试与发布说明。4 项构建验证全部通过。敏感信息检索无新增暴露（Authorization/Bearer 仅 redaction 测试和 Rust 内部 HTTP；localStorage 仅 legacy fallback；console.log 仅 send-perf 计时）。docs/stage-release-notes.md 已输出。release-checklist §20 已补充。已知限制：streaming 未支持、外部目录为 mock、Windows 打包未执行。建议下一步 TASK-028H-2 或 Windows 打包测试。
 - TASK-030A 终审通过（2026-05-28）：docs/moyu-center-design.md 产品方案合格。独立一级模块（不是 Skill Center 分类）。5 卡片：今日状态/今日摸鱼任务/AI 桌宠/随机冷知识/今日成就。行为统一：填入 prompt→跳转对话页→不自动发送。安全边界充分：非医学诊断、不读文件/隐私/.env、不常驻进程/通知/计时器、不做排行/抽卡/氪金。moyu-preferences.json 后置合理。未修改业务代码。下一步建议 TASK-030B+C 合并执行。
 - TASK-030B/C 终审通过（含 P1/P2/P3 收口）（2026-05-28）：摸鱼中心独立一级页面合格。左侧导航"摸鱼中心"(Sparkles icon)。MoyuCenterPage 5 卡片：Hero 今日摸鱼状态 + AI 桌宠 + 今日摸鱼任务 + 底部三卡（今日状态/随机冷知识/今日成就）。所有按钮统一 jumpToChat=setChatDraft+setActive("chat")，不自动发送。安全提示条明确"不是医学或心理诊断，不会自动发送，不会读取文件或隐私数据"。无 timer/notification/setInterval/常驻进程。未改 install/config/Token/run store/portable。下一步建议 TASK-030D 或先提交当前改动。
+- TASK-031A 已完成（2026-05-28）：全项目 UI 文案与产品语言审计。主要发现：(1) 导航中英文混杂（Skill Center/Agent 引擎/Agent 对话）；(2) 普通视图暴露 Gateway/Token/OpenClaw；(3) 摸鱼中心"装死""系统维护"太段子。输出 docs/ui-copy-and-product-language-audit.md，含 6 项 P0 + 10 项 P1 + 8 项 P2 改动建议。推荐先执行 TASK-031B 导航命名统一。
+- TASK-031B 已执行（2026-05-28）：导航命名统一完成。修改文件：`src/App.tsx`（navItems + 页面标题 + 按钮/错误提示/placeholder/免责）、`src/data/tutorials.ts`（教程步骤文案）。新导航：首页 / AI 对话 / AI 助手 / 能力中心 / 摸鱼中心 / 助手记忆 / 用量概览 / 文件库 / 教程 / 关于。RouteId 未变。`npm run build` ✅ `cargo check` ✅ `probe.mjs` ✅ `test-redaction` 21/21 ✅。人工验收脚本见下方 §验收。
 - TASK-027A 已审查通过并标记为“已完成”。
 - TASK-027B 已审查通过并标记为“已完成”。
 - TASK-027C 暂不直接进入安装接入；ClawHub / OpenClaw plugins 后续必须先做安全策略和只读能力摘要。
