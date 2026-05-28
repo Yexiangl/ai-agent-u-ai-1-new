@@ -1092,7 +1092,7 @@ function HomePage({ config, updateConfig, setActive, hermesCli, hermesApi, herme
       {!agentConnected && chatState.openclawChecked && (
         <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4">
           <p className="text-sm font-medium">AI 助手尚未就绪</p>
-          <p className="mt-1 text-xs text-muted-foreground">请前往 AI 助手页完成 OpenClaw 配置。</p>
+          <p className="mt-1 text-xs text-muted-foreground">请前往 AI 助手页完成模型配置。</p>
           <Button size="sm" className="mt-3" onClick={() => setActive("engines")}><Settings2 className="h-3.5 w-3.5" />前往配置</Button>
         </div>
       )}
@@ -2458,7 +2458,7 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
         if (!latestHermesApi?.running || !latestHermesApi.baseUrl) {
           if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
           cancelTypewriter();
-          setError("OpenClaw Gateway 未运行。请先前往 AI 助手页启动或配置。");
+          setError("本地服务未运行。请先前往 AI 助手页检查配置。");
           setErrorDetail(`请求目标：Legacy 引擎对话服务\nURL：http://127.0.0.1:8642/v1/chat/completions\n模型：${hermesModelName}\nHTTP 状态：unavailable\n错误：Legacy 引擎 API Server 未运行`);
           saveErrorSummary(requestId, "Legacy 引擎 API Server 未运行");
           setPhase("error");
@@ -2520,7 +2520,7 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
               : m
           );
           setMessages(messagesRef.current);
-          setError(`OpenClaw 请求异常：${errMsg}`);
+          setError(`请求异常：${errMsg}`);
           setPhase("error"); setLoading(false);
           activeRequestRef.current = null;
 
@@ -2659,7 +2659,7 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
 
     (async () => {
       if (!oc) oc = await initOpenClawBackend();
-      if (!oc) throw new Error("OpenClaw Backend 不可用");
+      if (!oc) throw new Error("后端服务不可用");
       const handle = await oc.startChat({ requestId: newRequestId, model: "openclaw/default", messages: agentMessages });
       if (!handle.accepted) throw new Error("请求提交失败");
       return handle;
@@ -2691,7 +2691,7 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
           : m
       );
       setMessages(messagesRef.current);
-      setError(`OpenClaw 请求异常：${errMsg}`);
+      setError(`请求异常：${errMsg}`);
       setPhase("error"); setLoading(false);
       activeRequestRef.current = null;
       runsRef.current.set(newRequestId, { ...run!, status: "failed", finishedAt: Date.now(), error: errMsg });
@@ -3195,7 +3195,7 @@ function SkillsPage({ config, updateConfig, setActive, setChatDraft, setPendingN
   });
 
   const officialCategories = ["全部", "文件处理", "数据处理", "写作办公", "学习资料", "开发调试", "自媒体", "校园副业", "通用办公", "编程辅助", "娱乐摸鱼"];
-  const openclawPlaceholderCategories = ["OpenClaw 插件", "自动化", "AI 工具", "数据分析", "安全审计", "开发工具"];
+  const openclawPlaceholderCategories = ["插件", "自动化", "AI 工具", "数据分析", "安全审计", "开发工具"];
 
   const openRun = (skill: OfficialSkill) => {
     setRunSkill(skill);
@@ -3232,7 +3232,7 @@ function SkillsPage({ config, updateConfig, setActive, setChatDraft, setPendingN
 
   const typeBadge = (type: string) => (
     <Badge tone={type === "builtin_workflow" ? "info" : type === "openclaw_plugin" ? "warning" : "muted"}>
-      {type === "builtin_workflow" ? "内置工作流" : type === "openclaw_plugin" ? "OpenClaw 插件" : "即将支持"}
+      {type === "builtin_workflow" ? "内置" : type === "openclaw_plugin" ? "插件" : "即将支持"}
     </Badge>
   );
 
@@ -3240,7 +3240,7 @@ function SkillsPage({ config, updateConfig, setActive, setChatDraft, setPendingN
   const riskTone = (level: string): "success" | "warning" | "danger" | "muted" =>
     level === "low" ? "success" : level === "medium" ? "warning" : level === "high" ? "danger" : "muted";
   const riskLabel = (level: string): string =>
-    level === "low" ? "低风险" : level === "medium" ? "中风险" : level === "high" ? "高风险" : "未审计";
+    level === "low" ? "低风险" : level === "medium" ? "中风险" : level === "high" ? "高风险" : "未验证";
   const permLabel = (p: string): string => {
     const map: Record<string, string> = { file_read: "文件读取", file_write: "文件写入", network: "网络访问", shell: "执行命令", env: "环境变量", config: "配置访问", api_key: "密钥访问", workspace: "工作区", unknown: "权限未知" };
     return map[p] || p;
@@ -3300,7 +3300,7 @@ function SkillsPage({ config, updateConfig, setActive, setChatDraft, setPendingN
       <Card>
         <CardHeader>
           <CardTitle>能力中心</CardTitle>
-          <CardDescription>把常用任务做成可复用能力，支持对话、文件、数据、写作和轻量娱乐。当前以内置工作流为主，OpenClaw 插件接入规划中。</CardDescription>
+          <CardDescription>把常用任务做成可复用能力，支持对话、文件、数据、写作和轻量娱乐。当前以内置工作流为主，外部插件暂未开放。</CardDescription>
           <div className="mt-2 rounded-lg border border-blue-500/20 bg-blue-500/5 px-3 py-2 text-xs text-blue-700 dark:text-blue-300">内置工作流为本地 prompt 模板，不会执行系统命令。真实插件能力将在后续版本接入。</div>
         </CardHeader>
       </Card>
@@ -3335,9 +3335,9 @@ function SkillsPage({ config, updateConfig, setActive, setChatDraft, setPendingN
               </div>
               <div className="flex gap-2 pt-1">
                 {isAvailable && (item as any).isOfficial ? (
-                  <Button size="sm" className="text-xs" onClick={() => openRun(item as OfficialSkill)}>使用工作流</Button>
+                  <Button size="sm" className="text-xs" onClick={() => openRun(item as OfficialSkill)}>使用</Button>
                 ) : isPlanned ? (
-                  <Button size="sm" variant="outline" disabled className="text-xs">接入规划中</Button>
+                  <Button size="sm" variant="outline" disabled className="text-xs">暂未开放</Button>
                 ) : (
                   <Button size="sm" variant="outline" disabled className="text-xs">即将支持</Button>
                 )}
@@ -3365,12 +3365,12 @@ function SkillsPage({ config, updateConfig, setActive, setChatDraft, setPendingN
               {installConfirm.perms.length > 0 && <p className="text-xs text-muted-foreground">权限：{installConfirm.perms.map(permLabel).join("、")}</p>}
               <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-3 text-xs space-y-1">
                 <p className="font-medium text-amber-700 dark:text-amber-300">免责声明</p>
-                <p className="text-amber-600 dark:text-amber-400">第三方 Skill/Plugin 可能访问文件、联网或执行本地命令。请仅安装你信任的来源。安装后产生的行为由该 Skill/Plugin 提供方负责，本应用仅提供安装入口和风险提示。</p>
+                <p className="text-amber-600 dark:text-amber-400">第三方能力可能访问文件、联网或执行本地命令。请只安装你信任的来源。安装前请确认风险等级和权限说明。</p>
               </div>
               {needsHardConfirm(installConfirm.risk) && (
                 <label className="flex items-start gap-2 text-xs">
                   <input type="checkbox" checked={installConfirmChecked} onChange={e => setInstallConfirmChecked(e.target.checked)} className="mt-0.5" />
-                  <span>我理解该能力{installConfirm.risk === "high" ? "可能执行命令、访问文件或联网" : "尚未审计，可能存在安全风险"}，并愿意继续安装。</span>
+                  <span>我已了解该能力{installConfirm.risk === "high" ? "可能执行命令、访问文件或联网" : "尚未验证，可能存在风险"}，仍要继续安装。</span>
                 </label>
               )}
               <div className="flex gap-2 pt-1">
@@ -3388,7 +3388,7 @@ function SkillsPage({ config, updateConfig, setActive, setChatDraft, setPendingN
       <div className="space-y-3 pt-4 border-t">
         <div>
           <h3 className="text-sm font-medium">能力排行</h3>
-          <p className="text-xs text-muted-foreground mt-0.5">按热度、趋势和上架时间浏览可安装能力。排行不代表安全，安装前请查看风险和权限。当前为内置目录排序，后续将接入真实商店数据。</p>
+          <p className="text-xs text-muted-foreground mt-0.5">排行仅用于浏览参考，不代表安全性。安装前请查看风险等级和权限说明。当前为内置目录排序，后续将接入真实商店数据。</p>
         </div>
         <div className="flex flex-wrap gap-1.5">
           {["全部","热门","趋势","新上架","高风险"].map(tab => (
@@ -3429,7 +3429,7 @@ function SkillsPage({ config, updateConfig, setActive, setChatDraft, setPendingN
                   <Badge tone={item.source === "clawhub" ? "info" : item.source === "skillhub" ? "warning" : item.source === "openclaw" ? "info" : "muted"}>
                     {item.source === "clawhub" ? "ClawHub" : item.source === "skillhub" ? "SkillHub" : item.source === "openclaw" ? "OpenClaw" : "Curated"}
                   </Badge>
-                  <Badge tone={item.kind === "skill" ? "info" : "warning"}>{item.kind === "skill" ? "Skill" : "Plugin"}</Badge>
+                  <Badge tone={item.kind === "skill" ? "info" : "warning"}>{item.kind === "skill" ? "工作流" : "插件"}</Badge>
                   <Badge tone={riskTone(item.risk)}>{riskLabel(item.risk)}</Badge>
                   <Badge tone={item.rankGroup === "hot" ? "danger" : item.rankGroup === "trending" ? "warning" : item.rankGroup === "new" ? "info" : item.rankGroup === "high_risk" ? "danger" : "muted"}>
                     {item.rankGroup === "hot" ? "热门" : item.rankGroup === "trending" ? "趋势" : item.rankGroup === "new" ? "新上架" : item.rankGroup === "high_risk" ? "需谨慎" : ""}
@@ -3458,8 +3458,8 @@ function SkillsPage({ config, updateConfig, setActive, setChatDraft, setPendingN
 
       {/* Security notice */}
       <div className="rounded-xl border border-dashed border-muted-foreground/30 p-4 text-center text-sm text-muted-foreground">
-        <p className="font-medium">OpenClaw 插件</p>
-        <p className="mt-1 text-xs">接入规划中，当前不会安装外部插件。支持后可从 ClawHub 浏览并安装通过审核的插件。</p>
+        <p className="font-medium">外部插件</p>
+        <p className="mt-1 text-xs">暂未开放，当前不会安装外部插件。支持后可从 ClawHub 浏览并安装通过审核的插件。</p>
       </div>
 
       {/* Skill Runner Drawer — keep unchanged */}
@@ -3471,7 +3471,7 @@ function SkillsPage({ config, updateConfig, setActive, setChatDraft, setPendingN
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <h3 className="text-lg font-semibold">{runSkill.name}</h3>
-                  <div className="mt-1.5 flex flex-wrap gap-1.5"><Badge tone="info">{runSkill.category}</Badge><Badge tone="info">内置工作流</Badge></div>
+                  <div className="mt-1.5 flex flex-wrap gap-1.5"><Badge tone="info">{runSkill.category}</Badge><Badge tone="info">内置</Badge></div>
                   <p className="mt-2 text-xs text-muted-foreground">{runSkill.description}</p>
                 </div>
                 <Button variant="ghost" size="icon" onClick={() => setRunSkill(null)}><ChevronDown className="h-4 w-4 rotate-90" /></Button>
@@ -3505,7 +3505,7 @@ function SkillsPage({ config, updateConfig, setActive, setChatDraft, setPendingN
                 <p className="mb-2 text-xs text-rose-500">请填写必填字段：{missingRequired.map((f) => f.label).join("、")}</p>
               )}
               <div className="flex gap-2">
-                <Button className="flex-1" disabled={missingRequired.length > 0} onClick={generateAndGo}>生成并进入对话</Button>
+                <Button className="flex-1" disabled={missingRequired.length > 0} onClick={generateAndGo}>开始对话</Button>
                 <Button variant="outline" onClick={() => setRunSkill(null)}>取消</Button>
               </div>
             </div>
@@ -3759,7 +3759,7 @@ function MoyuCenterPage({ setActive, setChatDraft }: { setActive: (id: RouteId) 
             <div className="rounded-lg border bg-background/80 p-2 text-xs text-muted-foreground italic">
               “先把这个小任务做完，再开始合理装死。”
             </div>
-            <Button size="sm" className="text-xs" onClick={() => jumpToChat("请帮我设计一个 AI 桌宠角色。请包含：\n1. 名字\n2. 性格\n3. 口头禅\n4. 喜欢的东西\n5. 讨厌的东西\n6. 工作时会怎么陪我\n7. 摸鱼时会怎么吐槽我\n\n风格要轻松可爱，但不要太幼稚。")}>生成我的桌宠</Button>
+            <Button size="sm" className="text-xs" onClick={() => jumpToChat("请帮我设计一个 AI 桌宠角色。请包含：\n1. 名字\n2. 性格\n3. 口头禅\n4. 喜欢的东西\n5. 讨厌的东西\n6. 工作时会怎么陪我\n7. 摸鱼时会怎么吐槽我\n\n风格要轻松可爱，但不要太幼稚。")}>生成桌宠</Button>
           </CardContent>
         </Card>
 
@@ -4187,7 +4187,7 @@ function TutorialsPage({ config }: { config: AppConfig }) {
 
 function AboutPage({ config, updateConfig }: { config: AppConfig; updateConfig: (next: AppConfig) => Promise<void> }) {
   const [confirm, setConfirm] = useState(false);
-  return <div className="space-y-4"><Card><CardHeader><CardTitle>AI Agent 工作台 U盘版</CardTitle><CardDescription>AI Agent Workspace v0.1.1</CardDescription></CardHeader><CardContent className="grid gap-3 text-sm"><Metric label="Agent 服务" value="本机 OpenClaw Gateway" tone="info" /><Metric label="对话模型" value="OpenClaw Agent" tone="success" /></CardContent></Card><Card><CardHeader><CardTitle>使用步骤</CardTitle><CardDescription>购买 U盘会赠送初始额度，用完后可联系续费。</CardDescription></CardHeader><CardContent className="space-y-3 text-sm text-muted-foreground">{["插入 U盘", "打开 AI Agent Workspace", "在 AI 助手页配置密钥和模型", "确认本地服务运行中", "开始和 AI Agent 对话"].map((step, index) => <div key={step} className="flex gap-3"><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-primary text-xs text-primary-foreground">{index + 1}</span>{step}</div>)}</CardContent></Card><Card><CardContent className="pt-4"><button onClick={() => setConfirm(true)} className="text-[11px] text-muted-foreground underline-offset-2 hover:underline">清除本地配置（重置密钥和设置）</button></CardContent></Card><ConfirmDialog open={confirm} onClose={() => setConfirm(false)} title="确认清除" description="此操作会清除本地保存的密钥和配置，不会影响助手记忆文件。" confirmLabel="确认清除" onConfirm={() => clearConfig().then(updateConfig)} /></div>;
+  return <div className="space-y-4"><Card><CardHeader><CardTitle>AI Agent 工作台 U盘版</CardTitle><CardDescription>AI Agent Workspace v0.1.1</CardDescription></CardHeader><CardContent className="grid gap-3 text-sm"><Metric label="Agent 服务" value="本机 OpenClaw" tone="info" /><Metric label="对话模型" value="OpenClaw Agent" tone="success" /></CardContent></Card><Card><CardHeader><CardTitle>使用步骤</CardTitle><CardDescription>购买 U盘会赠送初始额度，用完后可联系续费。</CardDescription></CardHeader><CardContent className="space-y-3 text-sm text-muted-foreground">{["插入 U盘", "打开 AI Agent Workspace", "在 AI 助手页配置密钥和模型", "确认本地服务运行中", "开始和 AI Agent 对话"].map((step, index) => <div key={step} className="flex gap-3"><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-primary text-xs text-primary-foreground">{index + 1}</span>{step}</div>)}</CardContent></Card><Card><CardContent className="pt-4"><button onClick={() => setConfirm(true)} className="text-[11px] text-muted-foreground underline-offset-2 hover:underline">清除本地配置（重置密钥和设置）</button></CardContent></Card><ConfirmDialog open={confirm} onClose={() => setConfirm(false)} title="确认清除" description="此操作会清除本地保存的密钥和配置，不会影响助手记忆文件。" confirmLabel="确认清除" onConfirm={() => clearConfig().then(updateConfig)} /></div>;
 }
 
 function PhaseBadge({ phase }: { phase: ChatPhase }) {
