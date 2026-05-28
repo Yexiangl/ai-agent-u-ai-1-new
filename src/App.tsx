@@ -998,7 +998,7 @@ function HomePage({ config, updateConfig, setActive, hermesCli, hermesApi, herme
   const agentConnected = hermesApi?.running || chatState.openclawConnected;
   const recentSessions = sortSessions(chatState.chatSessions).slice(0, 3);
   const runsRef = chatState.runsRef;
-  const displayModel = formatDisplayModel(chatState.ocPrimaryModel) || "需检查";
+  const displayModel = formatDisplayModel(chatState.ocPrimaryModel) || "需要检查";
   const [showTechInfo, setShowTechInfo] = useState(false);
 
   return (
@@ -1079,7 +1079,7 @@ function HomePage({ config, updateConfig, setActive, hermesCli, hermesApi, herme
             {showTechInfo && (
               <div className="flex items-center justify-between text-muted-foreground text-xs">
                 <span>当前模型</span>
-                <span className="text-foreground">{agentConnected ? displayModel : "需检查"}</span>
+                <span className="text-foreground">{agentConnected ? displayModel : "需要检查"}</span>
               </div>
             )}
             <Button variant="ghost" size="sm" className="w-full text-xs" onClick={() => setActive("engines")}>查看设置</Button>
@@ -1161,7 +1161,7 @@ function ReasoningEffortControl({ hermesModelConfig, setHermesModelConfig, confi
 }
 
 function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelConfig, setHermesModelConfig, refreshHermesCli, refreshHermesApi, setActive, chatState }: { config: AppConfig; updateConfig: (next: AppConfig) => Promise<void>; hermesCli: HermesStatus | null; hermesApi: HermesApiServerStatus | null; hermesModelConfig: HermesModelConfig | null; setHermesModelConfig: (value: HermesModelConfig | null) => void; refreshHermesCli: () => Promise<HermesStatus>; refreshHermesApi: () => Promise<HermesApiServerStatus>; setActive: (id: RouteId) => void; chatState: ChatPageState }) {
-  const displayModel = formatDisplayModel(chatState.ocPrimaryModel) || "需检查";
+  const displayModel = formatDisplayModel(chatState.ocPrimaryModel) || "需要检查";
   const [refreshing, setRefreshing] = useState(false);
   const [showKey, setShowKey] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -1237,7 +1237,7 @@ function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelCo
   const testToken = async () => {
     setTesting(true); setResult(null);
     try {
-      if (!tokenDraft.trim()) throw new Error("请先填写专属模型供应 Token");
+      if (!tokenDraft.trim()) throw new Error("请先填写模型访问密钥");
       const res = await listModels(config.baseUrl, tokenDraft);
       if (!res.ok) throw new Error(res.error || "连接失败");
       const count = res.data?.data?.length ?? 0;
@@ -1254,7 +1254,7 @@ function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelCo
   const [applying, setApplying] = useState(false);
   const [applyStep, setApplyStep] = useState(0);
   const [applySteps, setApplySteps] = useState<{ label: string; status: "pending" | "running" | "success" | "error" }[]>([
-    { label: "检查专属 Token", status: "pending" },
+    { label: "检查访问密钥", status: "pending" },
     { label: "写入 Legacy 模型配置", status: "pending" },
     { label: "写入模型凭证", status: "pending" },
     { label: "验证配置结果", status: "pending" },
@@ -1288,11 +1288,11 @@ function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelCo
     await new Promise((r) => setTimeout(r, 300));
     try {
       const testRes = await listModels(config.baseUrl, tokenDraft);
-      if (!testRes.ok) throw new Error(testRes.error || "Token 验证失败");
+      if (!testRes.ok) throw new Error(testRes.error || "密钥验证失败");
       updateStep(0, "success");
     } catch (err) {
       updateStep(0, "error");
-      setApplyFailed(`Token 验证失败：${getErrorMessage(err)}`);
+      setApplyFailed(`密钥验证失败：${getErrorMessage(err)}`);
       setApplying(false);
       return;
     }
@@ -1348,7 +1348,7 @@ function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelCo
           <div className="flex items-center justify-between gap-3">
             <CardTitle>AI 助手</CardTitle>
             <Badge tone={ocReady ? "success" : ocChecked ? "warning" : "muted"}>
-              {ocReady ? "已准备好" : ocChecked ? "需检查" : "检测中"}
+              {ocReady ? "已准备好" : ocChecked ? "需要检查" : "检测中"}
             </Badge>
           </div>
         </CardHeader>
@@ -1364,39 +1364,39 @@ function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelCo
           {ocChecked && !ocReady && ocConfig?.configExists && (
             <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-600 dark:text-amber-400 space-y-1">
               <p className="font-medium">需要检查</p>
-              {!ocConfig.httpChatCompletionsEnabled && <p>HTTP 对话接口未启用。</p>}
-              {!ocConfig.gatewayTokenPresent && <p>Gateway token 未配置。</p>}
+              {!ocConfig.httpChatCompletionsEnabled && <p>本地服务未连接。</p>}
+              {!ocConfig.gatewayTokenPresent && <p>密钥未配置。</p>}
             </div>
           )}
       <div className="flex flex-wrap items-center gap-2 overflow-x-auto">
             <Button disabled={refreshing} onClick={refreshAll} variant="outline" size="sm">
-              {refreshing && <Loader2 className="h-4 w-4 animate-spin" />}<RefreshCcw className="h-4 w-4" />重新检测
+              {refreshing && <Loader2 className="h-4 w-4 animate-spin" />}<RefreshCcw className="h-4 w-4" />重新检查
             </Button>
             <button onClick={() => setShowAdvanced(true)} className="text-xs text-muted-foreground underline-offset-2 hover:underline">高级诊断</button>
           </div>
         </CardContent>
       </Card>
 
-      {/* 2. OpenClaw Model Provider Config */}
+      {/* 2. Model Config */}
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle>模型供应配置</CardTitle>
-          <CardDescription>填写专属 Token 并选择模型档位，点击应用后写入 OpenClaw 配置。</CardDescription>
+          <CardTitle>模型配置</CardTitle>
+          <CardDescription>填写密钥并选择模型档位，保存后 AI 助手将使用该配置。</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           {/* Current preset indicator */}
           {ocConfig?.gatewayTokenPresent && (
             <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-2 text-xs text-emerald-700 dark:text-emerald-400">
-              模型供应已配置。如需切换档位或更新 Token，请重新填写并应用。
+              模型已配置。如需切换档位或更新密钥，请重新填写并保存。
             </div>
           )}
           <div className="space-y-1">
-            <label className="text-sm font-medium">专属模型供应 Token</label>
+            <label className="text-sm font-medium">模型访问密钥</label>
             <div className="flex gap-2">
-              <Input type={showKey ? "text" : "password"} value={tokenDraft} onChange={(e) => setTokenDraft(e.target.value)} placeholder="请输入 Token" />
+              <Input type={showKey ? "text" : "password"} value={tokenDraft} onChange={(e) => setTokenDraft(e.target.value)} placeholder="请输入密钥" />
               <Button variant="outline" size="icon" onClick={() => setShowKey(!showKey)}>{showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</Button>
             </div>
-            <p className="text-xs text-muted-foreground">Token 写入 OpenClaw 配置后即从页面清除，不会保存到 App 本地存储。</p>
+            <p className="text-xs text-muted-foreground">密钥写入后端配置后即从页面清除，不会保存到 App 本地存储。</p>
           </div>
           <div className="space-y-2">
             <label className="text-sm font-medium">模型档位</label>
@@ -1417,16 +1417,16 @@ function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelCo
           </div>
           <div className="flex flex-wrap gap-2">
             <Button onClick={applyOcProvider} disabled={!tokenDraft.trim() || ocApplying}>
-              {ocApplying && <Loader2 className="h-4 w-4 animate-spin" />}应用到 OpenClaw 配置
+              {ocApplying && <Loader2 className="h-4 w-4 animate-spin" />}保存配置
             </Button>
-            <p className="self-center text-[11px] text-muted-foreground">应用后需重启 Gateway 以生效。</p>
+            <p className="self-center text-[11px] text-muted-foreground">保存后可能需要重启本地服务以生效。</p>
           </div>
           {ocApplyResult && (
             <div className={cn("rounded-xl border p-3 text-sm",
               ocApplyResult.ok ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
               : "border-rose-500/30 bg-rose-500/10 text-rose-700 dark:text-rose-400")}>
               {ocApplyResult.ok
-                ? `已写入 OpenClaw 配置。当前档位：${ocModelPreset === "speed" ? "速度优先 (deepseek-v4-flash)" : "质量优先 (deepseek-v4-pro)"}。`
+                ? `配置已保存。当前档位：${ocModelPreset === "speed" ? "速度优先 (deepseek-v4-flash)" : "质量优先 (deepseek-v4-pro)"}。`
                 : ocApplyResult.error}
             </div>
           )}
@@ -1452,7 +1452,7 @@ function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelCo
                   <div className="rounded-xl border bg-muted/30 p-3 text-sm space-y-1">
                     <div><span className="font-medium">当前模型：</span>{selectedModelInfo.name}</div>
                     <div><span className="font-medium">模型模式：</span>{selectedModelInfo.mode}</div>
-                    <div><span className="font-medium">Token：</span>{tokenDraft ? "已填写（不显示明文）" : "未填写"}</div>
+                    <div><span className="font-medium">密钥：</span>{tokenDraft ? "已填写（不显示明文）" : "未填写"}</div>
                   </div>
                   <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-700 dark:text-emerald-300">写入前会自动备份现有配置。</div>
                   <div className="flex gap-2">
@@ -2479,7 +2479,7 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
         let oc = getOpenClawBackend();
         const doSend = async () => {
           if (!oc) oc = await initOpenClawBackend();
-          if (!oc) throw new Error("OpenClaw Backend 不可用：Gateway token 未配置或 Gateway 未运行。");
+          if (!oc) throw new Error("AI 助手不可用：密钥未配置或本地服务未运行。");
           const handle = await oc.startChat({ requestId, model: "openclaw/default", messages: agentMessages });
           if (!handle.accepted) throw new Error("请求提交失败");
           return handle;
@@ -4187,7 +4187,7 @@ function TutorialsPage({ config }: { config: AppConfig }) {
 
 function AboutPage({ config, updateConfig }: { config: AppConfig; updateConfig: (next: AppConfig) => Promise<void> }) {
   const [confirm, setConfirm] = useState(false);
-  return <div className="space-y-4"><Card><CardHeader><CardTitle>AI Agent 工作台 U盘版</CardTitle><CardDescription>AI Agent Workspace v0.1.1</CardDescription></CardHeader><CardContent className="grid gap-3 text-sm"><Metric label="Agent 服务" value="本机 OpenClaw Gateway" tone="info" /><Metric label="对话模型" value="OpenClaw Agent" tone="success" /></CardContent></Card><Card><CardHeader><CardTitle>使用步骤</CardTitle><CardDescription>购买 U盘会赠送初始额度，用完后可联系续费。</CardDescription></CardHeader><CardContent className="space-y-3 text-sm text-muted-foreground">{["插入 U盘", "打开 AI Agent Workspace", "在 AI 助手页配置 Token 和模型", "确认 OpenClaw Gateway 运行中", "开始和 AI Agent 对话"].map((step, index) => <div key={step} className="flex gap-3"><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-primary text-xs text-primary-foreground">{index + 1}</span>{step}</div>)}</CardContent></Card><Card><CardContent className="pt-4"><button onClick={() => setConfirm(true)} className="text-[11px] text-muted-foreground underline-offset-2 hover:underline">清除本地配置（重置 Token 和设置）</button></CardContent></Card><ConfirmDialog open={confirm} onClose={() => setConfirm(false)} title="确认清除" description="此操作会清除本地保存的 Token 和配置，不会影响助手记忆文件。" confirmLabel="确认清除" onConfirm={() => clearConfig().then(updateConfig)} /></div>;
+  return <div className="space-y-4"><Card><CardHeader><CardTitle>AI Agent 工作台 U盘版</CardTitle><CardDescription>AI Agent Workspace v0.1.1</CardDescription></CardHeader><CardContent className="grid gap-3 text-sm"><Metric label="Agent 服务" value="本机 OpenClaw Gateway" tone="info" /><Metric label="对话模型" value="OpenClaw Agent" tone="success" /></CardContent></Card><Card><CardHeader><CardTitle>使用步骤</CardTitle><CardDescription>购买 U盘会赠送初始额度，用完后可联系续费。</CardDescription></CardHeader><CardContent className="space-y-3 text-sm text-muted-foreground">{["插入 U盘", "打开 AI Agent Workspace", "在 AI 助手页配置密钥和模型", "确认本地服务运行中", "开始和 AI Agent 对话"].map((step, index) => <div key={step} className="flex gap-3"><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-primary text-xs text-primary-foreground">{index + 1}</span>{step}</div>)}</CardContent></Card><Card><CardContent className="pt-4"><button onClick={() => setConfirm(true)} className="text-[11px] text-muted-foreground underline-offset-2 hover:underline">清除本地配置（重置密钥和设置）</button></CardContent></Card><ConfirmDialog open={confirm} onClose={() => setConfirm(false)} title="确认清除" description="此操作会清除本地保存的密钥和配置，不会影响助手记忆文件。" confirmLabel="确认清除" onConfirm={() => clearConfig().then(updateConfig)} /></div>;
 }
 
 function PhaseBadge({ phase }: { phase: ChatPhase }) {

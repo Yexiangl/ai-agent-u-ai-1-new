@@ -23,7 +23,7 @@ async function requestJson<T>(url: string, apiKey: string, init?: RequestInit): 
 
   try {
     if (!apiKey.trim()) {
-      return { ok: false, latencyMs: 0, error: "专属模型供应 Token 未填写，请先在 Agent 引擎页填写并保存" };
+      return { ok: false, latencyMs: 0, error: "模型访问密钥未填写，请先在 AI 助手页填写并保存" };
     }
 
     if (!/^https?:\/\//i.test(url)) {
@@ -69,7 +69,7 @@ async function requestJson<T>(url: string, apiKey: string, init?: RequestInit): 
 }
 
 function formatApiError(status: number, json: unknown) {
-  if (status === 401 || status === 403) return `HTTP ${status}: 鉴权失败，请检查专属模型供应 Token 是否正确或是否有模型权限`;
+  if (status === 401 || status === 403) return `HTTP ${status}: 鉴权失败，请检查模型访问密钥是否正确或是否有模型权限`;
   if (status === 404) return `HTTP ${status}: 模型服务暂不可用，请联系售后处理`;
 
   if (typeof json === "object" && json) {

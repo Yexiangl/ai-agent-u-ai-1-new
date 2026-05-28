@@ -33,18 +33,19 @@
 ## 3. AI 助手页
 
 - [ ] 标题为 "AI 助手"
-- [ ] 状态检测显示：配置文件 / Gateway Token / HTTP 对话接口 / 对话状态
+- [ ] 普通视图：AI 助手状态 + 当前模型 + 重新检查 + 模型配置 + 保存配置
+- [ ] 普通视图不出现 Gateway / HTTP 主链路 / OpenClaw config / provider / baseUrl / API URL
+- [ ] 状态检测显示：配置文件 / 本地服务 / 对话接口 / 对话状态
 - [ ] 可用模型列表显示 openclaw, openclaw/default, openclaw/main
 - [ ] 默认模型显示 openclaw/default
-- [ ] 模型供应配置：Token 输入 + 速度优先/质量优先档位
-- [ ] "应用到 OpenClaw 配置"按钮正常，显示成功/失败反馈
-- [ ] 应用成功后提示重启 Gateway
+- [ ] 模型配置：密钥输入 + 速度优先/质量优先档位
+- [ ] 密钥输入说明用户化，placeholder 为"请输入密钥"
+- [ ] "保存配置"按钮正常，显示成功/失败反馈
+- [ ] 保存成功后提示可能需要重启本地服务
 - [ ] 不显示 "保存 Token 到本地" 按钮
-- [ ] 不显示 baseUrl / provider / API URL
-- [ ] Token 不在页面明文显示
-- [ ] 思考强度控件可用
-- [ ] Legacy 引擎诊断入口为 "售后诊断" 小字链接（默认隐藏）
-- [ ] Legacy 诊断弹窗显示 Legacy 引擎状态/路径/配置（不显示 Token）
+- [ ] 不显示 baseUrl / provider / API URL / Token 明文
+- [ ] 高级诊断按钮为小字链接，默认隐藏技术信息
+- [ ] 高级诊断弹窗显示 Gateway / 配置文件 / Legacy 引擎状态（不显示 Token/API URL）
 
 ## 4. AI 对话 (OpenClaw HTTP-first)
 

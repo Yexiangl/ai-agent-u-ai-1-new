@@ -268,3 +268,25 @@ TASK-031A | 日期：2026-05-28 | 本轮只做审计，不改业务代码。
 - `cargo check` ✅（3 warnings：catalogId/riskLevel 非蛇形命名，已有说明）
 - `openclaw-http-api-probe.mjs` ✅
 - `test-redaction.mjs` 21/21 ✅
+
+---
+
+## 八、TASK-031E 执行结果（2026-05-28）
+
+### 优化区域
+
+| 区域 | 改动 |
+|---|---|
+| AI 助手状态卡 | `重新检测`→`重新检查`；`需检查`→`需要检查`；错误提示 `HTTP 对话接口未启用`→`本地服务未连接`；`Gateway token 未配置`→`密钥未配置` |
+| 模型配置区域 | `模型供应配置`→`模型配置`；标题描述去 OpenClaw/Token；`专属模型供应 Token`→`模型访问密钥`；placeholder `请输入 Token`→`请输入密钥`；`应用到 OpenClaw 配置`→`保存配置`；`应用后需重启 Gateway`→`保存后可能需要重启本地服务` |
+| 高级诊断 | 保留 Gateway/HTTP/OpenClaw 等必要的技术词；描述为 `排查问题，不包含密钥。普通使用无需查看。` |
+| About 页 / API 错误 | `Agent 引擎页`→`AI 助手页`；`Token`→`密钥` |
+| 其他 | ChatPage 错误提示 `OpenClaw Backend 不可用`→`AI 助手不可用` |
+
+### 保留项
+- 高级诊断仍可显示 Gateway、HTTP 对话接口、Legacy 引擎状态等
+- 代码变量名（`tokenDraft`、`apiKey`、`gatewayTokenPresent`）不变
+- 用量统计中的 Token 计数不作修改（属于 LLM token 术语）
+
+### 验证
+- `npm run build` ✅ | `cargo check` ✅ | `probe.mjs` ✅ | `test-redaction` 21/21 ✅
