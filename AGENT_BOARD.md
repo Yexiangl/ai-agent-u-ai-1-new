@@ -215,8 +215,8 @@ OpenClaw 将成为主体 Agent 后端。Hermes 不再作为普通用户主路径
 | TASK-031 | 进行中 | P0 | 全项目 UI 文案与产品语言优化 | 父任务：统一导航命名、去技术词、Badge 中文化、摸鱼文案 polish。 |
 | TASK-031A | 待验收 | P0 | UI 文案与产品语言审计 | 已完成：docs/ui-copy-and-product-language-audit.md，6 项 P0 + 10 项 P1 + 8 项 P2 改动建议。 |
 | TASK-031B | 已完成 | P0 | 导航与模块命名统一 | 已审查通过：6 个导航标签统一中文（AI 对话/AI 助手/能力中心/助手记忆/用量概览/文件库），RouteId 未变，功能逻辑未动。 |
-| TASK-031C | ✅ 待验收 | P1 | 按钮 / Badge / 安全提示文案统一 | Badge 中文化 + 按钮精简 + 安全提示去甩锅 + 错误提示技术词清理。见下方执行说明。 |
-| TASK-031D | 待规划 | P1 | 摸鱼中心文案 polish | "装死"→"放空"，"系统维护"→"充电"。 |
+| TASK-031C | 已完成 | P1 | 按钮 / Badge / 安全提示文案统一 | 已审查通过：Badge 中文化（内置/插件/工作流/未验证），按钮精简（使用/开始对话/生成桌宠），错误提示去 OpenClaw/Gateway（本地服务/请求异常），安全提示去甩锅。 |
+| TASK-031D | ✅ 待验收 | P1 | 摸鱼中心文案 polish | "装死"→"放空"，"系统维护"→"状态恢复"，"摆烂"→"放松"。见下方执行说明。 |
 | TASK-031E | 已完成 | P0 | AI 助手页技术词弱化 | 已审查通过：普通视图已弱化（模型配置/密钥/保存配置/本地服务），高级诊断保留技术词合理。P1 观察项：错误消息仍有 OpenClaw/Gateway 字样。 |
 | TASK-031F | 待规划 | P2 | 全项目 UI 文案回归测试 | 确认改动不破坏功能。 |
 | TASK-028 | 进行中（阶段性完成） | P2 | Portable / U 盘 A+B 模式可行性审计 | A+B 可行性、data mode、runtime 探针、Windows/macOS 启动方案和安全策略文档均已完成；仍等待实现类子任务。 |
@@ -314,6 +314,8 @@ OpenClaw 将成为主体 Agent 后端。Hermes 不再作为普通用户主路径
 - TASK-031B 已执行（2026-05-28）：导航命名统一完成。修改文件：`src/App.tsx`（navItems + 页面标题 + 按钮/错误提示/placeholder/免责）、`src/data/tutorials.ts`（教程步骤文案）。新导航：首页 / AI 对话 / AI 助手 / 能力中心 / 摸鱼中心 / 助手记忆 / 用量概览 / 文件库 / 教程 / 关于。RouteId 未变。`npm run build` ✅ `cargo check` ✅ `probe.mjs` ✅ `test-redaction` 21/21 ✅。人工验收脚本见下方 §验收。
 - TASK-031E 已执行（2026-05-28）：AI 助手页技术词弱化完成。修改文件：`src/App.tsx`（EnginesPage 普通视图 + About 页 + 错误提示）、`src/lib/api.ts`（错误提示）。改动：(1) 模型供应配置→模型配置；(2) Token→密钥/访问密钥；(3) 重新检测→重新检查；(4) 应用到 OpenClaw 配置→保存配置；(5) 需检查→需要检查；(6) HTTP/Gateway 提示→本地服务/密钥。高级诊断保留 Gateway/HTTP/Legacy 技术词。功能逻辑未变。`npm run build` ✅ `cargo check` ✅ `probe.mjs` ✅ `test-redaction` 21/21 ✅。人工验收脚本见下方。
 - TASK-031C 已执行（2026-05-28）：Badge/按钮/安全提示文案统一完成。修改文件：`src/App.tsx`（SkillsPage + EnginesPage + ChatPage + About 页 + MoyuCenter）。改动：(1) Badge：内置工作流→内置、 Skill/Plugin→工作流/插件、未审计→未验证；(2) 按钮：使用工作流→使用、接入规划中→暂未开放、生成并进入对话→开始对话、生成我的桌宠→生成桌宠；(3) 安全提示：排行免责去甩锅、安装确认去 Skill/Plugin 提供方负责措辞；(4) 错误提示：OpenClaw 配置→模型配置、OpenClaw Gateway 未运行→本地服务未运行、OpenClaw 请求异常→请求异常。功能逻辑未变。`npm run build` ✅ `cargo check` ✅ `probe.mjs` ✅ `test-redaction` 21/21 ✅。人工验收脚本见下方。
+- TASK-031D 已执行（2026-05-28）：摸鱼中心文案 polish 完成。修改文件：`src/App.tsx`（MoyuCenterPage）、`docs/moyu-center-design.md`。改动：(1) 副标题：不耽误正事 → 给自己充个电；(2) Hero：不算摆烂算系统维护 → 让状态慢慢回来；(3) 别直接下线 → 别彻底掉线；但还能交付 → 但还能继续；(4) 桌宠：嘴上嫌弃 → 轻轻吐槽；合理装死 → 合理放空三分钟；(5) 今日摸鱼任务 → 今日休息任务；(6) 健康摸鱼任务 → 健康休息任务；(7) 离谱 → 轻松；把小事封成 → 把今天的小进展变成。模块名"摸鱼中心"不变，行为未变（仍只 setChatDraft + setActive("chat")）。`npm run build` ✅ `cargo check` ✅ `probe.mjs` ✅ `test-redaction` 21/21 ✅。人工验收脚本见下方。
+- TASK-031C 终审通过（2026-05-28）：Badge/按钮/安全提示/错误提示统一合格。Badge：内置/插件/工作流/未验证。按钮：使用/暂未开放/开始对话/生成桌宠。错误提示：本地服务未运行/请求异常/密钥未配置（OpenClaw/Gateway 已清除）。安全提示精简不甩锅。TASK-031E P1 观察项（错误消息 OpenClaw）已在本任务修复。功能逻辑未变。下一步建议 TASK-031D 摸鱼中心文案 polish。
 - TASK-031E 终审通过（2026-05-28）：AI 助手页普通视图技术词弱化合格。旧词（模型供应配置/Token/应用到 OpenClaw 配置/Gateway token 未配置/HTTP 对话接口未启用）已全部替换为用户化表达（模型配置/密钥/保存配置/密钥未配置/本地服务未连接）。高级诊断保留 Gateway/HTTP/Legacy 合理。P1 观察项：错误消息（line 1095/2461/2523）仍有 OpenClaw/Gateway 字样，建议后续 TASK-031C 一并处理。未改功能逻辑/config/Token 写入/install/run store/portable。下一步建议 TASK-031C Badge/按钮/安全提示统一。
 - TASK-031B 终审通过（2026-05-28）：导航命名统一合格。navItems 6 项已改为中文（AI 对话/AI 助手/能力中心/助手记忆/用量概览/文件库）。RouteId 未变（chat/engines/skills/memory/usage/files）。页面标题/按钮/placeholder 同步更新。About 页仍有"AI Agent 对话"（产品描述，P2 观察项）。未改 install/config/Token/run store/portable。下一步建议 TASK-031E 引擎页技术词弱化。
 - TASK-027A 已审查通过并标记为“已完成”。

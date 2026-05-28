@@ -3713,15 +3713,15 @@ function MoyuCenterPage({ setActive, setChatDraft }: { setActive: (id: RouteId) 
     <div className="mx-auto max-w-4xl space-y-4 py-3">
       <div className="text-center">
         <h1 className="text-xl font-bold tracking-tight">摸鱼中心</h1>
-        <p className="text-xs text-muted-foreground">工作间隙轻松一下，不耽误正事。</p>
+        <p className="text-xs text-muted-foreground">工作间隙轻松一下，给自己充个电。</p>
       </div>
 
-      {/* Hero: 今日摸鱼状态 — softer gradient */}
+      {/* Hero: 今日状态 — softer gradient */}
       <div className="rounded-xl border bg-gradient-to-br from-primary/5 via-amber-50/30 to-background p-4 space-y-3">
         <div className="flex items-center justify-between gap-2">
           <div>
             <h2 className="text-base font-bold">今日摸鱼状态</h2>
-            <p className="text-xs text-muted-foreground">给今天的自己留 3 分钟缓冲，不算摆烂，算系统维护。</p>
+            <p className="text-xs text-muted-foreground">给今天的自己留 3 分钟缓冲，让状态慢慢回来。</p>
           </div>
           <Button size="sm" variant="outline" className="text-xs shrink-0" onClick={() => jumpToChat("请用轻松幽默的方式帮我生成一个今日工作状态卡。请包含：\n1. 状态名称\n2. 状态描述\n3. 适合做的事\n4. 不适合做的事\n5. 一个 10 分钟收尾建议\n6. 一句轻松吐槽\n\n注意：这是娱乐化状态总结，不是医学或心理诊断。")}>生成状态卡</Button>
         </div>
@@ -3729,7 +3729,7 @@ function MoyuCenterPage({ setActive, setChatDraft }: { setActive: (id: RouteId) 
           <div className="rounded-lg bg-background/70 p-2">
             <span className="text-lg font-bold text-amber-600 dark:text-amber-400">72%</span>
             <span className="block text-muted-foreground">摸鱼指数</span>
-            <span className="block text-[10px] text-muted-foreground/50">适合短暂充电，别直接下线</span>
+            <span className="block text-[10px] text-muted-foreground/50">适合短暂充电，别彻底掉线</span>
           </div>
           <div className="rounded-lg bg-background/70 p-2">
             <span className="block font-medium">先收一个小尾巴</span>
@@ -3738,13 +3738,13 @@ function MoyuCenterPage({ setActive, setChatDraft }: { setActive: (id: RouteId) 
           </div>
           <div className="rounded-lg bg-background/70 p-2">
             <span className="block font-medium">低电量运行中</span>
-            <span className="text-muted-foreground">但还能交付</span>
+            <span className="text-muted-foreground">但还能继续</span>
             <span className="block text-[10px] text-muted-foreground/50">今日模式</span>
           </div>
         </div>
       </div>
 
-      {/* Main row: AI 桌宠 + 今日摸鱼任务 */}
+      {/* Main row: AI 桌宠 + 今日休息任务 */}
       <div className="grid gap-3 sm:grid-cols-2">
         {/* AI 桌宠 — enhanced */}
         <Card className="border-primary/20 bg-primary/5 transition-colors hover:border-primary/30">
@@ -3753,24 +3753,24 @@ function MoyuCenterPage({ setActive, setChatDraft }: { setActive: (id: RouteId) 
               <CardTitle className="text-sm">AI 桌宠</CardTitle>
               <Badge tone="info">陪伴</Badge>
             </div>
-            <CardDescription className="text-xs">嘴上嫌弃、实际陪你的 AI 小搭子。</CardDescription>
+            <CardDescription className="text-xs">嘴上轻轻吐槽，实际陪你把事做完的 AI 小搭子。</CardDescription>
           </CardHeader>
           <CardContent className="space-y-2">
             <div className="rounded-lg border bg-background/80 p-2 text-xs text-muted-foreground italic">
-              “先把这个小任务做完，再开始合理装死。”
+              “先把这个小任务做完，再合理放空三分钟。”
             </div>
-            <Button size="sm" className="text-xs" onClick={() => jumpToChat("请帮我设计一个 AI 桌宠角色。请包含：\n1. 名字\n2. 性格\n3. 口头禅\n4. 喜欢的东西\n5. 讨厌的东西\n6. 工作时会怎么陪我\n7. 摸鱼时会怎么吐槽我\n\n风格要轻松可爱，但不要太幼稚。")}>生成桌宠</Button>
+            <Button size="sm" className="text-xs" onClick={() => jumpToChat("请帮我设计一个 AI 桌宠角色。请包含：\n1. 名字\n2. 性格\n3. 口头禅\n4. 喜欢的东西\n5. 讨厌的东西\n6. 工作时会怎么陪我\n7. 我想短暂放松时会怎么轻轻吐槽我\n\n风格要轻松可爱，但不要太幼稚。")}>生成桌宠</Button>
           </CardContent>
         </Card>
 
-        {/* 今日摸鱼任务 — with mini plan */}
+        {/* 今日休息任务 — with mini plan */}
         <Card className="transition-colors hover:border-primary/20">
           <CardHeader className="pb-1.5">
             <div className="flex items-center gap-1.5">
-              <CardTitle className="text-sm">今日摸鱼任务</CardTitle>
+              <CardTitle className="text-sm">今日休息任务</CardTitle>
               <Badge tone="muted">3 分钟</Badge>
             </div>
-            <CardDescription className="text-xs">不刷短视频，不耽误正事。</CardDescription>
+            <CardDescription className="text-xs">不刷短视频，不沉迷，不影响正事。</CardDescription>
           </CardHeader>
           <CardContent className="space-y-2">
             <div className="space-y-1 text-xs text-muted-foreground">
@@ -3778,7 +3778,7 @@ function MoyuCenterPage({ setActive, setChatDraft }: { setActive: (id: RouteId) 
               <div className="flex items-center gap-1.5"><span className="h-1 w-1 rounded-full bg-muted-foreground/40" />1 分钟活动肩颈</div>
               <div className="flex items-center gap-1.5"><span className="h-1 w-1 rounded-full bg-muted-foreground/40" />1 分钟整理桌面</div>
             </div>
-            <Button size="sm" variant="outline" className="text-xs w-full" onClick={() => jumpToChat("请给我一个 3 分钟以内可以完成的健康摸鱼任务。要求：\n1. 不刷短视频\n2. 不沉迷\n3. 不影响正事\n4. 最好能放松眼睛、肩颈或情绪\n\n请输出：\n- 任务步骤\n- 预计用时\n- 为什么有用\n- 一句吐槽")}>生成任务</Button>
+            <Button size="sm" variant="outline" className="text-xs w-full" onClick={() => jumpToChat("请给我一个 3 分钟以内可以完成的健康休息任务。要求：\n1. 不刷短视频\n2. 不沉迷\n3. 不影响正事\n4. 最好能放松眼睛、肩颈或情绪\n\n请输出：\n- 任务步骤\n- 预计用时\n- 为什么有用\n- 一句吐槽")}>生成任务</Button>
           </CardContent>
         </Card>
       </div>
@@ -3786,9 +3786,9 @@ function MoyuCenterPage({ setActive, setChatDraft }: { setActive: (id: RouteId) 
       {/* Bottom row: 3 compact cards */}
       <div className="grid gap-2 sm:grid-cols-3">
         {[
-          { title:"今日状态", desc:"给今天的工作状态起个离谱但准确的名字。", btn:"生成状态", prompt:"请用轻松幽默的方式帮我生成一个今日工作状态卡。请包含：\n1. 状态名称\n2. 状态描述\n3. 适合做的事\n4. 不适合做的事\n5. 一个 10 分钟收尾建议\n6. 一句轻松吐槽\n\n注意：这是娱乐化状态总结，不是医学或心理诊断。" },
+          { title:"今日状态", desc:"给今天的状态起个轻松但准确的名字。", btn:"生成状态", prompt:"请用轻松幽默的方式帮我生成一个今日工作状态卡。请包含：\n1. 状态名称\n2. 状态描述\n3. 适合做的事\n4. 不适合做的事\n5. 一个 10 分钟收尾建议\n6. 一句轻松吐槽\n\n注意：这是娱乐化状态总结，不是医学或心理诊断。" },
           { title:"随机冷知识", desc:"30 秒看完一个反常识小知识。", btn:"换一个", prompt:"请给我一个 30 秒内能看完的有趣冷知识。要求：\n1. 有一点反常识\n2. 不要太长\n3. 适合工作间隙看一眼\n\n请输出：\n- 标题\n- 冷知识内容\n- 为什么有趣\n- 一句轻松吐槽" },
-          { title:"今日成就", desc:"把今天做完的小事封成一枚成就徽章。", btn:"生成徽章", prompt:"请根据我今天完成的事情，帮我生成 3 个有趣的成就徽章。请先让我补充\"今天完成了什么\"，如果我已经提供内容，请直接生成。\n\n每个徽章请包含：\n1. 徽章名\n2. 稀有度\n3. 获得条件\n4. 吐槽说明\n\n风格轻松幽默，不要太夸张。" },
+          { title:"今日成就", desc:"把今天的小进展变成一枚成就徽章。", btn:"生成徽章", prompt:"请根据我今天完成的事情，帮我生成 3 个有趣的成就徽章。请先让我补充\"今天完成了什么\"，如果我已经提供内容，请直接生成。\n\n每个徽章请包含：\n1. 徽章名\n2. 稀有度\n3. 获得条件\n4. 吐槽说明\n\n风格轻松幽默，不要太夸张。" },
         ].map(card => (
           <div key={card.title} className="rounded-lg border p-2.5 space-y-1.5">
             <div>
