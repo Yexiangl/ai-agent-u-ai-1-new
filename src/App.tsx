@@ -4074,16 +4074,17 @@ function UsagePage() {
     const totalTokens = assistantMsgs.reduce((sum, message) => sum + (message.usage?.total_tokens ?? 0), 0);
     const promptTokens = assistantMsgs.reduce((sum, message) => sum + (message.usage?.prompt_tokens ?? 0), 0);
     const completionTokens = assistantMsgs.reduce((sum, message) => sum + (message.usage?.completion_tokens ?? 0), 0);
-    const avgTokens = assistantMsgs.length > 0 ? Math.round(totalTokens / assistantMsgs.length) : 0;
+    const usageMessageCount = assistantMsgs.filter((message) => message.usage?.total_tokens != null).length;
+    const hasTokenUsage = usageMessageCount > 0;
+    const avgTokens = usageMessageCount > 0 ? Math.round(totalTokens / usageMessageCount) : 0;
 
     const now = Date.now();
     const dayMs = 86400000;
     const sessionsToday = usedSessions.filter((session) => now - Number(session.updatedAt) * 1000 < dayMs);
     const sessionsWeek = usedSessions.filter((session) => now - Number(session.updatedAt) * 1000 < 7 * dayMs);
-    const sessionsMonth = usedSessions.filter((session) => now - Number(session.updatedAt) * 1000 < 30 * dayMs);
+
     const todayTokens = sessionsToday.flatMap((session) => session.messages).filter((message) => message.role === "assistant").reduce((sum, message) => sum + (message.usage?.total_tokens ?? 0), 0);
     const weekTokens = sessionsWeek.flatMap((session) => session.messages).filter((message) => message.role === "assistant").reduce((sum, message) => sum + (message.usage?.total_tokens ?? 0), 0);
-    const monthTokens = sessionsMonth.flatMap((session) => session.messages).filter((message) => message.role === "assistant").reduce((sum, message) => sum + (message.usage?.total_tokens ?? 0), 0);
 
     const lastUse = usedSessions.length > 0 ? usedSessions.reduce((latest, session) => Math.max(latest, Number(session.updatedAt) * 1000), 0) : 0;
 
@@ -4095,45 +4096,59 @@ function UsagePage() {
     const topSessions = [...usedSessions].sort((a, b) => Number(b.updatedAt) - Number(a.updatedAt)).slice(0, 5);
 
     const fmtTokens = (n: number) => n > 10000 ? `${(n / 1000).toFixed(0)}K` : n > 1000 ? `${(n / 1000).toFixed(1)}K` : String(n);
+    const fmtTokensOrNA = hasTokenUsage ? (n: number) => (n > 0 ? fmtTokens(n) : "—") : (_n: number) => "暂未提供";
 
-    return { sessions: usedSessions, allMessages, assistantMsgs, userMsgs, totalTokens, promptTokens, completionTokens, avgTokens, todayTokens, weekTokens, monthTokens, lastUse, modelMap, topSessions, fmtTokens };
+    return { sessions: usedSessions, allMessages, assistantMsgs, userMsgs, totalTokens, promptTokens, completionTokens, avgTokens, todayTokens, weekTokens, lastUse, modelMap, topSessions, fmtTokens, fmtTokensOrNA, hasTokenUsage, usageMessageCount };
   }, [sessions]);
+
+  // TASK-032C: format model name for display (de-internalize openclaw/default)
+  const formatModelName = (name: string) => {
+    if (name === "openclaw/default") return "默认模型";
+    if (!name) return "模型信息待同步";
+    return name;
+  };
 
   if (loading) {
     return <div className="flex items-center justify-center py-16"><Loader2 className="h-6 w-6 animate-spin" /></div>;
   }
 
-  const { totalTokens, promptTokens, completionTokens, avgTokens, todayTokens, weekTokens, lastUse, modelMap, topSessions, fmtTokens } = stats;
+  const { totalTokens, promptTokens, completionTokens, avgTokens, todayTokens, weekTokens, lastUse, modelMap, topSessions, fmtTokens, fmtTokensOrNA, hasTokenUsage, usageMessageCount } = stats;
   const hasUsage = stats.allMessages.length > 0;
 
   return (
     <div className="space-y-4">
       <Card>
         <CardHeader>
-          <CardTitle>使用概况</CardTitle>
-          <CardDescription>本页统计来自本机历史会话，仅用于估算使用量。近期统计按会话最后更新时间估算，可能包含该会话内较早消息的 token。实际额度以服务后台为准。</CardDescription>
+          <CardTitle>本地用量概览</CardTitle>
+          <CardDescription>本页根据本机历史会话统计，用于了解本地使用情况。Token 数据来自模型接口返回的 usage 字段；如果服务未返回 usage，则显示为暂未提供。实际额度以模型服务后台为准。</CardDescription>
         </CardHeader>
       </Card>
 
       {!hasUsage ? (
         <div className="rounded-xl border bg-muted/30 p-8 text-center text-sm text-muted-foreground">
-          暂无使用数据，开始一次 AI 对话后这里会自动统计。本页仅做本地估算，不代表真实账单。
+          暂无使用数据，开始一次 AI 对话后这里会自动统计会话数和消息数。Token 统计依赖模型接口返回的 usage 字段，首次对话后即可查看。
         </div>
       ) : (
         <>
           <div className="grid gap-4 md:grid-cols-4">
             <Metric label="总会话数" value={String(stats.sessions.length)} tone="info" />
             <Metric label="总消息数" value={String(stats.allMessages.length)} tone="info" />
-            <Metric label="总 Token" value={fmtTokens(totalTokens)} tone="success" />
-            <Metric label="近 7 天" value={fmtTokens(weekTokens)} tone="info" />
+            <Metric label="总 Token" value={hasTokenUsage ? fmtTokens(totalTokens) : "暂未提供"} tone={hasTokenUsage ? "success" : "muted"} />
+            <Metric label="近 7 天" value={hasTokenUsage ? fmtTokens(weekTokens) : "暂未提供"} tone={hasTokenUsage ? "info" : "muted"} />
           </div>
 
           <div className="grid gap-4 md:grid-cols-4">
-            <Metric label="今日 Token" value={fmtTokens(todayTokens)} tone="success" />
-            <Metric label="输入 Token" value={fmtTokens(promptTokens)} tone="info" />
-            <Metric label="输出 Token" value={fmtTokens(completionTokens)} tone="info" />
-            <Metric label="平均每次回复" value={fmtTokens(avgTokens)} tone="info" />
+            <Metric label="今日 Token" value={hasTokenUsage ? fmtTokens(todayTokens) : "暂未提供"} tone={hasTokenUsage ? "success" : "muted"} />
+            <Metric label="输入 Token" value={hasTokenUsage ? fmtTokens(promptTokens) : "暂未提供"} tone={hasTokenUsage ? "info" : "muted"} />
+            <Metric label="输出 Token" value={hasTokenUsage ? fmtTokens(completionTokens) : "暂未提供"} tone={hasTokenUsage ? "info" : "muted"} />
+            <Metric label="平均每次回复" value={hasTokenUsage ? fmtTokens(avgTokens) : "暂未提供"} tone={hasTokenUsage ? "info" : "muted"} />
           </div>
+
+          {hasTokenUsage && (
+            <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 px-3 py-2 text-xs text-emerald-700 dark:text-emerald-400">
+              真实统计 · 基于 {usageMessageCount} 条回复的 usage 字段
+            </div>
+          )}
 
           <Card>
             <CardHeader><CardTitle>模型用量分布</CardTitle></CardHeader>
@@ -4144,8 +4159,8 @@ function UsagePage() {
                 <div className="space-y-2">
                   {[...modelMap.entries()].sort((a, b) => b[1] - a[1]).map(([model, tokens]) => (
                     <div key={model} className="flex items-center justify-between rounded-xl border bg-muted/30 px-4 py-3">
-                      <span className="font-medium">{model}</span>
-                      <span className="text-sm text-muted-foreground">{fmtTokens(tokens)} tokens</span>
+                      <span className="font-medium">{formatModelName(model)}</span>
+                      <span className="text-sm text-muted-foreground">{hasTokenUsage ? `${fmtTokens(tokens)} tokens` : "暂未提供"}</span>
                     </div>
                   ))}
                 </div>
@@ -4157,15 +4172,20 @@ function UsagePage() {
             <CardHeader><CardTitle>最近会话</CardTitle></CardHeader>
             <CardContent>
               <div className="space-y-2">
-                {topSessions.map((session) => (
-                  <div key={session.id} className="flex items-center justify-between rounded-xl border bg-muted/30 px-4 py-3">
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-sm font-medium">{session.title || "新对话"}</div>
-                      <div className="text-xs text-muted-foreground">{session.lastMessagePreview || ""} · {formatUnixTime(session.updatedAt)}</div>
+                {topSessions.map((session) => {
+                  const sessionUsageMsgs = (session.messages || []).filter((m) => m.role === "assistant" && m.usage?.total_tokens != null);
+                  const sessionHasUsage = sessionUsageMsgs.length > 0;
+                  const sessionTokens = sessionUsageMsgs.reduce((sum, m) => sum + (m.usage?.total_tokens ?? 0), 0);
+                  return (
+                    <div key={session.id} className="flex items-center justify-between rounded-xl border bg-muted/30 px-4 py-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-sm font-medium">{session.title || "新对话"}</div>
+                        <div className="text-xs text-muted-foreground">{session.lastMessagePreview || ""} · {formatUnixTime(session.updatedAt)}</div>
+                      </div>
+                      <span className="ml-3 shrink-0 text-xs text-muted-foreground">{sessionHasUsage ? `${fmtTokens(sessionTokens)} tokens` : "暂未提供"}</span>
                     </div>
-                    <span className="ml-3 shrink-0 text-xs text-muted-foreground">{session.totalTokens || 0} tokens</span>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </CardContent>
           </Card>
