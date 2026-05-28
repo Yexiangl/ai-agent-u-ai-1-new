@@ -149,7 +149,7 @@ export interface HermesNativeMemoryResult {
 
 export interface StoredChatMessage extends ChatMessage {
   requestId?: string;
-  source?: "Hermes Agent";
+  source?: "Hermes Agent" | "OpenClaw Agent";
   elapsedMs?: number;
   usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } | null;
   modelName?: string;
@@ -169,6 +169,8 @@ export interface ChatSession {
   totalTokens?: number;
   lastMessagePreview?: string;
   pinned?: boolean;
+  projectId?: string;       // TASK-023C-B: session → project grouping, default "default"
+  sourceType?: "chat" | "skill" | "file" | "debug" | "onboarding";  // source tag
 }
 
 export async function checkHermes(): Promise<HermesStatus> {

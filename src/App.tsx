@@ -19,6 +19,7 @@ import {
   Moon,
   MoreHorizontal,
   PackageOpen,
+  Pencil,
   Pin,
   Plus,
   RefreshCcw,
@@ -38,9 +39,13 @@ import { DEFAULT_CONFIG, type AppConfig } from "@/lib/config";
 import { clearConfig, loadConfig, saveConfig } from "@/lib/storage";
 import { applyHermesModelConfig, applyHermesReasoningConfig, deleteAiFile, ensureAiFilesDirs, extractAiFileText, listAiFiles, openAiFileLocation, pickAndUploadFile, readChatSessions, readHermesCronCliStatus, readHermesCronOverview, readHermesModelConfig, readHermesNativeMemory, saveGeneratedFile, writeChatSessions, type AiFileEntry, type ChatSession, type HermesApiServerStatus, type HermesChatChunk, type HermesChatDone, type HermesChatError, type HermesCronCliStatus, type HermesCronOverview, type HermesModelConfig, type HermesNativeMemoryFile, type HermesNativeMemoryResult, type HermesStatus, type HermesStreamDiagnostics, type HermesToolProgress } from "@/lib/hermes";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { hermesLegacyBackend } from "@/lib/agentBackend";
+import { hermesLegacyBackend, getOpenClawBackend, initOpenClawBackend, isOpenClawBackendAvailable } from "@/lib/agentBackend";
+import { readOpenClawConfigSummary, checkOpenClawHttpStatus, readOpenClawProviderSummary, applyOpenClawProviderConfig } from "@/lib/openclawHttpClient";
+import { type AgentRun, type AgentRunStatus } from "@/lib/agentRunStore";
+import { type ChatProject, loadProjects, saveProjects, createProject, DEFAULT_PROJECT_ID, SYSTEM_PROJECTS } from "@/lib/chatProjects";
 import { cn, getErrorMessage } from "@/lib/utils";
-import { officialSkills, officialCategories, hermesHubSkills, hermesHubCategories, type OfficialSkill, type HermesHubSkill } from "@/data/skills";
+import { invoke } from "@tauri-apps/api/core";  // TASK-027C-D: install/uninstall
+import { officialSkills, officialCategories, hermesHubSkills, hermesHubCategories, type OfficialSkill, type HermesHubSkill, type SkillInputField } from "@/data/skills";
 import { tutorials } from "@/data/tutorials";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -54,7 +59,7 @@ import { Textarea } from "@/components/ui/textarea";
 type RouteId = "home" | "chat" | "engines" | "skills" | "memory" | "usage" | "files" | "tutorials" | "about";
 type UiChatMessage = ChatMessage & {
   requestId?: string;
-  source?: "Hermes Agent";
+  source?: "Hermes Agent" | "OpenClaw Agent";
   elapsedMs?: number;
   usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } | null;
   modelName?: string;
@@ -92,6 +97,32 @@ interface PreparedAttachment {
   text: string;
   truncated: boolean;
   fileType: string;
+}
+
+// TASK-021B: Chat state bundle type lifted to App level
+interface ChatPageState {
+  messages: UiChatMessage[]; setMessages: React.Dispatch<React.SetStateAction<UiChatMessage[]>>; messagesRef: React.MutableRefObject<UiChatMessage[]>;
+  chatSessions: ChatSession[]; setChatSessions: React.Dispatch<React.SetStateAction<ChatSession[]>>; chatSessionsRef: React.MutableRefObject<ChatSession[]>; latestSessionsRef: React.MutableRefObject<ChatSession[]>;
+  currentSessionId: string | null; setCurrentSessionId: React.Dispatch<React.SetStateAction<string | null>>; currentSessionIdRef: React.MutableRefObject<string | null>;
+  loading: boolean; setLoading: React.Dispatch<React.SetStateAction<boolean>>;
+  phase: ChatPhase; setPhase: React.Dispatch<React.SetStateAction<ChatPhase>>;
+  error: string; setError: React.Dispatch<React.SetStateAction<string>>;
+  errorDetail: string | null; setErrorDetail: React.Dispatch<React.SetStateAction<string | null>>;
+  activeRequestRef: React.MutableRefObject<string | null>; stoppedIdsRef: React.MutableRefObject<Set<string>>;
+  timerRef: React.MutableRefObject<ReturnType<typeof setInterval> | null>; unlistenRef: React.MutableRefObject<UnlistenFn[]>;
+  elapsedLive: number; setElapsedLive: React.Dispatch<React.SetStateAction<number>>;
+  lastElapsed: number | null; setLastElapsed: React.Dispatch<React.SetStateAction<number | null>>;
+  streamDiagnostics: FrontStreamDiagnostics; setStreamDiagnostics: React.Dispatch<React.SetStateAction<FrontStreamDiagnostics>>;
+  sessionsLoaded: boolean; setSessionsLoaded: React.Dispatch<React.SetStateAction<boolean>>; sessionsLoadedRef: React.MutableRefObject<boolean>;
+  sessionError: string; setSessionError: React.Dispatch<React.SetStateAction<string>>;
+  saveQueueRef: React.MutableRefObject<Promise<void>>;
+  // Run store (TASK-021C)
+  runsRef: React.MutableRefObject<Map<string, AgentRun>>;
+  activeRuns: AgentRun[]; setActiveRuns: React.Dispatch<React.SetStateAction<AgentRun[]>>;
+  hasRunningRun: boolean; setHasRunningRun: React.Dispatch<React.SetStateAction<boolean>>;
+  openclawConnected: boolean; setOpenclawConnected: React.Dispatch<React.SetStateAction<boolean>>;
+  openclawChecked: boolean; setOpenclawChecked: React.Dispatch<React.SetStateAction<boolean>>;
+  ocPrimaryModel: string; setOcPrimaryModel: React.Dispatch<React.SetStateAction<string>>;
 }
 
 const attachmentExtractCache = new Map<string, ExtractCacheEntry>();
@@ -159,6 +190,9 @@ function sanitizeChatSessions(sessions: ChatSession[]): ChatSession[] {
 }
 
 const DEBUG_STREAM = false;
+// TASK-011: OpenClaw-first. Default backend is OpenClaw.
+// HermesLegacyBackend is preserved as fallback but not the primary path.
+const USE_OPENCLAW_BACKEND = true;
 
 type FrontStreamDiagnostics = {
   requestId: string;
@@ -297,9 +331,9 @@ function sessionTotalTokens(messages: UiChatMessage[]) {
   return messages.reduce((sum, message) => sum + (message.role === "assistant" ? message.usage?.total_tokens ?? 0 : 0), 0);
 }
 
-function createEmptySession(model = "hermes-agent"): ChatSession {
+function createEmptySession(model = "openclaw/default"): ChatSession {
   const now = nowStamp();
-  return { id: crypto.randomUUID(), title: "新对话", createdAt: now, updatedAt: now, messages: [], hermesSessionId: null, model, totalTokens: 0, lastMessagePreview: "暂无消息", pinned: false };
+  return { id: crypto.randomUUID(), title: "新对话", createdAt: now, updatedAt: now, messages: [], hermesSessionId: null, model, totalTokens: 0, lastMessagePreview: "暂无消息", pinned: false, projectId: "default" };
 }
 
 function buildHermesMessages(systemPrompt: string, history: UiChatMessage[], lastUserModel?: string): ChatMessage[] {
@@ -535,9 +569,9 @@ function StreamingMarkdownContent({ text }: { text: string }) {
 const navItems = [
   { id: "home", label: "首页", icon: Home },
   { id: "chat", label: "Agent 对话", icon: MessageSquare },
-  { id: "engines", label: "Hermes 管理", icon: Bot },
+  { id: "engines", label: "Agent 引擎", icon: Bot },
   { id: "skills", label: "Skill Center", icon: PackageOpen },
-  { id: "memory", label: "Hermes 记忆", icon: FileText },
+  { id: "memory", label: "Agent 记忆", icon: FileText },
   { id: "usage", label: "使用情况", icon: Bot },
   { id: "files", label: "AI 文件库", icon: FolderOpen },
   { id: "tutorials", label: "教程", icon: BookOpen },
@@ -556,6 +590,80 @@ function App() {
   const [hermesModelConfig, setHermesModelConfig] = useState<HermesModelConfig | null>(null);
   const [ready, setReady] = useState(false);
   const showOnboarding = ready && !config.hasCompletedOnboarding;
+
+  // ── TASK-021B: Agent chat state lifted to App level ──
+  const [chatMessages, setChatMessages] = useState<UiChatMessage[]>([]);
+  const chatMessagesRef = useRef<UiChatMessage[]>([]);
+  const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
+  const chatSessionsRef = useRef<ChatSession[]>([]);
+  const latestSessionsRef = useRef<ChatSession[]>([]);
+  const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+  const currentSessionIdRef = useRef<string | null>(null);
+  const [sessionsLoaded, setSessionsLoaded] = useState(false);
+  const sessionsLoadedRef = useRef(false);
+  const [sessionError, setSessionError] = useState("");
+  const [chatLoading, setChatLoading] = useState(false);
+  const [chatPhase, setChatPhase] = useState<ChatPhase>("ready");
+  const [chatError, setChatError] = useState("");
+  const [chatErrorDetail, setChatErrorDetail] = useState<string | null>(null);
+  const activeRequestRef = useRef<string | null>(null);
+  const stoppedIdsRef = useRef<Set<string>>(new Set());
+  const chatTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const chatUnlistenRef = useRef<UnlistenFn[]>([]);
+  const [elapsedLive, setElapsedLive] = useState(0);
+  const [lastElapsed, setLastElapsed] = useState<number | null>(null);
+  const [streamDiagnostics, setStreamDiagnostics] = useState<FrontStreamDiagnostics>(initialFrontStreamDiagnostics);
+
+  // ── TASK-021C: Agent run store ──
+  const runsRef = useRef<Map<string, AgentRun>>(new Map());
+  const [activeRuns, setActiveRuns] = useState<AgentRun[]>([]);
+  const [hasRunningRun, setHasRunningRun] = useState(false);
+  const runStore = {
+    addRun(run: AgentRun) {
+      runsRef.current.set(run.runId, run);
+      setActiveRuns(Array.from(runsRef.current.values()));
+      setHasRunningRun(true);
+    },
+    updateRun(runId: string, patch: Partial<AgentRun>) {
+      const existing = runsRef.current.get(runId);
+      if (!existing) return;
+      runsRef.current.set(runId, { ...existing, ...patch });
+      setActiveRuns(Array.from(runsRef.current.values()));
+      if (patch.status && patch.status !== "running") {
+        setHasRunningRun(Array.from(runsRef.current.values()).some(r => r.status === "running"));
+      }
+    },
+    cancelRun(runId: string) {
+      this.updateRun(runId, { status: "cancelled", finishedAt: Date.now(), localCancel: true });
+    },
+    getRun(runId: string): AgentRun | undefined { return runsRef.current.get(runId); },
+  };
+
+  // ── TASK-021C fix: OpenClaw status preloaded at App level ──
+  const [openclawConnected, setOpenclawConnected] = useState(false);
+  const [openclawChecked, setOpenclawChecked] = useState(false);
+  const [ocPrimaryModel, setOcPrimaryModel] = useState("");
+
+  const chatState = {
+    messages: chatMessages, setMessages: setChatMessages, messagesRef: chatMessagesRef,
+    chatSessions, setChatSessions, chatSessionsRef, latestSessionsRef,
+    currentSessionId, setCurrentSessionId, currentSessionIdRef,
+    loading: chatLoading, setLoading: setChatLoading,
+    phase: chatPhase, setPhase: setChatPhase,
+    error: chatError, setError: setChatError,
+    errorDetail: chatErrorDetail, setErrorDetail: setChatErrorDetail,
+    activeRequestRef, stoppedIdsRef,
+    timerRef: chatTimerRef, unlistenRef: chatUnlistenRef,
+    elapsedLive, setElapsedLive, lastElapsed, setLastElapsed,
+    streamDiagnostics, setStreamDiagnostics,
+    sessionsLoaded, setSessionsLoaded, sessionsLoadedRef,
+    sessionError, setSessionError, saveQueueRef,
+    // Run store
+    runsRef, activeRuns, setActiveRuns, hasRunningRun, setHasRunningRun,
+    openclawConnected, setOpenclawConnected, openclawChecked, setOpenclawChecked,
+    ocPrimaryModel, setOcPrimaryModel,
+  };
 
   useEffect(() => {
     loadConfig()
@@ -598,6 +706,71 @@ function App() {
     };
   }, [ready]);
 
+  // TASK-021C fix: Preload OpenClaw HTTP status at App mount
+  useEffect(() => {
+    if (!ready) return;
+    let cancelled = false;
+    const check = async () => {
+      try {
+        const http = await checkOpenClawHttpStatus();
+        if (!cancelled) {
+          setOpenclawConnected(http.ready);
+          setOpenclawChecked(true);
+        }
+      } catch {
+        if (!cancelled) { setOpenclawConnected(false); setOpenclawChecked(true); }
+      }
+      try {
+        const cfg = await readOpenClawConfigSummary();
+        if (!cancelled && cfg.defaultModelPrimary) {
+          setOcPrimaryModel(cfg.defaultModelPrimary);
+        }
+      } catch { /* ignore */ }
+    };
+    check();
+    const iv = setInterval(check, 30_000);
+    return () => { cancelled = true; clearInterval(iv); };
+  }, [ready]);
+
+  // TASK-025B fix: Load chat sessions at App mount so HomePage has data
+  useEffect(() => {
+    if (!ready) return;
+    let cancelled = false;
+    readChatSessions()
+      .then((stored) => {
+        if (cancelled) return;
+        const sorted = sortSessions(sanitizeChatSessions((stored || []) as ChatSession[]));
+        const initial = sorted.length > 0 ? sorted : [createEmptySession()];
+        latestSessionsRef.current = initial;
+        chatSessionsRef.current = initial;
+        currentSessionIdRef.current = initial[0]?.id ?? null;
+        setChatSessions(initial);
+        setCurrentSessionId(initial[0]?.id ?? null);
+        if (!sessionsLoadedRef.current) {
+          const initialMessages = (initial[0]?.messages || []) as UiChatMessage[];
+          setChatMessages(initialMessages);
+          chatMessagesRef.current = initialMessages;
+        }
+        setSessionsLoaded(true);
+        sessionsLoadedRef.current = true;
+        if (sorted.length === 0) { writeChatSessions(initial).catch(() => {}); }
+      })
+      .catch((err) => {
+        console.warn("Failed to read chat sessions", err);
+        if (cancelled) return;
+        const session = createEmptySession();
+        latestSessionsRef.current = [session];
+        chatSessionsRef.current = [session];
+        currentSessionIdRef.current = session.id;
+        setChatSessions([session]);
+        setCurrentSessionId(session.id);
+        setSessionsLoaded(true);
+        sessionsLoadedRef.current = true;
+        setSessionError("历史会话文件无法读取，已临时重建为空历史。后续保存成功后会恢复正常。");
+      });
+    return () => { cancelled = true; };
+  }, [ready]);
+
   const updateConfig = async (next: AppConfig) => {
     setConfig(next);
     await saveConfig(next);
@@ -618,7 +791,7 @@ function App() {
   const current = navItems.find((item) => item.id === active) ?? navItems[0];
 
   if (showOnboarding) {
-    return <Onboarding config={config} updateConfig={updateConfig} hermesCli={hermesCli} hermesApi={hermesApi} />;
+    return <Onboarding config={config} updateConfig={updateConfig} />;
   }
 
   return (
@@ -637,6 +810,7 @@ function App() {
           {navItems.map((item) => {
             const Icon = item.icon;
             const selected = active === item.id;
+            const isChat = item.id === "chat";
             return (
               <button
                 key={item.id}
@@ -648,6 +822,7 @@ function App() {
               >
                 <Icon className="h-4 w-4" />
                 {item.label}
+                {isChat && hasRunningRun && <Loader2 className="ml-auto h-3.5 w-3.5 animate-spin text-primary/70" />}
               </button>
             );
           })}
@@ -677,11 +852,20 @@ function App() {
           </Button>
         </header>
 
+        {/* TASK-021D: Global run indicator banner */}
+        {hasRunningRun && active !== "chat" && (
+          <div className="shrink-0 z-20 flex items-center gap-3 bg-primary/5 border-b px-4 py-2 text-sm">
+            <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+            <span className="text-primary">AI Agent 正在处理消息</span>
+            <Button variant="link" size="sm" className="ml-auto text-primary underline" onClick={() => setActive("chat")}>查看</Button>
+          </div>
+        )}
+
         <main className={cn("min-h-0 flex-1 p-4 md:p-6", active === "chat" ? "overflow-hidden" : "overflow-y-auto")}>
           {!ready ? (
             <div className="flex h-[60vh] items-center justify-center text-muted-foreground"><Loader2 className="mr-2 h-4 w-4 animate-spin" /> 正在加载本地配置</div>
           ) : (
-            <Page active={active} setActive={setActive} chatDraft={chatDraft} setChatDraft={setChatDraft} pendingNewSessionTitle={pendingNewSessionTitle} setPendingNewSessionTitle={setPendingNewSessionTitle} pendingChatAttachment={pendingChatAttachment} setPendingChatAttachment={setPendingChatAttachment} config={config} updateConfig={updateConfig} hermesCli={hermesCli} hermesApi={hermesApi} hermesModelConfig={hermesModelConfig} setHermesModelConfig={setHermesModelConfig} refreshHermesCli={refreshHermesCli} refreshHermesApi={refreshHermesApi} />
+            <Page active={active} setActive={setActive} chatDraft={chatDraft} setChatDraft={setChatDraft} pendingNewSessionTitle={pendingNewSessionTitle} setPendingNewSessionTitle={setPendingNewSessionTitle} pendingChatAttachment={pendingChatAttachment} setPendingChatAttachment={setPendingChatAttachment} config={config} updateConfig={updateConfig} hermesCli={hermesCli} hermesApi={hermesApi} hermesModelConfig={hermesModelConfig} setHermesModelConfig={setHermesModelConfig} refreshHermesCli={refreshHermesCli} refreshHermesApi={refreshHermesApi} chatState={chatState} />
           )}
         </main>
       </div>
@@ -689,128 +873,110 @@ function App() {
   );
 }
 
-function Onboarding({ config, updateConfig, hermesCli, hermesApi }: { config: AppConfig; updateConfig: (next: AppConfig) => Promise<void>; hermesCli: HermesStatus | null; hermesApi: HermesApiServerStatus | null }) {
-  const [draft, setDraft] = useState({ ...config, baseUrl: DEFAULT_CONFIG.baseUrl });
-  const [showToken, setShowToken] = useState(false);
-  const [applying, setApplying] = useState(false);
-  const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
-  const hermesInstalled = hermesCli?.installed;
-  const hermesRunning = hermesApi?.running;
-
-  const modelCards: Array<{ value: AppConfig["defaultModel"]; title: string; name: string; description: string }> = [
-    { value: "deepseek-v4-flash", title: "速度优先", name: "DeepSeek Flash", description: "响应更快，适合日常聊天、简单办公、轻量任务" },
-    { value: "deepseek-v4-pro", title: "质量优先", name: "DeepSeek Pro", description: "适合复杂分析、方案整理、长一点的任务" },
-    { value: "kimi-k2.6", title: "长文本 / 代码", name: "Kimi K2.6", description: "适合长文档、代码和复杂上下文" }
-  ];
-
-  const applyAndEnter = async () => {
-    setApplying(true);
-    setResult(null);
-    try {
-      if (!draft.apiKey.trim()) throw new Error("请填写专属模型供应 Token");
-      // Test token first
-      const fixedDraft = { ...draft, baseUrl: DEFAULT_CONFIG.baseUrl };
-      const modelsResult = await listModels(fixedDraft.baseUrl, fixedDraft.apiKey);
-      if (!modelsResult.ok) throw new Error(modelsResult.error || "Token 连接测试失败");
-      // Apply to Hermes if installed
-      if (hermesInstalled) {
-        try {
-          await applyHermesModelConfig(fixedDraft.apiKey, fixedDraft.defaultModel);
-        } catch { /* non-fatal: config write failed but we can still enter */ }
-      }
-      await updateConfig({ ...fixedDraft, selectedEngine: "hermes", hasCompletedOnboarding: true });
-      setResult({ ok: true, message: "配置完成，正在进入工作台…" });
-    } catch (error) {
-      setResult({ ok: false, message: getErrorMessage(error) });
-    } finally {
-      setApplying(false);
-    }
-  };
-
+function DetectionRow({ label, ok, hint }: { label: string; ok: boolean; hint: string }) {
   return (
-    <div className="min-h-screen bg-background p-3 md:p-5">
-      <div className="mx-auto grid min-h-[calc(100vh-2.5rem)] max-w-6xl items-center gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(460px,520px)]">
-        <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-[#6366F1] via-[#4F46E5] to-[#06B6D4] p-6 text-white shadow-xl md:p-8 lg:p-7">
-          <div className="relative space-y-5">
-            <Badge className="border-white/30 bg-white/20 text-white">U 盘交付版</Badge>
-            <div>
-              <h1 className="text-3xl font-bold tracking-tight">你的个人 Hermes Agent 工作台</h1>
-              <p className="mt-3 text-sm leading-6 text-white/80">连接模型供应 Token 后，即可使用本地 Agent 对话、文件分析、Skill 工作流。</p>
-            </div>
-            <div className="grid gap-3 text-sm text-white/85">
-              <div className="rounded-xl bg-white/10 p-3">Hermes 是长期运行的个人 Agent，负责对话、记忆和工作流。</div>
-              <div className="rounded-xl bg-white/10 p-3">专属 Token 用于启用你的模型额度，请勿分享给他人。</div>
-            </div>
-          </div>
-        </div>
-
-        <Card className="rounded-2xl border-border/70 bg-card/95 shadow-xl shadow-primary/5">
-          <CardHeader className="gap-2 p-5 pb-3">
-            <CardTitle className="text-xl">初始化配置</CardTitle>
-            <CardDescription>填写专属 Token，选择 Agent 使用的模型，即可开始使用。</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4 p-5 pt-0">
-            <div className={cn("rounded-2xl border p-3 text-sm", hermesRunning ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400" : hermesInstalled ? "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400" : "border-rose-500/30 bg-rose-500/10 text-rose-700 dark:text-rose-400")}>
-              {!hermesCli
-                ? "正在检测本机 Hermes…"
-                : hermesRunning
-                ? "Hermes 已就绪，可以开始配置。"
-                : hermesInstalled
-                  ? "未检测到 Hermes 对话服务，请先启动 Hermes。"
-                  : "未检测到 Hermes。进入工作台后可通过 Hermes 管理页查看安装方式。"}
-            </div>
-            <Field label="专属模型供应 Token">
-              <div className="flex items-center gap-2">
-                <Input className="h-11" type={showToken ? "text" : "password"} value={draft.apiKey} onChange={(event) => setDraft({ ...draft, apiKey: event.target.value })} placeholder="请输入 Token" />
-                <Button variant="outline" size="icon" className="h-11 w-11 shrink-0" onClick={() => setShowToken(!showToken)}>{showToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</Button>
-              </div>
-              <p className="mt-2 text-xs text-muted-foreground">用于启用你的专属模型额度，请勿分享给他人。</p>
-            </Field>
-            <div className="space-y-3">
-              <div>
-                <h3 className="text-sm font-medium">选择 Agent 模型</h3>
-                <p className="mt-1 text-xs leading-5 text-muted-foreground">不同模型在速度、质量和长文本能力上有所区别。你可以稍后在 Hermes 管理中切换。</p>
-              </div>
-              <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-3">
-                {modelCards.map((model) => {
-                  const selected = draft.defaultModel === model.value;
-                  return (
-                    <button
-                      key={model.value}
-                      type="button"
-                      onClick={() => setDraft({ ...draft, defaultModel: model.value })}
-                      className={cn(
-                        "relative rounded-2xl border p-3 text-left transition-all",
-                        selected
-                          ? "border-primary/70 bg-primary/10 shadow-lg shadow-primary/10"
-                          : "border-border/70 bg-background/70 hover:border-primary/30 hover:bg-primary/5"
-                      )}
-                    >
-                      {selected && <Check className="absolute right-3 top-3 h-4 w-4 text-primary" />}
-                      <div className="pr-5 text-sm font-semibold">{model.title}</div>
-                      <div className="mt-1 text-sm text-foreground">{model.name}</div>
-                      <p className="mt-1.5 text-xs leading-5 text-muted-foreground">{model.description}</p>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-            <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
-              <Button className="w-full" disabled={applying || !draft.apiKey.trim()} onClick={applyAndEnter}>{applying && <Loader2 className="h-4 w-4 animate-spin" />}{applying ? "正在应用配置…" : draft.apiKey.trim() ? "应用并进入工作台" : "填写 Token 后继续"}</Button>
-              <Button variant="ghost" className="w-full text-muted-foreground sm:w-auto" onClick={() => updateConfig({ ...draft, baseUrl: DEFAULT_CONFIG.baseUrl, selectedEngine: "hermes", hasCompletedOnboarding: true })}>稍后配置</Button>
-            </div>
-            {result && <div className={cn("rounded-xl border p-3 text-sm", result.ok ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400" : "border-rose-500/30 bg-rose-500/10 text-rose-700 dark:text-rose-400")}>{result.message}</div>}
-          </CardContent>
-        </Card>
-      </div>
+    <div className="flex items-center gap-2">
+      <span className={cn("h-2 w-2 shrink-0 rounded-full", ok ? "bg-emerald-500" : "bg-muted-foreground/40")} />
+      <span>{label}：{hint}</span>
     </div>
   );
 }
 
-function Page({ active, setActive, chatDraft, setChatDraft, pendingNewSessionTitle, setPendingNewSessionTitle, pendingChatAttachment, setPendingChatAttachment, config, updateConfig, hermesCli, hermesApi, hermesModelConfig, setHermesModelConfig, refreshHermesCli, refreshHermesApi }: { active: RouteId; setActive: (id: RouteId) => void; chatDraft: string; setChatDraft: (value: string) => void; pendingNewSessionTitle: string; setPendingNewSessionTitle: (v: string) => void; pendingChatAttachment: PreparedAttachment | null; setPendingChatAttachment: (v: PreparedAttachment | null) => void; config: AppConfig; updateConfig: (next: AppConfig) => Promise<void>; hermesCli: HermesStatus | null; hermesApi: HermesApiServerStatus | null; hermesModelConfig: HermesModelConfig | null; setHermesModelConfig: (value: HermesModelConfig | null) => void; refreshHermesCli: () => Promise<HermesStatus>; refreshHermesApi: () => Promise<HermesApiServerStatus> }) {
-  if (active === "home") return <HomePage config={config} setActive={setActive} hermesCli={hermesCli} hermesApi={hermesApi} hermesModelConfig={hermesModelConfig} />;
-  if (active === "chat") return <ChatPage config={config} hermesCli={hermesCli} hermesApi={hermesApi} refreshHermesApi={refreshHermesApi} setActive={setActive} initialDraft={chatDraft} onDraftConsumed={() => setChatDraft("")} pendingNewSessionTitle={pendingNewSessionTitle} onNewSessionCreated={() => setPendingNewSessionTitle("")} pendingAttachment={pendingChatAttachment} onAttachmentConsumed={() => setPendingChatAttachment(null)} />;
-  if (active === "engines") return <EnginesPage config={config} updateConfig={updateConfig} hermesCli={hermesCli} hermesApi={hermesApi} hermesModelConfig={hermesModelConfig} setHermesModelConfig={setHermesModelConfig} refreshHermesCli={refreshHermesCli} refreshHermesApi={refreshHermesApi} setActive={setActive} />;
+function Onboarding({ config, updateConfig }: { config: AppConfig; updateConfig: (next: AppConfig) => Promise<void> }) {
+  const [step, setStep] = useState(1);
+  const MAX_STEP = 4;
+
+  const enterWorkspace = async (preferred?: string) => {
+    await updateConfig({ ...config, hasCompletedOnboarding: true });
+  };
+
+  const skipOnboarding = async () => {
+    await updateConfig({ ...config, hasCompletedOnboarding: true });
+  };
+
+  const next = () => setStep(s => Math.min(s + 1, MAX_STEP));
+  const prev = () => setStep(s => Math.max(s - 1, 1));
+
+  const dots = [1,2,3,4].map(s => (
+    <span key={s} className={cn("h-2 w-2 rounded-full transition-colors", step === s ? "bg-primary" : "bg-muted-foreground/30")} />
+  ));
+
+  return (
+    <div className="min-h-screen bg-background flex items-center justify-center p-4">
+      <Card className="w-full max-w-lg">
+        <CardHeader className="text-center pb-2">
+          <div className="flex items-center justify-center gap-2 mb-3">{dots}</div>
+          {step === 1 && <CardTitle className="text-xl">欢迎使用 AI Agent 工作台</CardTitle>}
+          {step === 2 && <CardTitle className="text-xl">检查 AI 助手</CardTitle>}
+          {step === 3 && <CardTitle className="text-xl">你想先做什么？</CardTitle>}
+          {step === 4 && <CardTitle className="text-xl">准备好了</CardTitle>}
+        </CardHeader>
+        <CardContent className="space-y-4 text-center pb-6">
+          {step === 1 && (
+            <div className="space-y-3">
+              <p className="text-sm text-muted-foreground">这是一个桌面 AI 工作台，可以帮你对话、整理文件、处理任务和扩展能力。</p>
+              <Button onClick={next} size="lg">开始设置</Button>
+              <div><button onClick={skipOnboarding} className="text-xs text-muted-foreground underline-offset-2 hover:underline mt-2">跳过</button></div>
+            </div>
+          )}
+          {step === 2 && (
+            <div className="space-y-3">
+              <p className="text-sm text-muted-foreground">AI 助手已准备好，可以开始对话和处理任务。</p>
+              <div className="flex justify-center gap-2">
+                <Button variant="outline" onClick={prev}>上一步</Button>
+                <Button onClick={next}>下一步</Button>
+              </div>
+            </div>
+          )}
+          {step === 3 && (
+            <div className="space-y-3">
+              <div className="grid gap-2 sm:grid-cols-2">
+                {[
+                  { title:"开始对话", desc:"和 AI 助手直接聊天，处理问题和任务", route:"chat" as const },
+                  { title:"使用能力中心", desc:"使用内置工作流，也可以安装扩展能力", route:"skills" as const },
+                  { title:"处理文件/数据", desc:"整理资料、分析表格、总结内容", route:"skills" as const },
+                  { title:"管理项目会话", desc:"按项目保存和筛选会话", route:"chat" as const },
+                ].map(item => (
+                  <button key={item.title}
+                    onClick={() => { void enterWorkspace(); setStep(4); }}
+                    className="rounded-xl border border-border/50 p-3 text-left text-sm transition-colors hover:border-primary/30 hover:bg-primary/5">
+                    <div className="font-medium">{item.title}</div>
+                    <div className="text-xs text-muted-foreground mt-0.5">{item.desc}</div>
+                  </button>
+                ))}
+              </div>
+              <div className="flex justify-center gap-2 pt-1">
+                <Button variant="outline" onClick={prev}>上一步</Button>
+                <Button variant="ghost" onClick={() => { void enterWorkspace(); }}>跳过</Button>
+              </div>
+            </div>
+          )}
+          {step === 4 && (
+            <div className="space-y-3">
+              <p className="text-sm text-muted-foreground">你可以随时从首页开始对话、打开能力中心，或在设置中检查 AI 助手状态。</p>
+              <Button size="lg" onClick={() => enterWorkspace()}>进入工作台</Button>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function Page({ active, setActive, chatDraft, setChatDraft, pendingNewSessionTitle, setPendingNewSessionTitle, pendingChatAttachment, setPendingChatAttachment, config, updateConfig, hermesCli, hermesApi, hermesModelConfig, setHermesModelConfig, refreshHermesCli, refreshHermesApi, chatState }: {
+  active: RouteId; setActive: (id: RouteId) => void;
+  chatDraft: string; setChatDraft: (value: string) => void;
+  pendingNewSessionTitle: string; setPendingNewSessionTitle: (v: string) => void;
+  pendingChatAttachment: PreparedAttachment | null; setPendingChatAttachment: (v: PreparedAttachment | null) => void;
+  config: AppConfig; updateConfig: (next: AppConfig) => Promise<void>;
+  hermesCli: HermesStatus | null; hermesApi: HermesApiServerStatus | null;
+  hermesModelConfig: HermesModelConfig | null; setHermesModelConfig: (value: HermesModelConfig | null) => void;
+  refreshHermesCli: () => Promise<HermesStatus>; refreshHermesApi: () => Promise<HermesApiServerStatus>;
+  chatState: ChatPageState;
+}) {
+  if (active === "home") return <HomePage config={config} updateConfig={updateConfig} setActive={setActive} hermesCli={hermesCli} hermesApi={hermesApi} hermesModelConfig={hermesModelConfig} chatState={chatState} />;
+  if (active === "chat") return <ChatPage config={config} hermesCli={hermesCli} hermesApi={hermesApi} refreshHermesApi={refreshHermesApi} setActive={setActive} initialDraft={chatDraft} onDraftConsumed={() => setChatDraft("")} pendingNewSessionTitle={pendingNewSessionTitle} onNewSessionCreated={() => setPendingNewSessionTitle("")} pendingAttachment={pendingChatAttachment} onAttachmentConsumed={() => setPendingChatAttachment(null)} chatState={chatState} />;
+  if (active === "engines") return <EnginesPage config={config} updateConfig={updateConfig} hermesCli={hermesCli} hermesApi={hermesApi} hermesModelConfig={hermesModelConfig} setHermesModelConfig={setHermesModelConfig} refreshHermesCli={refreshHermesCli} refreshHermesApi={refreshHermesApi} setActive={setActive} chatState={chatState} />;
   if (active === "skills") return <SkillsPage config={config} updateConfig={updateConfig} setActive={setActive} setChatDraft={setChatDraft} setPendingNewSessionTitle={setPendingNewSessionTitle} />;
   if (active === "memory") return <MemoryPage />;
   if (active === "usage") return <UsagePage />;
@@ -819,71 +985,114 @@ function Page({ active, setActive, chatDraft, setChatDraft, pendingNewSessionTit
   return <AboutPage config={config} updateConfig={updateConfig} />;
 }
 
-function HomePage({ config, setActive, hermesCli, hermesApi, hermesModelConfig }: { config: AppConfig; setActive: (id: RouteId) => void; hermesCli: HermesStatus | null; hermesApi: HermesApiServerStatus | null; hermesModelConfig: HermesModelConfig | null }) {
-  const agentConnected = hermesApi?.running;
+// TASK-025B: Format OpenClaw primary model for display (no token/provider)
+function formatDisplayModel(raw?: string | null): string {
+  if (!raw) return "";
+  const last = raw.split("/").pop() || raw;
+  return last;
+}
+
+function HomePage({ config, updateConfig, setActive, hermesCli, hermesApi, hermesModelConfig, chatState }: { config: AppConfig; updateConfig: (next: AppConfig) => Promise<void>; setActive: (id: RouteId) => void; hermesCli: HermesStatus | null; hermesApi: HermesApiServerStatus | null; hermesModelConfig: HermesModelConfig | null; chatState: ChatPageState }) {
+  const agentConnected = hermesApi?.running || chatState.openclawConnected;
+  const recentSessions = sortSessions(chatState.chatSessions).slice(0, 3);
+  const runsRef = chatState.runsRef;
+  const displayModel = formatDisplayModel(chatState.ocPrimaryModel) || "需检查";
+  const [showTechInfo, setShowTechInfo] = useState(false);
+
   return (
-    <div className="space-y-6">
+    <div className="mx-auto w-full max-w-[1120px] min-w-0 space-y-6 px-4 py-4">
       {/* Hero */}
-      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-[#6366F1] to-[#06B6D4] p-6 text-white shadow-lg md:p-8">
-        <div className="relative flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h2 className="text-2xl font-bold tracking-tight">AI Agent 工作台</h2>
-            <p className="mt-1 text-sm text-white/80">你的个人 Hermes Agent 桌面助手</p>
-          </div>
-          <Badge className="self-start border-white/30 bg-white/20 text-white">
-            {hermesApi ? (agentConnected ? <CheckCircle2 className="mr-1 h-3 w-3" /> : <Moon className="mr-1 h-3 w-3" />) : <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
-            {!hermesApi ? "正在检测" : agentConnected ? "Hermes 已连接" : hermesCli?.installed ? "对话服务未运行" : "未检测到 Hermes"}
-          </Badge>
+      <div className="space-y-2 text-center">
+        <h1 className="text-3xl font-bold tracking-tight">AI Agent 工作台</h1>
+        <p className="text-muted-foreground">让本地 AI Agent 帮你处理对话、文件和任务。</p>
+        <div className="flex items-center justify-center gap-3 pt-1">
+          <Button size="lg" onClick={() => setActive("chat")}><MessageSquare className="h-4 w-4" />开始对话</Button>
+          <Button variant="outline" size="lg" onClick={() => setActive("engines")}><Settings2 className="h-4 w-4" />配置 Agent 引擎</Button>
         </div>
       </div>
 
-      {/* Status Overview */}
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <Metric label="Hermes 状态" value={!hermesApi ? "检测中" : agentConnected ? "已连接" : hermesCli?.installed ? "服务未运行" : "未安装"} tone={agentConnected ? "success" : hermesCli?.installed ? "warning" : "danger"} />
-        <Metric label="当前模型" value={hermesModelConfig?.model || config.defaultModel} tone="info" />
-        <Metric label="Token 状态" value={config.apiKey ? "已配置" : "未配置"} tone={config.apiKey ? "success" : "warning"} />
-        <Metric label="已启用 Skills" value={`${config.enabledSkills.length} 个`} tone="info" />
+      {/* Quick Start */}
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {[
+          { icon: MessageSquare, title: "开始对话", desc: "和 AI Agent 直接对话", route: "chat" as RouteId },
+          { icon: Upload, title: "分析文件", desc: "上传内容，让 Agent 帮你整理", route: "files" as RouteId },
+          { icon: PackageOpen, title: "Skill Center", desc: "使用可复用的 Agent 能力", route: "skills" as RouteId },
+          { icon: FileText, title: "Agent 记忆", desc: "查看本地记忆和上下文", route: "memory" as RouteId },
+        ].map((item) => (
+          <button key={item.title} onClick={() => setActive(item.route)} className="flex flex-col items-start gap-1.5 rounded-xl border border-border/50 bg-card/80 p-4 text-left transition-colors hover:border-primary/30 hover:bg-primary/5">
+            <item.icon className="h-5 w-5 text-primary" />
+            <span className="text-sm font-medium">{item.title}</span>
+            <span className="text-xs text-muted-foreground">{item.desc}</span>
+          </button>
+        ))}
       </div>
 
-      {/* Quick Actions */}
-      <Card>
-        <CardHeader>
-          <CardTitle>快速开始</CardTitle>
-        </CardHeader>
-        <CardContent className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <Button onClick={() => setActive("chat")} className="h-auto flex-col gap-1 p-5">
-            <MessageSquare className="h-6 w-6" />
-            <span className="text-sm font-semibold">开始对话</span>
-          </Button>
-          <Button variant="outline" onClick={() => setActive("engines")} className="h-auto flex-col gap-1 p-5">
-            <Bot className="h-6 w-6" />
-            <span className="text-sm font-semibold">配置 Hermes</span>
-          </Button>
-          <Button variant="outline" onClick={() => setActive("skills")} className="h-auto flex-col gap-1 p-5">
-            <PackageOpen className="h-6 w-6" />
-            <span className="text-sm font-semibold">Skill Center</span>
-          </Button>
-          <Button variant="outline" onClick={() => setActive("memory")} className="h-auto flex-col gap-1 p-5">
-            <FileText className="h-6 w-6" />
-            <span className="text-sm font-semibold">Hermes 记忆</span>
-          </Button>
-        </CardContent>
-      </Card>
+      {/* Recent Sessions + Status */}
+      <div className="grid min-w-0 gap-6 grid-cols-1 xl:grid-cols-[1fr_320px]">
+        {/* Recent Sessions */}
+        <div className="min-w-0 space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-medium text-muted-foreground">最近会话</h3>
+            {recentSessions.length > 0 && (
+              <button onClick={() => setActive("chat")} className="text-xs text-muted-foreground hover:text-foreground">查看全部</button>
+            )}
+          </div>
+          {recentSessions.length === 0 ? (
+            <p className="text-sm text-muted-foreground">还没有会话，先开始一次对话。</p>
+          ) : (
+            <div className="space-y-0.5">
+              {recentSessions.map((session) => {
+                const sessionRunning = Array.from(runsRef.current.values()).some(r => r.status === "running" && r.sessionId === session.id);
+                return (
+                  <button key={session.id} onClick={() => setActive("chat")} className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors hover:bg-muted/60">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5 text-sm font-medium">
+                        {session.title}
+                        {sessionRunning && <Loader2 className="h-3 w-3 shrink-0 animate-spin text-primary/70" />}
+                      </div>
+                      <div className="truncate text-xs text-muted-foreground/70">{session.lastMessagePreview || "暂无消息"}</div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
 
-      {/* Token Warning */}
-      {!config.apiKey && (
-        <Card accent="#F59E0B">
-          <CardHeader><CardTitle>请先配置专属模型供应 Token</CardTitle><CardDescription>Token 用于启用你的专属模型额度，请勿分享给他人。额度用完后可联系商家续费。</CardDescription></CardHeader>
-          <CardContent><Button onClick={() => setActive("engines")}><Settings2 className="h-4 w-4" />去配置</Button></CardContent>
-        </Card>
-      )}
+        {/* Lightweight Agent Status */}
+        <div className="min-w-0 space-y-3">
+          <h3 className="text-sm font-medium text-muted-foreground">AI 助手</h3>
+          <div className="rounded-xl border border-border/50 bg-card/80 p-4 space-y-3 text-sm">
+            <div className="flex items-center gap-2">
+              <span className={cn("h-2 w-2 rounded-full", agentConnected ? "bg-emerald-500" : "bg-amber-500")} />
+              <span>{agentConnected ? "已准备好" : "需要配置"}</span>
+            </div>
+            <div className="text-muted-foreground text-xs">
+              <span>可以帮你</span>
+              <p className="mt-0.5 text-foreground">对话、整理文件、处理任务</p>
+            </div>
+            <button onClick={() => setShowTechInfo(!showTechInfo)} className="w-full text-xs text-muted-foreground/60 hover:text-muted-foreground">
+              {showTechInfo ? "收起技术信息" : "显示技术信息"}
+            </button>
+            {showTechInfo && (
+              <div className="flex items-center justify-between text-muted-foreground text-xs">
+                <span>当前模型</span>
+                <span className="text-foreground">{agentConnected ? displayModel : "需检查"}</span>
+              </div>
+            )}
+            <Button variant="ghost" size="sm" className="w-full text-xs" onClick={() => setActive("engines")}>查看设置</Button>
+            <button onClick={() => updateConfig({ ...config, hasCompletedOnboarding: false })} className="w-full text-xs text-muted-foreground underline-offset-2 hover:underline mt-1">新手引导</button>
+          </div>
+        </div>
+      </div>
 
-      {/* Not connected warning */}
-      {config.apiKey && !agentConnected && hermesApi && (
-        <Card accent="#F59E0B">
-          <CardHeader><CardTitle>Hermes 对话服务未运行</CardTitle><CardDescription>{hermesCli?.installed ? "请确认 Hermes 已启动。" : "请先安装 Hermes。"}</CardDescription></CardHeader>
-          <CardContent><Button variant="outline" onClick={() => setActive("engines")}>前往 Hermes 管理</Button></CardContent>
-        </Card>
+      {/* Conditional warnings */}
+      {!agentConnected && chatState.openclawChecked && (
+        <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4">
+          <p className="text-sm font-medium">Agent 引擎尚未就绪</p>
+          <p className="mt-1 text-xs text-muted-foreground">请前往 Agent 引擎页完成 OpenClaw 配置。</p>
+          <Button size="sm" className="mt-3" onClick={() => setActive("engines")}><Settings2 className="h-3.5 w-3.5" />前往配置</Button>
+        </div>
       )}
     </div>
   );
@@ -949,7 +1158,8 @@ function ReasoningEffortControl({ hermesModelConfig, setHermesModelConfig, confi
   );
 }
 
-function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelConfig, setHermesModelConfig, refreshHermesCli, refreshHermesApi, setActive }: { config: AppConfig; updateConfig: (next: AppConfig) => Promise<void>; hermesCli: HermesStatus | null; hermesApi: HermesApiServerStatus | null; hermesModelConfig: HermesModelConfig | null; setHermesModelConfig: (value: HermesModelConfig | null) => void; refreshHermesCli: () => Promise<HermesStatus>; refreshHermesApi: () => Promise<HermesApiServerStatus>; setActive: (id: RouteId) => void }) {
+function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelConfig, setHermesModelConfig, refreshHermesCli, refreshHermesApi, setActive, chatState }: { config: AppConfig; updateConfig: (next: AppConfig) => Promise<void>; hermesCli: HermesStatus | null; hermesApi: HermesApiServerStatus | null; hermesModelConfig: HermesModelConfig | null; setHermesModelConfig: (value: HermesModelConfig | null) => void; refreshHermesCli: () => Promise<HermesStatus>; refreshHermesApi: () => Promise<HermesApiServerStatus>; setActive: (id: RouteId) => void; chatState: ChatPageState }) {
+  const displayModel = formatDisplayModel(chatState.ocPrimaryModel) || "需检查";
   const [refreshing, setRefreshing] = useState(false);
   const [showKey, setShowKey] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -964,11 +1174,55 @@ function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelCo
 
   const selectedModelInfo = modelDisplay(selectedModel);
 
+  // OpenClaw HTTP-first status for engines page
+  const [ocReady, setOcReady] = useState(false);
+  const [ocModels, setOcModels] = useState<string[]>([]);
+  const [ocDefaultModel, setOcDefaultModel] = useState("openclaw/default");
+  const [ocConfig, setOcConfig] = useState<{ configExists: boolean; gatewayTokenPresent: boolean; httpChatCompletionsEnabled: boolean; gatewayAuthMode?: string; errors: string[] } | null>(null);
+  const [ocChecked, setOcChecked] = useState(false);
+
+  // OpenClaw provider config state
+  const [ocModelPreset, setOcModelPreset] = useState<"speed" | "quality">("speed");
+  const [ocApplying, setOcApplying] = useState(false);
+  const [ocApplyResult, setOcApplyResult] = useState<{ ok: boolean; model?: string; error?: string } | null>(null);
+
+  const applyOcProvider = async () => {
+    if (!tokenDraft.trim()) return;
+    setOcApplying(true); setOcApplyResult(null);
+    try {
+      await applyOpenClawProviderConfig(tokenDraft, ocModelPreset);
+      const modelMap: Record<string, string> = { speed: "deepseek-v4-flash", quality: "deepseek-v4-pro" };
+      setOcApplyResult({ ok: true, model: modelMap[ocModelPreset] || ocModelPreset });
+      // Token is written to OpenClaw config by Rust command only.
+      // Do NOT save to AppConfig.apiKey or localStorage.
+      setTokenDraft("");
+    } catch (err) {
+      setOcApplyResult({ ok: false, error: getErrorMessage(err) });
+    } finally { setOcApplying(false); }
+  };
+
+  const refreshOpenClawStatus = async () => {
+    try {
+      const [cfg, http] = await Promise.all([
+        readOpenClawConfigSummary(),
+        checkOpenClawHttpStatus(),
+      ]);
+      setOcConfig(cfg);
+      setOcReady(http.ready);
+      setOcModels(http.models || []);
+      setOcDefaultModel(http.defaultModel || "openclaw/default");
+    } catch { /* ignore */ }
+    setOcChecked(true);
+  };
+
+  useEffect(() => { refreshOpenClawStatus(); }, []);
+
   const refreshAll = async () => {
     setRefreshing(true);
     try { await refreshHermesCli(); } catch { /* ignore */ }
     try { await refreshHermesApi(); } catch { /* ignore */ }
     try { const data = await readHermesModelConfig(); setHermesModelConfig(data); } catch { /* ignore */ }
+    await refreshOpenClawStatus();
     setRefreshing(false);
   };
 
@@ -999,7 +1253,7 @@ function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelCo
   const [applyStep, setApplyStep] = useState(0);
   const [applySteps, setApplySteps] = useState<{ label: string; status: "pending" | "running" | "success" | "error" }[]>([
     { label: "检查专属 Token", status: "pending" },
-    { label: "写入 Hermes 模型配置", status: "pending" },
+    { label: "写入 Legacy 模型配置", status: "pending" },
     { label: "写入模型凭证", status: "pending" },
     { label: "验证配置结果", status: "pending" },
     { label: "完成", status: "pending" },
@@ -1086,85 +1340,99 @@ function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelCo
 
   return (
     <div className="space-y-4">
-      {/* 1. Status */}
-      <Card accent="#6366F1">
-        <CardHeader>
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <CardTitle>Hermes 状态</CardTitle>
-              <CardDescription>{hermesConnected ? "本机 Hermes Agent 已连接，可以开始对话。" : hermesInstalled ? "未检测到本地 Hermes 对话服务，请先启动 Hermes。" : "未检测到 Hermes，请确认已正确安装。"}</CardDescription>
-            </div>
-            <Badge tone={hermesConnected ? "success" : hermesInstalled ? "warning" : "danger"}>{hermesConnected ? "已连接" : hermesInstalled ? "未运行" : "未安装"}</Badge>
+      {/* 1. AI 助手状态 */}
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between gap-3">
+            <CardTitle>AI 助手</CardTitle>
+            <Badge tone={ocReady ? "success" : ocChecked ? "warning" : "muted"}>
+              {ocReady ? "已准备好" : ocChecked ? "需检查" : "检测中"}
+            </Badge>
           </div>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
-            <Metric label="Hermes 程序" value={hermesCli ? (hermesInstalled ? "已安装" : "未安装") : "检测中"} tone={hermesInstalled ? "success" : "warning"} />
-            <Metric label="对话服务" value={hermesApi ? (hermesConnected ? "已连接" : "未运行") : "检测中"} tone={hermesConnected ? "success" : "warning"} />
-            <Metric label="当前模型" value={currentModelInfo.name} tone={hermesModel ? "info" : "muted"} />
-            <Metric label="模型模式" value={currentModelInfo.mode} tone="info" />
-            <Metric label="Token 状态" value={config.apiKey ? "已填写" : "未填写"} tone={config.apiKey ? "success" : "warning"} />
-            <Metric label="配置状态" value={configApplied ? "已应用" : "未应用"} tone={configApplied ? "success" : "warning"} />
+        <CardContent className="space-y-3">
+          <div className="flex items-center gap-2 text-sm">
+            <span className={cn("h-2 w-2 rounded-full", ocReady ? "bg-emerald-500" : "bg-amber-500")} />
+            <span>{ocReady ? "当前使用" : "当前模型"}</span>
+            <span className="font-medium">{displayModel}</span>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <Button disabled={refreshing} onClick={refreshAll}>{refreshing && <Loader2 className="h-4 w-4 animate-spin" />}<RefreshCcw className="h-4 w-4" />刷新状态</Button>
-            <span className="text-xs text-muted-foreground">最近检测：{timeAgo(hermesApi?.checkedAt || hermesCli?.checkedAt) || "未检测"}</span>
+          {ocReady && (
+            <p className="text-xs text-muted-foreground">可以用于对话、文件整理和任务处理。</p>
+          )}
+          {ocChecked && !ocReady && ocConfig?.configExists && (
+            <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-600 dark:text-amber-400 space-y-1">
+              <p className="font-medium">需要检查</p>
+              {!ocConfig.httpChatCompletionsEnabled && <p>HTTP 对话接口未启用。</p>}
+              {!ocConfig.gatewayTokenPresent && <p>Gateway token 未配置。</p>}
+            </div>
+          )}
+      <div className="flex flex-wrap items-center gap-2 overflow-x-auto">
+            <Button disabled={refreshing} onClick={refreshAll} variant="outline" size="sm">
+              {refreshing && <Loader2 className="h-4 w-4 animate-spin" />}<RefreshCcw className="h-4 w-4" />重新检测
+            </Button>
+            <button onClick={() => setShowAdvanced(true)} className="text-xs text-muted-foreground underline-offset-2 hover:underline">高级诊断</button>
           </div>
         </CardContent>
       </Card>
 
-      {/* 2. Model Config */}
+      {/* 2. OpenClaw Model Provider Config */}
       <Card>
-        <CardHeader>
-          <CardTitle>Agent 模型配置</CardTitle>
-          <CardDescription>填写专属 Token，选择 Agent 使用的模型。额度用完后可联系商家续费。</CardDescription>
+        <CardHeader className="pb-3">
+          <CardTitle>模型供应配置</CardTitle>
+          <CardDescription>填写专属 Token 并选择模型档位，点击应用后写入 OpenClaw 配置。</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          {/* Current preset indicator */}
+          {ocConfig?.gatewayTokenPresent && (
+            <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-2 text-xs text-emerald-700 dark:text-emerald-400">
+              模型供应已配置。如需切换档位或更新 Token，请重新填写并应用。
+            </div>
+          )}
           <div className="space-y-1">
             <label className="text-sm font-medium">专属模型供应 Token</label>
             <div className="flex gap-2">
               <Input type={showKey ? "text" : "password"} value={tokenDraft} onChange={(e) => setTokenDraft(e.target.value)} placeholder="请输入 Token" />
               <Button variant="outline" size="icon" onClick={() => setShowKey(!showKey)}>{showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</Button>
             </div>
-            <p className="text-xs text-muted-foreground">该 Token 用于启用你的专属模型额度，请勿分享给他人。</p>
+            <p className="text-xs text-muted-foreground">Token 写入 OpenClaw 配置后即从页面清除，不会保存到 App 本地存储。</p>
           </div>
           <div className="space-y-2">
-            <label className="text-sm font-medium">选择 Agent 模型</label>
-            <div className="grid gap-2 sm:grid-cols-3">
+            <label className="text-sm font-medium">模型档位</label>
+            <div className="grid gap-2 sm:grid-cols-2">
               {[
-                { value: "deepseek-v4-flash", title: "速度优先", subtitle: "响应更快，适合日常聊天和简单任务" },
-                { value: "deepseek-v4-pro", title: "质量优先", subtitle: "适合复杂分析、方案整理" },
-                { value: "kimi-k2.6", title: "长文本 / 代码", subtitle: "适合长文档、代码、复杂上下文" },
+                { preset: "speed" as const, title: "速度优先", subtitle: "响应更快，适合日常任务" },
+                { preset: "quality" as const, title: "质量优先", subtitle: "推理更强，适合复杂分析" },
               ].map((card) => (
-                <button key={card.value} onClick={() => setSelectedModel(card.value as typeof selectedModel)}
+                <button key={card.preset} onClick={() => setOcModelPreset(card.preset)}
                   className={cn("relative flex flex-col gap-1 rounded-2xl border px-4 py-3 text-left transition-all duration-150",
-                    selectedModel === card.value ? "border-primary bg-primary/5" : "border-border/60 hover:border-primary/30")}>
-                  {selectedModel === card.value && <Check className="absolute right-2 top-2 h-4 w-4 text-primary" />}
+                    ocModelPreset === card.preset ? "border-primary bg-primary/5" : "border-border/60 hover:border-primary/30")}>
+                  {ocModelPreset === card.preset && <Check className="absolute right-2 top-2 h-4 w-4 text-primary" />}
                   <div className="text-sm font-medium">{card.title}</div>
                   <div className="text-xs text-muted-foreground">{card.subtitle}</div>
                 </button>
               ))}
             </div>
-            <p className="text-xs text-muted-foreground">额度消耗和响应速度会因模型不同而变化。</p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button onClick={() => setShowApplyPreview(true)} disabled={!tokenDraft.trim()}>应用到 Hermes</Button>
-            <Button variant="outline" disabled={testing} onClick={testToken}>{testing && <Loader2 className="h-4 w-4 animate-spin" />}测试 Token</Button>
-            <Button variant="outline" onClick={saveConfig}><Save className="h-4 w-4" />保存配置</Button>
-            <Button variant="ghost" size="sm" disabled={readingConfig} onClick={readConfig}>{readingConfig && <Loader2 className="h-4 w-4 animate-spin" />}读取 Hermes 配置</Button>
+            <Button onClick={applyOcProvider} disabled={!tokenDraft.trim() || ocApplying}>
+              {ocApplying && <Loader2 className="h-4 w-4 animate-spin" />}应用到 OpenClaw 配置
+            </Button>
+            <p className="self-center text-[11px] text-muted-foreground">应用后需重启 Gateway 以生效。</p>
           </div>
-          {result && <div className={cn("rounded-xl border p-3 text-sm", result.ok ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400" : "border-rose-500/30 bg-rose-500/10 text-rose-700 dark:text-rose-400")}>{result.message}</div>}
-        </CardContent>
-      </Card>
-
-      {/* 2.5 Reasoning Effort */}
-      <Card>
-        <CardHeader>
-          <CardTitle>思考强度</CardTitle>
-          <CardDescription>控制 Hermes Agent 的推理深度。是否生效取决于当前模型能力。</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <ReasoningEffortControl hermesModelConfig={hermesModelConfig} setHermesModelConfig={setHermesModelConfig} config={config} updateConfig={updateConfig} />
+          {ocApplyResult && (
+            <div className={cn("rounded-xl border p-3 text-sm",
+              ocApplyResult.ok ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+              : "border-rose-500/30 bg-rose-500/10 text-rose-700 dark:text-rose-400")}>
+              {ocApplyResult.ok
+                ? `已写入 OpenClaw 配置。当前档位：${ocModelPreset === "speed" ? "速度优先 (deepseek-v4-flash)" : "质量优先 (deepseek-v4-pro)"}。`
+                : ocApplyResult.error}
+            </div>
+          )}
+          {ocApplyResult?.ok && (
+            <div className="rounded-lg bg-muted/50 p-2 font-mono text-xs text-muted-foreground">
+              如未立即生效，请在终端执行：openclaw gateway restart
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -1173,8 +1441,8 @@ function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelCo
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setShowApplyPreview(false)}>
           <Card className="w-full max-w-md overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <CardHeader>
-              <CardTitle>应用配置到 Hermes</CardTitle>
-              <CardDescription>{!applying && !applyDone ? "确认后开始写入 Hermes 配置。" : ""}</CardDescription>
+              <CardTitle>应用配置到 Legacy 引擎</CardTitle>
+              <CardDescription>{!applying && !applyDone ? "确认后开始写入 Legacy 引擎配置。" : ""}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               {!applying && !applyDone && !applyFailed && (
@@ -1215,7 +1483,7 @@ function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelCo
                   {/* Success state */}
                   {applyDone && applySuccess && (
                     <div className="space-y-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4">
-                      <div className="text-sm font-medium text-emerald-700 dark:text-emerald-300">配置已应用到 Hermes</div>
+                      <div className="text-sm font-medium text-emerald-700 dark:text-emerald-300">配置已应用到 Legacy 引擎</div>
                       <div className="space-y-1 text-xs text-emerald-700/80 dark:text-emerald-300/80">
                         <div>当前模型：{modelDisplay(applySuccess.model).name}</div>
                         <div>模型模式：{modelDisplay(applySuccess.model).mode}</div>
@@ -1223,7 +1491,7 @@ function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelCo
                       <div className="text-xs text-emerald-600/70 dark:text-emerald-400/70">新建会话将使用新模型，当前会话不受影响。</div>
                       <div className="flex gap-2 pt-1">
                         <Button size="sm" onClick={() => { setShowApplyPreview(false); setApplyDone(false); setActive("chat"); }}>进入 Agent 对话</Button>
-                        <Button variant="outline" size="sm" onClick={() => { setShowApplyPreview(false); setApplyDone(false); }}>留在 Hermes 管理</Button>
+                        <Button variant="outline" size="sm" onClick={() => { setShowApplyPreview(false); setApplyDone(false); }}>留在 Agent 引擎</Button>
                       </div>
                     </div>
                   )}
@@ -1248,8 +1516,7 @@ function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelCo
 
       {/* 4. Diagnostic entry (lightweight) */}
       <div className="flex items-center gap-3">
-        <button onClick={() => setShowAdvanced(true)} className="text-xs text-muted-foreground underline-offset-2 hover:underline">售后诊断</button>
-        {!hermesConnected && <span className="text-xs text-muted-foreground">· 查看诊断信息排查连接问题</span>}
+        <button onClick={() => setShowAdvanced(true)} className="text-xs text-muted-foreground underline-offset-2 hover:underline">高级诊断</button>
       </div>
 
       {/* Diagnostic popup */}
@@ -1257,37 +1524,38 @@ function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelCo
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setShowAdvanced(false)}>
           <Card className="max-h-[80vh] w-full max-w-md overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <CardHeader>
-              <CardTitle>售后诊断信息</CardTitle>
-              <CardDescription>以下信息用于排查问题，不包含密钥或 Token。</CardDescription>
+              <CardTitle>高级诊断</CardTitle>
+              <CardDescription>以下信息用于排查问题，不包含密钥或 Token。普通使用无需查看。</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
+              {/* OpenClaw technical info */}
               <div className="space-y-1 rounded-xl border bg-muted/30 p-3">
-                <div>Hermes 状态：{hermesConnected ? "已连接" : hermesInstalled ? "未运行" : "未安装"}</div>
-                <div>Hermes 路径：{hermesCli?.binaryPath || "未找到"}</div>
+                <div>配置文件：{ocConfig?.configExists ? "已找到" : "未找到"}</div>
+                <div>Gateway：{ocReady ? "运行中" : "未运行"}</div>
+                <div>HTTP 对话接口：{ocConfig?.httpChatCompletionsEnabled ? "已启用" : "未启用"}</div>
+                <div>路由入口：openclaw/default</div>
+                {ocModels.length > 0 && <div>可用模型：{ocModels.join(", ")}</div>}
+                {ocChecked && !ocReady && ocConfig?.configExists && (
+                  <div className="mt-1 text-xs text-muted-foreground">
+                    {!ocConfig.httpChatCompletionsEnabled && (
+                      <div className="mt-1 rounded bg-muted/50 p-1.5 font-mono text-[11px]">
+                        openclaw config set gateway.http.endpoints.chatCompletions.enabled true --strict-json
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+              {/* Legacy Hermes diagnostic */}
+              <div className="space-y-1 rounded-xl border bg-muted/30 p-3">
+                <div>Legacy 引擎状态：{hermesConnected ? "已连接" : hermesInstalled ? "未运行" : "未安装"}</div>
+                <div>Legacy 引擎路径：{hermesCli?.binaryPath || "未找到"}</div>
                 <div>配置文件：~/.hermes/config.yaml</div>
                 <div>密钥文件：~/.hermes/.env（未读取内容）</div>
-                <div>对话服务：http://127.0.0.1:8642/v1</div>
-                <div>模型供应：{config.baseUrl}</div>
+                <div>本地服务：已检测</div>
                 <div>当前模型：{hermesModelConfig?.model || config.defaultModel}</div>
-                <div>Provider：{hermesModelConfig?.provider || "未配置"}</div>
                 <div>最近检测：{timeAgo(hermesApi?.checkedAt || hermesCli?.checkedAt) || "未检测"}</div>
               </div>
               <div className="flex gap-2">
-                <Button variant="outline" onClick={() => {
-                  const diag = [
-                    "AI Agent Workspace 诊断信息",
-                    `Hermes 状态：${hermesConnected ? "已连接" : hermesInstalled ? "未运行" : "未安装"}`,
-                    `Hermes 路径：${hermesCli?.binaryPath || "未找到"}`,
-                    `配置文件：~/.hermes/config.yaml`,
-                    `密钥文件：~/.hermes/.env（未读取内容）`,
-                    `对话服务：http://127.0.0.1:8642/v1`,
-                    `模型供应：${config.baseUrl}`,
-                    `当前模型：${hermesModelConfig?.model || config.defaultModel}`,
-                    `Provider：${hermesModelConfig?.provider || "未配置"}`,
-                    `最近检测：${timeAgo(hermesApi?.checkedAt || hermesCli?.checkedAt) || "未检测"}`,
-                  ].join("\n");
-                  navigator.clipboard.writeText(diag);
-                }}><Copy className="h-4 w-4" />复制诊断信息</Button>
                 <Button variant="outline" onClick={() => setShowAdvanced(false)}>关闭</Button>
               </div>
             </CardContent>
@@ -1300,23 +1568,34 @@ function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelCo
 
 type ChatPhase = "ready" | "sending" | "thinking" | "running" | "done" | "error";
 
-function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, initialDraft, onDraftConsumed, pendingNewSessionTitle, onNewSessionCreated, pendingAttachment, onAttachmentConsumed }: { config: AppConfig; hermesCli: HermesStatus | null; hermesApi: HermesApiServerStatus | null; refreshHermesApi: () => Promise<HermesApiServerStatus>; setActive: (id: RouteId) => void; initialDraft: string; onDraftConsumed: () => void; pendingNewSessionTitle: string; onNewSessionCreated: () => void; pendingAttachment: PreparedAttachment | null; onAttachmentConsumed: () => void }) {
+function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, initialDraft, onDraftConsumed, pendingNewSessionTitle, onNewSessionCreated, pendingAttachment, onAttachmentConsumed, chatState }: {
+  config: AppConfig; hermesCli: HermesStatus | null; hermesApi: HermesApiServerStatus | null;
+  refreshHermesApi: () => Promise<HermesApiServerStatus>; setActive: (id: RouteId) => void;
+  initialDraft: string; onDraftConsumed: () => void; pendingNewSessionTitle: string;
+  onNewSessionCreated: () => void; pendingAttachment: PreparedAttachment | null; onAttachmentConsumed: () => void;
+  chatState: ChatPageState;
+}) {
+  const { messages, setMessages, messagesRef, chatSessions, setChatSessions, chatSessionsRef, latestSessionsRef, currentSessionId, setCurrentSessionId, currentSessionIdRef, loading, setLoading, phase, setPhase, error, setError, errorDetail, setErrorDetail, activeRequestRef, stoppedIdsRef, timerRef, unlistenRef, elapsedLive, setElapsedLive, lastElapsed, setLastElapsed, streamDiagnostics, setStreamDiagnostics, sessionsLoaded, setSessionsLoaded, sessionsLoadedRef, sessionError, setSessionError, saveQueueRef, runsRef, activeRuns: _activeRuns, hasRunningRun, setHasRunningRun, openclawConnected, setOpenclawConnected, openclawChecked, setOpenclawChecked, ocPrimaryModel, setOcPrimaryModel } = chatState;
+  const displayModel = formatDisplayModel(ocPrimaryModel) || "openclaw/default";
+
   const [input, setInput] = useState(initialDraft);
   const [attachments, setAttachments] = useState<PreparedAttachment[]>([]);
   const [attachBusy, setAttachBusy] = useState(false);
-  const [messages, setMessages] = useState<UiChatMessage[]>([]);
-  const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
-  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [sessionSearch, setSessionSearch] = useState("");
+  const [selectedProjectId, setSelectedProjectId] = useState<string>("all");  // TASK-023C-B: "all" | "default" | customId
+  const [chatProjects, setChatProjects] = useState<ChatProject[]>(SYSTEM_PROJECTS);  // TASK-028C: loaded async in useEffect
+
+  // TASK-028C: Load chatProjects from file (async)
+  useEffect(() => { loadProjects().then(setChatProjects).catch(() => {}); }, []);
+  const [showNewProject, setShowNewProject] = useState(false);  // create project dialog
+  const [newProjectName, setNewProjectName] = useState("");
+  const [renamingProjectId, setRenamingProjectId] = useState<string | null>(null);  // inline rename
+  const [renameProjectName, setRenameProjectName] = useState("");
+  const [deleteProjectId, setDeleteProjectId] = useState<string | null>(null);  // delete confirmation
+  const [showMoveMenu, setShowMoveMenu] = useState<string | null>(null);  // sessionId for move submenu
   const [deleteSessionId, setDeleteSessionId] = useState<string | null>(null);
   const [confirmClearHistory, setConfirmClearHistory] = useState(false);
-  const [sessionsLoaded, setSessionsLoaded] = useState(false);
-  const sessionsLoadedRef = useRef(false);
-  const [sessionError, setSessionError] = useState("");
   const [mobileHistoryOpen, setMobileHistoryOpen] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const [errorDetail, setErrorDetail] = useState<string | null>(null);
   const [showErrorDetail, setShowErrorDetail] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [showStreamDiagnostics, setShowStreamDiagnostics] = useState(false);
@@ -1325,29 +1604,15 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
   const isComposingRef = useRef(false);
   const [confirmClear, setConfirmClear] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
-  const [lastElapsed, setLastElapsed] = useState<number | null>(null);
-  const [phase, setPhase] = useState<ChatPhase>("ready");
-  const [elapsedLive, setElapsedLive] = useState(0);
-  const [streamDiagnostics, setStreamDiagnostics] = useState<FrontStreamDiagnostics>(initialFrontStreamDiagnostics);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
-  const messagesRef = useRef<UiChatMessage[]>([]);
-  const chatSessionsRef = useRef<ChatSession[]>([]);
-  const currentSessionIdRef = useRef<string | null>(null);
-  const activeRequestRef = useRef<string | null>(null);
-  const stoppedIdsRef = useRef<Set<string>>(new Set());
-  const unlistenRef = useRef<UnlistenFn[]>([]);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const twRef = useRef<TypewriterState>({ contentBuf: "", reasoningBuf: "", done: false, skip: false, rafId: null, requestId: "" });
   const autoFollowRef = useRef(true);
   const scrollRafRef = useRef<number | null>(null);
   const [showJumpToBottom, setShowJumpToBottom] = useState(false);
   const [expandedDetailId, setExpandedDetailId] = useState<string | null>(null);
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
-
-  const latestSessionsRef = useRef<ChatSession[]>([]);
-  const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
 
   const updateSessionsView = (nextUnsorted: ChatSession[]) => {
     const sorted = sortSessions(nextUnsorted);
@@ -1378,7 +1643,7 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
   const createSession = async (title?: string) => {
     if (loading) return;
     cancelTypewriter();
-    const session = createEmptySession("hermes-agent");
+    const session = createEmptySession();
     if (title) session.title = title;
     const existing = chatSessionsRef.current;
     if (!sessionsLoadedRef.current && existing.length === 0) {
@@ -1422,7 +1687,7 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
   const saveCurrentSession = (nextMessages: UiChatMessage[], extra?: Partial<ChatSession>) => {
     const currentId = currentSessionIdRef.current;
     const sessions = latestSessionsRef.current;
-    const session = sessions.find((item) => item.id === currentId) ?? createEmptySession("hermes-agent");
+    const session = sessions.find((item) => item.id === currentId) ?? createEmptySession();
     const safeMessages = sanitizeChatMessages(nextMessages);
     const updated = updateSessionFromMessages(session, safeMessages, extra);
     const next = sessions.some((item) => item.id === updated.id)
@@ -1434,11 +1699,26 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
     void enqueueWriteSessions();
   };
 
+  // TASK-021C: Save messages to a specific session (for cross-page writes)
+  const saveMessagesToSession = (nextMessages: UiChatMessage[], targetSessionId: string, extra?: Partial<ChatSession>) => {
+    const sessions = latestSessionsRef.current;
+    const session = sessions.find((item) => item.id === targetSessionId) ?? createEmptySession();
+    const safeMessages = sanitizeChatMessages(nextMessages);
+    const updated = updateSessionFromMessages(session, safeMessages, extra);
+    const next = sessions.some((item) => item.id === updated.id)
+      ? sessions.map((item) => item.id === updated.id ? updated : item)
+      : [updated, ...sessions];
+    updateSessionsView(next);
+    void enqueueWriteSessions();
+  };
+
   const saveErrorSummary = (requestId: string, summary: string) => {
     const existing = messagesRef.current;
+    const src = USE_OPENCLAW_BACKEND ? "OpenClaw Agent" as const : "Hermes Agent" as const;
+    const mdl = USE_OPENCLAW_BACKEND ? "openclaw/default" : "hermes-agent";
     const failedMessages = existing.some((message) => message.role === "assistant" && message.requestId === requestId)
       ? existing.map((message) => message.role === "assistant" && message.requestId === requestId ? { ...message, content: `请求失败：${summary}` } : message)
-      : [...existing, { role: "assistant", source: "Hermes Agent", requestId, content: `请求失败：${summary}`, modelName: "hermes-agent" } as UiChatMessage];
+      : [...existing, { role: "assistant", source: src, requestId, content: `请求失败：${summary}`, modelName: mdl } as UiChatMessage];
     messagesRef.current = failedMessages;
     setMessages(failedMessages);
     void saveCurrentSession(failedMessages, { lastMessagePreview: `请求失败：${summary}` });
@@ -1624,20 +1904,27 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
   }, [pendingAttachment, sessionsLoaded]);
 
   useEffect(() => {
+    // TASK-025B fix: Skip if sessions already loaded by App
+    if (sessionsLoadedRef.current) return;
     let cancelled = false;
     readChatSessions()
       .then((stored) => {
         if (cancelled) return;
         const sorted = sortSessions(sanitizeChatSessions((stored || []) as ChatSession[]));
-        const initial = sorted.length > 0 ? sorted : [createEmptySession("hermes-agent")];
+        const initial = sorted.length > 0 ? sorted : [createEmptySession()];
         latestSessionsRef.current = initial;
         chatSessionsRef.current = initial;
         currentSessionIdRef.current = initial[0]?.id ?? null;
         setChatSessions(initial);
         setCurrentSessionId(initial[0]?.id ?? null);
-        const initialMessages = (initial[0]?.messages || []) as UiChatMessage[];
-        setMessages(initialMessages);
-        messagesRef.current = initialMessages;
+        // TASK-021C fix: Don't overwrite App-level messages on ChatPage remount.
+        // On first load (sessionsLoadedRef=false), load from disk.
+        // On remount (sessionsLoadedRef already true), preserve in-memory state.
+        if (!sessionsLoadedRef.current) {
+          const initialMessages = (initial[0]?.messages || []) as UiChatMessage[];
+          setMessages(initialMessages);
+          messagesRef.current = initialMessages;
+        }
         setSessionsLoaded(true);
         sessionsLoadedRef.current = true;
         if (sorted.length === 0) void enqueueWriteSessions();
@@ -1645,7 +1932,7 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
       .catch((err) => {
         console.warn("Failed to read chat sessions", err);
         if (cancelled) return;
-        const session = createEmptySession("hermes-agent");
+        const session = createEmptySession();
         latestSessionsRef.current = [session];
         chatSessionsRef.current = [session];
         currentSessionIdRef.current = session.id;
@@ -1747,7 +2034,7 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
   const deleteSession = async (sessionId: string) => {
     const next = chatSessions.filter((session) => session.id !== sessionId);
     if (next.length === 0) {
-      const fresh = createEmptySession("hermes-agent");
+      const fresh = createEmptySession();
       setCurrentSessionId(fresh.id);
       currentSessionIdRef.current = fresh.id;
       setMessages([]);
@@ -1767,7 +2054,7 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
   };
 
   const clearHistory = async () => {
-    const fresh = createEmptySession("hermes-agent");
+    const fresh = createEmptySession();
     setCurrentSessionId(fresh.id);
     currentSessionIdRef.current = fresh.id;
     setMessages([]);
@@ -1776,21 +2063,114 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
     await persistSessions([fresh]);
   };
 
+  // TASK-023C-C: Create custom project
+  const handleCreateProject = async () => {
+    const name = newProjectName.trim();
+    if (!name) return;
+    if (chatProjects.some(p => p.name === name)) { setSessionError("项目名称已存在"); return; }
+    const proj = createProject(name, chatProjects);
+    const next = [...chatProjects, proj];
+    setChatProjects(next);
+    await saveProjects(next);
+    setNewProjectName("");
+    setShowNewProject(false);
+  };
+
+  // TASK-023C-D: Rename custom project
+  const handleRenameProject = async () => {
+    const name = renameProjectName.trim();
+    if (!name || !renamingProjectId) return;
+    if (chatProjects.some(p => p.id !== renamingProjectId && p.name === name)) { setSessionError("项目名称已存在"); return; }
+    const next = chatProjects.map(p => p.id === renamingProjectId ? { ...p, name, updatedAt: Date.now() } : p);
+    setChatProjects(next);
+    await saveProjects(next);
+    setRenamingProjectId(null); setRenameProjectName("");
+  };
+
+  // TASK-023C-D: Delete custom project, move sessions back to default
+  const handleDeleteProject = async () => {
+    if (!deleteProjectId) return;
+    const sessions = chatSessionsRef.current;
+    const updated = sessions.map(s => s.projectId === deleteProjectId ? { ...s, projectId: DEFAULT_PROJECT_ID } : s);
+    chatSessionsRef.current = updated;
+    latestSessionsRef.current = sortSessions(updated);
+    setChatSessions(updated);
+    void enqueueWriteSessions();
+    const nextProjects = chatProjects.filter(p => p.id !== deleteProjectId);
+    setChatProjects(nextProjects);
+    await saveProjects(nextProjects);
+    if (selectedProjectId === deleteProjectId) setSelectedProjectId(DEFAULT_PROJECT_ID);
+    setDeleteProjectId(null);
+  };
+
+  // TASK-023C-C: Move session to a project
+  const moveSessionToProject = (sessionId: string, projectId: string) => {
+    const sessions = chatSessionsRef.current;
+    const updated = sessions.map(s => s.id === sessionId ? { ...s, projectId } : s);
+    chatSessionsRef.current = updated;
+    latestSessionsRef.current = sortSessions(updated);
+    setChatSessions(updated);
+    void enqueueWriteSessions();
+    setShowMoveMenu(null);
+  };
+
   const hermesInstalled = hermesCli?.installed;
   const hermesConnected = Boolean(hermesInstalled && hermesApi?.running);
   const hermesModelName = "hermes-agent";
-  const disabledReason = !hermesCli
-    ? "正在检测 Hermes 状态，请稍候。"
-    : !hermesInstalled
-    ? "未检测到 Hermes 程序。请先安装 Hermes 后再使用 Agent 对话。"
-    : !hermesConnected
-      ? "Hermes 本地对话服务未运行。请先前往 Hermes 管理页启动或配置 Hermes。"
-      : "";
+  const [openclawStatus, setOpenclawStatus] = useState<{
+    cliInstalled: boolean;
+    gatewayRunning: boolean;
+    helloOk: boolean;
+    paired: boolean;
+    pairingRequired: boolean;
+    requestId?: string;
+    errorCode?: string;
+    errorMessage?: string;
+    protocol?: number;
+    serverVersion?: string;
+    methodsCount?: number;
+  } | null>(null);
+
+  // OpenClaw detailed status refresh
+  const refreshOpenClawStatus = async () => {
+    try {
+      const oc = getOpenClawBackend() || await initOpenClawBackend();
+      if (!oc) {
+        setOpenclawStatus({ cliInstalled: false, gatewayRunning: false, helloOk: false, paired: false, pairingRequired: false });
+        return;
+      }
+      const s = await oc.checkStatus();
+      const raw = (s.raw || {}) as Record<string, unknown>;
+      setOpenclawStatus({
+        cliInstalled: s.installed,
+        gatewayRunning: s.running,
+        helloOk: s.ready,
+        paired: s.ready,
+        pairingRequired: raw.pairingRequired === true,
+        requestId: typeof raw.requestId === "string" ? raw.requestId : undefined,
+        errorCode: (typeof raw.errorCode === "string" ? raw.errorCode : undefined) || (typeof raw.errorDetailsCode === "string" ? raw.errorDetailsCode : undefined),
+        errorMessage: s.detail,
+        protocol: typeof raw.protocol === "number" ? raw.protocol : undefined,
+        serverVersion: typeof s.version === "string" ? s.version : undefined,
+        methodsCount: typeof raw.methodsCount === "number" ? raw.methodsCount : undefined,
+      });
+    } catch {
+      setOpenclawStatus({ cliInstalled: false, gatewayRunning: false, helloOk: false, paired: false, pairingRequired: false });
+    }
+  };
+
+  // Refresh OpenClaw status on mount
+  useEffect(() => {
+    refreshOpenClawStatus();
+    const iv = setInterval(refreshOpenClawStatus, 30_000);
+    return () => clearInterval(iv);
+  }, []);
 
   const send = async () => {
     if (!input.trim() || loading) return;
-    if (!hermesConnected) {
-      setError(disabledReason);
+    if (hasRunningRun) { setError("AI Agent 正在处理上一条消息，请等待完成后再发送。"); return; }
+    if (!USE_OPENCLAW_BACKEND && !hermesConnected) {
+      setError("Agent 引擎未运行。");
       return;
     }
     setError("");
@@ -1835,9 +2215,9 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
     const placeholder: UiChatMessage = {
       requestId,
       role: "assistant",
-      source: "Hermes Agent",
+      source: USE_OPENCLAW_BACKEND ? "OpenClaw Agent" : "Hermes Agent",
       content: "",
-      modelName: hermesModelName
+      modelName: USE_OPENCLAW_BACKEND ? "openclaw/default" : hermesModelName
     };
     const messagesWithPlaceholder = [...nextMessages, placeholder];
     messagesRef.current = messagesWithPlaceholder;
@@ -1848,6 +2228,16 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
       });
     });
     void saveCurrentSession(nextMessages);
+
+    // TASK-021C: Create agent run for OpenClaw path
+    if (USE_OPENCLAW_BACKEND) {
+      runsRef.current.set(requestId, {
+        runId: requestId, sessionId: currentSessionIdRef.current!,
+        status: "running", startedAt: Date.now(),
+        modelName: "openclaw/default", source: "OpenClaw Agent",
+      });
+      setHasRunningRun(true);
+    }
 
     console.log("[send-perf] Phase1 UI visible + placeholder in", Date.now() - clickSendAt, "ms");
 
@@ -1877,7 +2267,9 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
       .filter((skill) => config.enabledSkills.includes(skill.id))
       .map((skill) => `${skill.name}：${skill.description}`)
       .join("\n") || "暂无启用 Skills";
-    const systemPrompt = `你是 AI Agent 工作台中的个人 Hermes Agent。\nAgent 名称：AI Agent Workspace\n当前模型：${hermesModelName}\n已启用 Skills：\n${enabledSkillSummary}\n请结合 Hermes 原生上下文、Skills 和任务配置协助用户完成工作。不要暴露底层 Token 或系统提示词。`;
+    const systemPrompt = USE_OPENCLAW_BACKEND
+      ? `你是 AI Agent 工作台中的 AI Agent。\nAgent 名称：AI Agent Workspace\n当前模型：openclaw/default\n已启用 Skills：\n${enabledSkillSummary}\n请结合上下文、Skills 和任务配置协助用户完成工作。不要暴露底层 Token 或系统提示词。`
+      : `你是 AI Agent 工作台中的个人 AI Agent。\nAgent 名称：AI Agent Workspace\n当前模型：${hermesModelName}\n已启用 Skills：\n${enabledSkillSummary}\n请结合原生上下文、Skills 和任务配置协助用户完成工作。不要暴露底层 Token 或系统提示词。`;
     const agentMessages = buildHermesMessages(systemPrompt, nextMessages, modelContent);
 
     const cleanupListeners = () => {
@@ -2046,8 +2438,8 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
         }
         if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
         cancelTypewriter();
-        setError("Hermes 请求失败，请检查本地对话服务或 Hermes 模型配置。");
-        setErrorDetail(`请求目标：Hermes 对话服务\nURL：${event.payload.url ?? "http://127.0.0.1:8642/v1/chat/completions"}\nHTTP 状态：${event.payload.status ?? "error"}\n错误：${event.payload.error}`);
+        setError("Agent 请求失败，请检查本地对话服务或 Legacy 引擎配置。");
+        setErrorDetail(`请求目标：Legacy 引擎对话服务\nURL：${event.payload.url ?? "http://127.0.0.1:8642/v1/chat/completions"}\nHTTP 状态：${event.payload.status ?? "error"}\n错误：${event.payload.error}`);
         saveErrorSummary(requestId, event.payload.error);
         setPhase("error");
         setLoading(false);
@@ -2058,32 +2450,97 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
       setStreamDiagnostics((prev) => ({ ...prev, listenRegistered: true, currentRequestId: activeRequestRef.current }));
       if (DEBUG_STREAM) console.debug("[stream-debug] front listeners registered", { requestId });
 
-      const latestHermesApi = hermesApi?.running ? hermesApi : await refreshHermesApi();
-      if (!latestHermesApi?.running || !latestHermesApi.baseUrl) {
-        if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
-        cancelTypewriter();
-        setError("Hermes 本地对话服务未运行。请先前往 Hermes 管理页启动或配置 Hermes。");
-        setErrorDetail(`请求目标：Hermes 对话服务\nURL：http://127.0.0.1:8642/v1/chat/completions\n模型：${hermesModelName}\nHTTP 状态：unavailable\n错误：Hermes API Server 未运行`);
-        saveErrorSummary(requestId, "Hermes API Server 未运行");
-        setPhase("error");
-        setLoading(false);
-        activeRequestRef.current = null;
-        cleanupListeners();
-        return;
+      // Hermes API preflight (skip when using OpenClaw backend)
+      if (!USE_OPENCLAW_BACKEND) {
+        const latestHermesApi = hermesApi?.running ? hermesApi : await refreshHermesApi();
+        if (!latestHermesApi?.running || !latestHermesApi.baseUrl) {
+          if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+          cancelTypewriter();
+          setError("OpenClaw Gateway 未运行。请先前往 Agent 引擎页启动或配置。");
+          setErrorDetail(`请求目标：Legacy 引擎对话服务\nURL：http://127.0.0.1:8642/v1/chat/completions\n模型：${hermesModelName}\nHTTP 状态：unavailable\n错误：Legacy 引擎 API Server 未运行`);
+          saveErrorSummary(requestId, "Legacy 引擎 API Server 未运行");
+          setPhase("error");
+          setLoading(false);
+          activeRequestRef.current = null;
+          cleanupListeners();
+          return;
+        }
       }
 
       setPhase("thinking");
-      const runHandle = await hermesLegacyBackend.startChat({ requestId, model: hermesModelName, messages: agentMessages });
-      const result = runHandle.raw as import("@/lib/hermes").HermesChatResult | undefined;
-      if (!result?.success) {
-        if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
-        cancelTypewriter();
-        setError(result?.error || "请求提交失败");
-        saveErrorSummary(requestId, result?.error || "请求提交失败");
-        setPhase("error");
-        setLoading(false);
-        activeRequestRef.current = null;
-        cleanupListeners();
+
+      // TASK-021C: HTTP-first OpenClaw chat (non-blocking, cross-page safe)
+      if (USE_OPENCLAW_BACKEND) {
+        const targetSessionId = currentSessionIdRef.current!;
+        const cleanupTimers = () => { if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; } };
+
+        let oc = getOpenClawBackend();
+        const doSend = async () => {
+          if (!oc) oc = await initOpenClawBackend();
+          if (!oc) throw new Error("OpenClaw Backend 不可用：Gateway token 未配置或 Gateway 未运行。");
+          const handle = await oc.startChat({ requestId, model: "openclaw/default", messages: agentMessages });
+          if (!handle.accepted) throw new Error("请求提交失败");
+          return handle;
+        };
+
+        doSend().then((runHandle) => {
+          const run = runsRef.current.get(requestId);
+          if (run?.localCancel) return; // cancelled, ignore result
+
+          const raw = runHandle.raw as { content?: string; model?: string } | undefined;
+          const content = raw?.content || "";
+          cleanupTimers();
+
+          // TASK-021C: write full content via App-level refs (survives page switches)
+          messagesRef.current = messagesRef.current.map((m) =>
+            m.requestId === requestId
+              ? { ...m, content: (m.content || "") + (content || ""), modelName: raw?.model || "openclaw/default" }
+              : m
+          );
+          setMessages(messagesRef.current);
+          setLoading(false); setPhase("done");
+          activeRequestRef.current = null;
+
+          runsRef.current.set(requestId, { ...run!, status: "completed", finishedAt: Date.now() });
+          setHasRunningRun(Array.from(runsRef.current.values()).some(r => r.status === "running"));
+
+          saveMessagesToSession(messagesRef.current as UiChatMessage[], targetSessionId, { model: "openclaw/default" });
+        }).catch((err) => {
+          const run = runsRef.current.get(requestId);
+          if (run?.localCancel) return; // cancelled, ignore error
+
+          cleanupTimers();
+          const errMsg = getErrorMessage(err);
+
+          messagesRef.current = messagesRef.current.map((m) =>
+            m.requestId === requestId
+              ? { ...m, content: (m.content || "") || `请求失败：${errMsg}` }
+              : m
+          );
+          setMessages(messagesRef.current);
+          setError(`OpenClaw 请求异常：${errMsg}`);
+          setPhase("error"); setLoading(false);
+          activeRequestRef.current = null;
+
+          runsRef.current.set(requestId, { ...run!, status: "failed", finishedAt: Date.now(), error: errMsg });
+          setHasRunningRun(Array.from(runsRef.current.values()).some(r => r.status === "running"));
+
+          saveMessagesToSession(messagesRef.current as UiChatMessage[], targetSessionId);
+        });
+      } else {
+        // Hermes path (default)
+        const runHandle = await hermesLegacyBackend.startChat({ requestId, model: hermesModelName, messages: agentMessages });
+        const result = runHandle.raw as import("@/lib/hermes").HermesChatResult | undefined;
+        if (!result?.success) {
+          if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+          cancelTypewriter();
+          setError(result?.error || "请求提交失败");
+          saveErrorSummary(requestId, result?.error || "请求提交失败");
+          setPhase("error");
+          setLoading(false);
+          activeRequestRef.current = null;
+          cleanupListeners();
+        }
       }
     } catch (err) {
       if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
@@ -2120,16 +2577,125 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
         u.splice(idx, 1);
         u.push({ role: "system" as any, content: "", requestId: rid, stopped: true } as any);
       } else {
-        u[idx] = { ...msg, content: finalContent, reasoningContent: finalReasoning, partial: true, warning: "已停止生成" };
+        u[idx] = { ...msg, content: finalContent, reasoningContent: finalReasoning, partial: true, warning: "已取消生成" };
       }
       messagesRef.current = u;
       return u;
     });
     twRef.current = { contentBuf: "", reasoningBuf: "", done: true, skip: false, rafId: null, requestId: "" };
+    // TASK-021C: mark run as cancelled
+    const run = runsRef.current.get(rid);
+    if (run) {
+      runsRef.current.set(rid, { ...run, status: "cancelled", finishedAt: Date.now(), localCancel: true });
+      setHasRunningRun(Array.from(runsRef.current.values()).some(r => r.status === "running"));
+    }
     // Save session with stopped content
     void saveCurrentSession(messagesRef.current);
-    // Tell Rust to stop (best effort, non-blocking)
-    void hermesLegacyBackend.cancelChat({ requestId: rid }).catch(() => {});
+    // Tell backend to stop (best effort, non-blocking)
+    if (USE_OPENCLAW_BACKEND) {
+      const oc = getOpenClawBackend();
+      if (oc) void oc.cancelChat({ requestId: rid }).catch(() => {});
+    } else {
+      void hermesLegacyBackend.cancelChat({ requestId: rid }).catch(() => {});
+    }
+  };
+
+  // TASK-021E: True retry — keeps failed message, creates new run + assistant placeholder, calls HTTP directly
+  const retryRun = (failedRequestId: string) => {
+    if (loading || hasRunningRun) return;
+    const msgs = messagesRef.current;
+    const failIdx = msgs.findIndex(m => m.role === "assistant" && m.requestId === failedRequestId);
+    if (failIdx < 1) return;
+    // Find the user message immediately before this failed assistant message
+    let userMsg: UiChatMessage | null = null;
+    for (let i = failIdx - 1; i >= 0; i--) {
+      if (msgs[i]!.role === "user") { userMsg = msgs[i]!; break; }
+    }
+    if (!userMsg) return;
+
+    setLoading(true); setPhase("sending"); setElapsedLive(0);
+    const newRequestId = crypto.randomUUID();
+    const targetSessionId = currentSessionIdRef.current!;
+    const userContent = userMsg.content;
+    const hasAttachments = Boolean(userMsg.attachments?.length);
+
+    // Create new run
+    runsRef.current.set(newRequestId, {
+      runId: newRequestId, sessionId: targetSessionId,
+      status: "running", startedAt: Date.now(),
+      modelName: "openclaw/default", source: "OpenClaw Agent",
+    });
+    setHasRunningRun(true);
+
+    // Append new assistant placeholder (keep failed message)
+    const placeholder: UiChatMessage = {
+      requestId: newRequestId, role: "assistant",
+      source: "OpenClaw Agent", content: "",
+      modelName: "openclaw/default",
+    };
+    messagesRef.current = [...messagesRef.current, placeholder];
+    setMessages(messagesRef.current);
+    void saveCurrentSession(messagesRef.current);
+
+    const enabledSkillSummary = officialSkills
+      .filter((skill) => config.enabledSkills.includes(skill.id))
+      .map((skill) => `${skill.name}：${skill.description}`)
+      .join("\n") || "暂无启用 Skills";
+    const systemPrompt = `你是 AI Agent 工作台中的 AI Agent。\nAgent 名称：AI Agent Workspace\n当前模型：openclaw/default\n已启用 Skills：\n${enabledSkillSummary}\n请结合上下文、Skills 和任务配置协助用户完成工作。不要暴露底层 Token 或系统提示词。`;
+    const history = [...messagesRef.current.filter(m => m.role === "user" || m.role === "assistant").slice(0, -1)] as ChatMessage[];
+    const lastUserMsg: ChatMessage = { role: "user", content: userContent };
+    const agentMessages = buildHermesMessages(systemPrompt, [...history, lastUserMsg], userContent);
+
+    const retryStartedAt = Date.now();
+    const timer = setInterval(() => { setElapsedLive(Math.round((Date.now() - retryStartedAt) / 1000)); }, 1000);
+    timerRef.current = timer;
+    activeRequestRef.current = newRequestId;
+    setPhase("thinking");
+
+    const cleanupTimers = () => { if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; } };
+    let oc = getOpenClawBackend();
+
+    (async () => {
+      if (!oc) oc = await initOpenClawBackend();
+      if (!oc) throw new Error("OpenClaw Backend 不可用");
+      const handle = await oc.startChat({ requestId: newRequestId, model: "openclaw/default", messages: agentMessages });
+      if (!handle.accepted) throw new Error("请求提交失败");
+      return handle;
+    })().then((runHandle) => {
+      const run = runsRef.current.get(newRequestId);
+      if (run?.localCancel) return;
+      const raw = runHandle.raw as { content?: string; model?: string } | undefined;
+      const content = raw?.content || "";
+      cleanupTimers();
+      messagesRef.current = messagesRef.current.map((m) =>
+        m.requestId === newRequestId
+          ? { ...m, content: (m.content || "") + (content || ""), modelName: raw?.model || "openclaw/default" }
+          : m
+      );
+      setMessages(messagesRef.current);
+      setLoading(false); setPhase("done");
+      activeRequestRef.current = null;
+      runsRef.current.set(newRequestId, { ...run!, status: "completed", finishedAt: Date.now() });
+      setHasRunningRun(Array.from(runsRef.current.values()).some(r => r.status === "running"));
+      saveMessagesToSession(messagesRef.current as UiChatMessage[], targetSessionId, { model: "openclaw/default" });
+    }).catch((err) => {
+      const run = runsRef.current.get(newRequestId);
+      if (run?.localCancel) return;
+      cleanupTimers();
+      const errMsg = getErrorMessage(err);
+      messagesRef.current = messagesRef.current.map((m) =>
+        m.requestId === newRequestId
+          ? { ...m, content: (m.content || "") || `请求失败：${errMsg}` }
+          : m
+      );
+      setMessages(messagesRef.current);
+      setError(`OpenClaw 请求异常：${errMsg}`);
+      setPhase("error"); setLoading(false);
+      activeRequestRef.current = null;
+      runsRef.current.set(newRequestId, { ...run!, status: "failed", finishedAt: Date.now(), error: errMsg });
+      setHasRunningRun(Array.from(runsRef.current.values()).some(r => r.status === "running"));
+      saveMessagesToSession(messagesRef.current as UiChatMessage[], targetSessionId);
+    });
   };
 
   const regenLast = () => {
@@ -2155,6 +2721,7 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
   };
 
   const filteredSessions = sortSessions(chatSessions).filter((session) => {
+    if (selectedProjectId !== "all" && (session.projectId || DEFAULT_PROJECT_ID) !== selectedProjectId) return false;
     const query = sessionSearch.trim().toLowerCase();
     if (!query) return true;
     return session.title.toLowerCase().includes(query)
@@ -2163,26 +2730,87 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
   });
 
   return (
-    <div className="mx-auto grid h-full min-h-0 max-w-7xl gap-4 overflow-hidden lg:grid-cols-[300px_minmax(0,1fr)]">
+    <div className="mx-auto grid h-full min-h-0 max-w-7xl gap-4 overflow-hidden lg:grid-cols-[260px_minmax(0,1fr)]">
       <Card className="hidden min-h-0 flex-col overflow-hidden lg:flex">
         <CardHeader className="shrink-0 border-b py-3">
           <div className="flex items-center justify-between gap-2">
-            <CardTitle className="text-base">历史对话</CardTitle>
+            <CardTitle className="text-base">最近会话</CardTitle>
             <Button size="sm" onClick={resetSession}><Plus className="h-4 w-4" />新建</Button>
           </div>
-          <div className="relative mt-3">
+          {/* TASK-024A: Project section label */}
+          <div className="mt-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">项目</div>
+          {/* TASK-023C-C: Project list filter */}
+          <div className="mt-1 space-y-0.5">
+            {[
+              { id: "all", label: "全部会话", count: chatSessions.length },
+              ...chatProjects.map(p => ({
+                id: p.id, label: p.name, isProject: true, type: p.type,
+                count: chatSessions.filter(s => (s.projectId || DEFAULT_PROJECT_ID) === p.id).length,
+              })),
+            ].map((p) => (
+              <div key={p.id} className="group relative">
+                <button
+                  onClick={() => setSelectedProjectId(p.id)}
+                  className={cn("w-full flex items-center gap-2 rounded-lg px-2 py-1 text-left text-xs transition-colors min-w-0",
+                    selectedProjectId === p.id
+                      ? "bg-primary/10 text-primary font-medium"
+                      : "text-muted-foreground hover:bg-muted")}>
+                  <span className={cn("h-1.5 w-1.5 rounded-full", selectedProjectId === p.id ? "bg-primary" : "bg-muted-foreground/40")} />
+                  {renamingProjectId === p.id ? (
+                    <Input className="h-6 flex-1 text-xs" value={renameProjectName} onChange={(e) => setRenameProjectName(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") handleRenameProject(); if (e.key === "Escape") { setRenamingProjectId(null); } }}
+                      onBlur={() => { void handleRenameProject(); }} autoFocus />
+                  ) : (
+                    <span className="flex-1">{p.label}</span>
+                  )}
+                  {"count" in p && <span className="text-[10px] text-muted-foreground/60">{p.count}</span>}
+                </button>
+                {/* TASK-023C-D: Project menu for custom projects */}
+                {p.id !== "all" && chatProjects.some(cp => cp.id === p.id && cp.type === "custom") && !renamingProjectId && (
+                  <div className="absolute right-0.5 top-0.5 flex opacity-0 group-hover:opacity-100">
+                    <Button variant="ghost" size="icon" className="h-5 w-5" title="重命名" onClick={(e) => { e.stopPropagation(); setRenamingProjectId(p.id); setRenameProjectName(p.label); }}>
+                      <Pencil className="h-2.5 w-2.5" />
+                    </Button>
+                    <Button variant="ghost" size="icon" className="h-5 w-5" title="删除" onClick={(e) => { e.stopPropagation(); setDeleteProjectId(p.id); }}>
+                      <Trash2 className="h-2.5 w-2.5" />
+                    </Button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+          {/* TASK-023C-C: New project button */}
+          <button onClick={() => setShowNewProject(true)} className="mt-1 flex w-full items-center gap-1 rounded-lg px-2 py-1 text-xs text-muted-foreground hover:bg-muted">
+            <Plus className="h-3 w-3" /> 新建项目
+          </button>
+          {/* Create project inline dialog */}
+          {showNewProject && (
+            <div className="mt-1 rounded-lg border bg-background p-2">
+              <Input className="h-8 text-xs" value={newProjectName} onChange={(e) => setNewProjectName(e.target.value)} placeholder="项目名称" onKeyDown={(e) => { if (e.key === "Enter") handleCreateProject(); if (e.key === "Escape") { setShowNewProject(false); setNewProjectName(""); } }} autoFocus />
+              <div className="mt-1 flex gap-1">
+                <Button size="sm" className="h-7 text-xs" onClick={handleCreateProject} disabled={!newProjectName.trim()}>创建</Button>
+                <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => { setShowNewProject(false); setNewProjectName(""); }}>取消</Button>
+              </div>
+            </div>
+          )}
+          <div className="relative mt-2">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-            <Input className="pl-8" value={sessionSearch} onChange={(event) => setSessionSearch(event.target.value)} placeholder="搜索历史" />
+            <Input className="pl-8" value={sessionSearch} onChange={(event) => setSessionSearch(event.target.value)} placeholder="搜索会话" />
           </div>
         </CardHeader>
         <CardContent className="min-h-0 flex-1 overflow-y-auto p-2" onClick={() => setMenuOpenId(null)}>
           {sessionError && <div className="mb-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-2 text-xs text-amber-700 dark:text-amber-300">{sessionError}</div>}
           {!sessionsLoaded && <div className="p-3 text-sm text-muted-foreground"><Loader2 className="mr-2 inline h-4 w-4 animate-spin" />正在加载历史</div>}
-          {filteredSessions.map((session) => (
-            <div key={session.id} className={cn("group relative rounded-xl border", session.id === currentSessionId ? "border-primary/40 bg-primary/5" : "border-transparent hover:bg-muted/50")}>
+          {filteredSessions.map((session) => {
+            const sessionHasRunning = Array.from(runsRef.current.values()).some(r => r.status === "running" && r.sessionId === session.id);
+            return (
+            <div key={session.id} className={cn("group relative rounded-lg", session.id === currentSessionId ? "bg-muted/70" : "hover:bg-muted/40")}>
               <button className="flex w-full items-start gap-2 p-2 text-left" disabled={loading} onClick={() => { setMenuOpenId(null); switchSession(session); }}>
                 <div className="min-w-0 flex-1">
-                  <div className="text-sm font-medium">{session.title}</div>
+                  <div className="flex items-center gap-1.5 text-sm font-medium">
+                    {session.title}
+                    {sessionHasRunning && <Loader2 className="h-3 w-3 shrink-0 animate-spin text-primary/70" />}
+                  </div>
                   <div className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{session.lastMessagePreview || "暂无消息"}</div>
                 </div>
                 {session.pinned && <Pin className="mt-1 h-3 w-3 shrink-0 text-primary/60" />}
@@ -2195,58 +2823,98 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
                   <div className="absolute right-0 top-8 z-20 min-w-[100px] rounded-xl border bg-card p-1 shadow-lg">
                     <button className="w-full rounded-lg px-3 py-1.5 text-left text-sm hover:bg-muted" onClick={() => { renameSession(session); setMenuOpenId(null); }}>重命名</button>
                     <button className="w-full rounded-lg px-3 py-1.5 text-left text-sm hover:bg-muted" onClick={() => { togglePinSession(session); setMenuOpenId(null); }}>{session.pinned ? "取消置顶" : "置顶"}</button>
+                    {/* TASK-023C-C: Move to project submenu */}
+                    <button className="w-full rounded-lg px-3 py-1.5 text-left text-sm hover:bg-muted" onClick={(e) => { e.stopPropagation(); setShowMoveMenu(showMoveMenu === session.id ? null : session.id); }}>
+                      移动到项目
+                    </button>
+                    {showMoveMenu === session.id && (
+                      <div className="pl-2 space-y-0.5">
+                        {chatProjects.map(p => (
+                          <button key={p.id} className="w-full rounded-lg px-3 py-1 text-left text-xs text-muted-foreground hover:bg-muted"
+                            onClick={() => moveSessionToProject(session.id, p.id)}>
+                            {p.name}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                     <button className="w-full rounded-lg px-3 py-1.5 text-left text-sm text-rose-600 hover:bg-rose-500/10" onClick={() => { setDeleteSessionId(session.id); setMenuOpenId(null); }}>删除</button>
                   </div>
                 )}
               </div>
             </div>
-          ))}
-          {filteredSessions.length === 0 && <div className="p-3 text-sm text-muted-foreground">没有匹配的历史对话。</div>}
+          )})}
+          {filteredSessions.length === 0 && (
+            <div className="p-3 text-sm text-muted-foreground">
+              {sessionSearch.trim()
+                ? "没有匹配的会话。"
+                : selectedProjectId !== "all" && !chatSessions.some(s => (s.projectId || DEFAULT_PROJECT_ID) === selectedProjectId)
+                  ? "这个项目还没有会话"
+                  : "还没有会话"}
+            </div>
+          )}
         </CardContent>
         <div className="shrink-0 border-t p-2">
-          <Button variant="ghost" size="sm" className="w-full" onClick={() => setConfirmClearHistory(true)}>清空全部历史</Button>
+          <Button variant="ghost" size="sm" className="w-full" onClick={() => setConfirmClearHistory(true)}>清空全部会话</Button>
         </div>
       </Card>
       <Card className="flex min-h-0 flex-1 flex-col overflow-hidden">
         <CardHeader className="shrink-0 border-b bg-background/80 py-2.5 backdrop-blur">
           <div className="flex items-center gap-3">
-            <span className="flex items-center gap-1.5 text-xs">
-              <span className={cn("h-2 w-2 rounded-full", hermesConnected ? "bg-emerald-500" : hermesInstalled ? "bg-amber-500" : "bg-rose-500")} />
-              {hermesConnected ? "Hermes 已连接" : hermesInstalled ? "对话服务未运行" : "未安装"}
+            <span className="text-sm font-medium">AI Agent</span>
+            <span className={cn("flex items-center gap-1.5 text-xs", openclawConnected ? "text-emerald-600 dark:text-emerald-400" : openclawChecked ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground")}>
+              <span className={cn("h-1.5 w-1.5 rounded-full", openclawConnected ? "bg-emerald-500" : openclawChecked ? "bg-amber-500" : "bg-slate-400")} />
+              {openclawConnected ? "已就绪" : openclawChecked ? "需要配置" : "检测中"}
             </span>
-            <span className="text-xs text-muted-foreground">·</span>
-            {hermesConnected && <PhaseBadge phase={phase} />}
-            {(phase === "sending" || phase === "thinking" || phase === "running") && <span className="text-xs text-muted-foreground">已耗时 {elapsedLive}s</span>}
+            {openclawConnected && <span className="text-xs text-muted-foreground">{displayModel}</span>}
+            {openclawConnected && phase !== "ready" && <PhaseBadge phase={phase} />}
+            {(phase === "sending" || phase === "thinking" || phase === "running") && <span className="text-xs text-muted-foreground">{elapsedLive}s</span>}
             {loading && elapsedLive > 120 && (
-              <span className="text-xs text-amber-600 dark:text-amber-400">长时间未收到新内容，可点击停止后缩小文件范围重试。</span>
+              <span className="text-xs text-amber-600 dark:text-amber-400">响应时间较长，可点击停止后缩小文件范围重试。</span>
             )}
-            {phase === "done" && lastElapsed != null && <span className="text-xs text-muted-foreground">耗时 {lastElapsed >= 1000 ? `${Math.round(lastElapsed / 1000)}s` : "1s"}</span>}
+            {phase === "done" && lastElapsed != null && <span className="text-xs text-muted-foreground">{lastElapsed >= 1000 ? `${Math.round(lastElapsed / 1000)}s` : "1s"}</span>}
             <div className="ml-auto flex flex-wrap items-center gap-2">
-              {DEBUG_STREAM && (
-                <Button variant="ghost" size="sm" onClick={() => setShowAdvanced(!showAdvanced)}>
-                  {showAdvanced ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}高级诊断
-                </Button>
-              )}
               <Button variant="outline" size="sm" onClick={() => setConfirmClear(true)} disabled={messages.length === 0}><Trash2 className="h-4 w-4" />清空</Button>
               <Button variant="outline" size="sm" onClick={resetSession}><Plus className="h-4 w-4" />新会话</Button>
             </div>
           </div>
-          {!hermesConnected && <Button className="mt-2" variant="outline" size="sm" onClick={() => setActive("engines")}>前往 Hermes 管理</Button>}
+          {openclawChecked && !openclawConnected && <Button className="mt-2" variant="outline" size="sm" onClick={() => setActive("engines")}>配置 Agent 引擎</Button>}
           <div className="mt-3 lg:hidden">
             <Button variant="ghost" size="sm" onClick={() => setMobileHistoryOpen(!mobileHistoryOpen)}>
               {mobileHistoryOpen ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-              历史对话
+              最近会话
             </Button>
             {mobileHistoryOpen && <div className="mt-2 rounded-xl border bg-background p-2">
               {sessionError && <div className="mb-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-2 text-xs text-amber-700 dark:text-amber-300">{sessionError}</div>}
               <div className="mb-2 flex gap-2">
-                <Input value={sessionSearch} onChange={(event) => setSessionSearch(event.target.value)} placeholder="搜索历史" />
+                 <Input value={sessionSearch} onChange={(event) => setSessionSearch(event.target.value)} placeholder="搜索会话" />
                 <Button size="sm" onClick={resetSession}><Plus className="h-4 w-4" /></Button>
               </div>
-              <div className="max-h-48 space-y-1 overflow-y-auto">
-                {filteredSessions.map((session) => (
-                  <button key={session.id} disabled={loading} onClick={() => switchSession(session)} className={cn("w-full rounded-lg px-2 py-1.5 text-left text-sm", session.id === currentSessionId ? "bg-primary/10 text-primary" : "hover:bg-muted")}>{session.title}</button>
+              {/* TASK-024A: Mobile project filter */}
+              <div className="mb-2 flex flex-wrap gap-1">
+                {[
+                  { id: "all", label: "全部" },
+                  ...chatProjects.map(p => ({ id: p.id, label: p.name })),
+                ].map((p) => (
+                  <button key={p.id}
+                    onClick={() => setSelectedProjectId(p.id)}
+                    className={cn("rounded-full px-2 py-0.5 text-[11px] transition-colors",
+                      selectedProjectId === p.id
+                        ? "bg-primary/10 text-primary font-medium"
+                        : "text-muted-foreground hover:bg-muted")}>
+                    {p.label}
+                  </button>
                 ))}
+              </div>
+              <div className="max-h-48 space-y-1 overflow-y-auto">
+                {filteredSessions.map((session) => {
+                  const mobileSessionRunning = Array.from(runsRef.current.values()).some(r => r.status === "running" && r.sessionId === session.id);
+                  return (
+                  <button key={session.id} disabled={loading} onClick={() => switchSession(session)} className={cn("w-full flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-left text-sm", session.id === currentSessionId ? "bg-primary/10 text-primary" : "hover:bg-muted")}>
+                    <span className="truncate flex-1">{session.title}</span>
+                    {mobileSessionRunning && <Loader2 className="h-3 w-3 shrink-0 animate-spin text-primary/70" />}
+                  </button>
+                  );
+                })}
               </div>
             </div>}
           </div>
@@ -2264,19 +2932,23 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
         <CardContent className="flex min-h-0 flex-1 flex-col p-0">
           <div className="relative flex-1 min-h-0">
             <div ref={scrollRef} onScroll={handleMessageScroll} className="h-full space-y-5 overflow-y-auto bg-gradient-to-b from-background to-muted/20 px-5 pt-5 pb-2">
+            <div className="mx-auto max-w-[820px]">
             {messages.length === 0 && (
               <div className="flex min-h-[50vh] flex-col items-center justify-center text-center">
-                <h3 className="text-xl font-semibold">今天想让 Hermes 帮你做什么？</h3>
-                <p className="mt-2 max-w-md text-sm text-muted-foreground">输入问题后发送，回复会在这里平滑显示。支持 Markdown、代码块和推理过程。</p>
-                <div className="mt-8 grid w-full max-w-lg gap-3 sm:grid-cols-2">
+                <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10">
+                  <Sparkles className="h-8 w-8 text-primary" />
+                </div>
+                <h3 className="text-xl font-semibold">今天想让 AI Agent 帮你做什么？</h3>
+                <p className="mt-2 max-w-md text-sm text-muted-foreground">输入问题或上传文件，Agent 会在这里回复。支持 Markdown、代码块和文件分析。</p>
+                <div className="mt-8 grid w-full max-w-lg gap-2 sm:grid-cols-2">
                   {[
-                    { text: "写一段朋友圈宣传文案", fill: "写一段适合朋友圈发布的产品宣传文案" },
-                    { text: "总结一份资料", fill: "请总结以下资料的核心要点：" },
-                    { text: "解释一段报错", fill: "请解释以下报错的原因并给出修复建议：" },
-                    { text: "制定一个工作计划", fill: "请帮我制定一个工作计划：" },
+                    { text: "总结这个文件", fill: "请总结这个文件的核心内容：" },
+                    { text: "分析这个表格", fill: "请分析以下表格数据，提炼关键结论：" },
+                    { text: "写一段说明", fill: "请帮我写一段说明：" },
+                    { text: "制定一个计划", fill: "请帮我制定一个执行计划：" },
                   ].map((card) => (
                     <button key={card.text} onClick={() => { setInput(card.fill); requestAnimationFrame(() => { inputRef.current?.focus(); autoResize(inputRef.current); }); }}
-                      className="rounded-xl border bg-card p-4 text-left text-sm transition hover:border-primary/40 hover:bg-primary/5">
+                      className="rounded-xl border bg-card p-3.5 text-left text-sm transition hover:border-primary/40 hover:bg-primary/5">
                       {card.text}
                     </button>
                   ))}
@@ -2297,16 +2969,17 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
               const isPlaceholder = isLastAssistant && loading;
               const showPlaceholderText = isPlaceholder && !message.content && !message.reasoningContent;
               const isActiveAssistant = Boolean(loading && message.role === "assistant" && message.requestId === activeRequestRef.current);
-              const isStopped = Boolean(message.partial && message.warning === "已停止生成");
+              const isStopped = Boolean(message.partial && message.warning === "已取消生成");
+              const isFailed = Boolean(message.role === "assistant" && message.content?.trim().startsWith("请求失败："));
               const compactElapsed = message.elapsedMs == null ? null : message.elapsedMs < 1000 ? "<1s" : `${Math.round(message.elapsedMs / 1000)}s`;
               return (
                 <div key={message.requestId || index} className={cn("group flex", message.role === "user" ? "justify-end" : "justify-start")}>
-                  <div className={cn("flex flex-col", message.role === "user" ? "max-w-[68%] items-end" : "max-w-[720px] items-start")}>
+                  <div className={cn("flex flex-col", message.role === "user" ? "max-w-[65%] items-end" : "max-w-[720px] items-start")}>
                     <div className={cn(
-                      "rounded-2xl px-5 py-3.5 text-[15px] leading-7",
+                      "rounded-2xl px-4 py-3 text-[15px] leading-7",
                       message.role === "user"
-                        ? "bg-primary text-primary-foreground"
-                        : "border border-border/40 bg-card text-foreground"
+                        ? "bg-primary/85 text-primary-foreground"
+                        : "bg-muted/30 text-foreground"
                     )}>
                       {message.role === "assistant" && <ReasoningBlock content={message.reasoningContent || ""} isPlaceholder={isPlaceholder} phase={isPlaceholder ? phase : "done"} />}
                       {message.role === "assistant" && (message.toolEvents?.length ?? 0) > 0 && <ToolsBlock toolEvents={message.toolEvents} />}
@@ -2324,7 +2997,7 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
                         </div>
                       )}
                       {message.role === "assistant" && isStopped && (
-                        <div className="mt-2 inline-flex items-center gap-1 rounded-md bg-amber-500/10 px-2 py-0.5 text-[11px] text-amber-700 dark:text-amber-300">已停止生成</div>
+                        <div className="mt-2 inline-flex items-center gap-1 rounded-md bg-amber-500/10 px-2 py-0.5 text-[11px] text-amber-700 dark:text-amber-300">已取消生成</div>
                       )}
                       {message.role === "assistant" && message.partial && !isStopped && (
                         <div className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
@@ -2332,11 +3005,22 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
                         </div>
                       )}
                     </div>
-                    {message.role === "assistant" && (
-                      <div className="mt-1.5 flex flex-wrap items-center gap-2 pl-1 text-[11px] text-muted-foreground">
-                        <span>Hermes{compactElapsed ? ` · ${compactElapsed}` : ""}</span>
-                        <div className="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+                    {/* TASK-022A: User message actions */}
+                    {message.role === "user" && (
+                      <div className="mt-1.5 flex items-center gap-2 pr-1 text-[11px] text-muted-foreground opacity-40 transition-opacity group-hover:opacity-100">
                         <Button variant="ghost" size="icon" className="h-7 w-7" title="复制" aria-label="复制" onClick={() => navigator.clipboard.writeText(message.content || "")}><Copy className="h-3.5 w-3.5" /></Button>
+                        <Button variant="ghost" size="icon" className="h-7 w-7" title="填入输入框" aria-label="填入输入框" onClick={() => { setInput(message.content); requestAnimationFrame(() => { inputRef.current?.focus(); autoResize(inputRef.current); }); }}><Pencil className="h-3.5 w-3.5" /></Button>
+                      </div>
+                    )}
+                    {message.role === "assistant" && (
+                      <div className="mt-1.5 flex flex-wrap items-center gap-2 pl-1 text-[10px] text-muted-foreground/40">
+                        <span>{message.source || (USE_OPENCLAW_BACKEND ? "OpenClaw Agent" : "Hermes")}</span>
+                        {message.modelName && <span>{message.modelName}</span>}
+                        {compactElapsed && <span>{compactElapsed}</span>}
+                        <div className="flex items-center gap-0.5 opacity-40 transition-opacity group-hover:opacity-100">
+                        <Button variant="ghost" size="icon" className="h-7 w-7" title="复制" aria-label="复制" onClick={() => navigator.clipboard.writeText(message.content || "")}><Copy className="h-3.5 w-3.5" /></Button>
+                        {!isFailed && message.content && !loading && <Button variant="ghost" size="icon" className="h-7 w-7" title="继续" aria-label="继续" onClick={() => { setInput("请继续。"); requestAnimationFrame(() => { inputRef.current?.focus(); autoResize(inputRef.current); }); }}><MessageSquare className="h-3.5 w-3.5" /></Button>}
+                        {isFailed && <Button variant="ghost" size="icon" className="h-7 w-7" title={hasRunningRun ? "AI Agent 正在处理，稍后再试" : "重试"} aria-label="重试" disabled={hasRunningRun} onClick={() => retryRun(message.requestId!)}><RotateCcw className="h-3.5 w-3.5" /></Button>}
                         {message.content && !loading && (
                           <Button variant="ghost" size="icon" className="h-7 w-7" title="保存" aria-label="保存" onClick={() => {
                             const title = (currentSessionId ? chatSessions.find((s) => s.id === currentSessionId)?.title || "对话" : "对话").slice(0, 20);
@@ -2346,7 +3030,7 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
                           }}><Save className="h-3.5 w-3.5" /></Button>
                         )}
                         {isActiveAssistant && <Button variant="ghost" size="icon" className="h-7 w-7" title="快速显示" aria-label="快速显示" onClick={skipTypewriter}><FastForward className="h-3.5 w-3.5" /></Button>}
-                        {isLastAssistant && !loading && messages.length >= 2 && <Button variant="ghost" size="icon" className="h-7 w-7" title="重新生成" aria-label="重新生成" onClick={regenLast}><RotateCcw className="h-3.5 w-3.5" /></Button>}
+                        {isLastAssistant && !loading && messages.length >= 2 && <Button variant="ghost" size="icon" className="h-7 w-7" title={hasRunningRun ? "AI Agent 正在处理，稍后再试" : "重新生成"} aria-label="重新生成" disabled={hasRunningRun} onClick={regenLast}><RotateCcw className="h-3.5 w-3.5" /></Button>}
                         <DetailsEntry message={message} expandedDetailId={expandedDetailId} setExpandedDetailId={setExpandedDetailId} />
                         </div>
                       </div>
@@ -2378,8 +3062,9 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
               )}
             </div>
           )}
-          <div className="shrink-0 border-t bg-background/90 p-2 backdrop-blur-xl md:p-2.5">
-            <div className="rounded-2xl border bg-card/90 p-2 shadow-sm">
+          </div>
+          <div className="shrink-0 border-t border-border/50 bg-background/90 p-2 backdrop-blur-xl md:p-2.5">
+            <div className="rounded-2xl border border-border/40 bg-card/90 p-2 shadow-sm">
               {attachments.length > 0 && (
                 <div className="flex flex-wrap items-center gap-1.5 px-3 pb-2">
                   {attachments.map((att, i) => {
@@ -2404,8 +3089,8 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
                 onCompositionStart={() => { setIsComposing(true); isComposingRef.current = true; }}
                 onCompositionEnd={() => { setIsComposing(false); isComposingRef.current = false; }}
                 onKeyDown={handleKeyDown}
-                placeholder={hermesConnected ? "向 Hermes Agent 发送消息..." : disabledReason}
-                disabled={!hermesConnected || loading}
+                placeholder={openclawConnected || hermesConnected ? "向 AI Agent 发送消息..." : "Agent 引擎未连接"}
+                disabled={(!openclawConnected && !hermesConnected) || loading}
               />
               <div className="flex items-center justify-between px-2 pb-1">
                 <span className="flex items-center gap-2">
@@ -2439,7 +3124,7 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
                     <Square className="h-4 w-4" />停止
                   </Button>
                 ) : (
-                  <Button className="rounded-full" disabled={!hermesConnected || !input.trim()} onClick={send}>
+                  <Button className="rounded-full" disabled={(!openclawConnected && !hermesConnected) || !input.trim()} onClick={send}>
                     <Send className="h-4 w-4" />发送
                   </Button>
                 )}
@@ -2459,58 +3144,55 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
       <ConfirmDialog
         open={deleteSessionId !== null}
         onClose={() => setDeleteSessionId(null)}
-        title="删除历史对话"
-        description="将删除此历史对话记录，此操作不可恢复。"
+        title="删除会话"
+        description="将删除此会话记录，此操作不可恢复。"
         confirmLabel="确认删除"
         onConfirm={() => { if (deleteSessionId) void deleteSession(deleteSessionId); setDeleteSessionId(null); }}
       />
       <ConfirmDialog
         open={confirmClearHistory}
         onClose={() => setConfirmClearHistory(false)}
-        title="清空全部历史"
-        description="将删除所有本地历史对话记录，此操作不可恢复。"
+        title="清空全部会话"
+        description="将删除所有本地会话记录，此操作不可恢复。"
         confirmLabel="确认清空"
         onConfirm={() => { void clearHistory(); setConfirmClearHistory(false); }}
+      />
+      {/* TASK-023C-D: Delete project confirmation */}
+      <ConfirmDialog
+        open={deleteProjectId !== null}
+        onClose={() => setDeleteProjectId(null)}
+        title="删除项目"
+        description="此项目下的会话将移回默认项目，不会被删除。此操作不可恢复。"
+        confirmLabel="确认删除"
+        onConfirm={handleDeleteProject}
       />
     </div>
   );
 }
 
 function SkillsPage({ config, updateConfig, setActive, setChatDraft, setPendingNewSessionTitle }: { config: AppConfig; updateConfig: (next: AppConfig) => Promise<void>; setActive: (id: RouteId) => void; setChatDraft: (value: string) => void; setPendingNewSessionTitle: (v: string) => void }) {
-  const [tab, setTab] = useState<"official" | "hub" | "enabled">("official");
   const [category, setCategory] = useState<string>("全部");
   const [search, setSearch] = useState("");
-  const [riskFilter, setRiskFilter] = useState<string>("全部");
-  const [enabledOnly, setEnabledOnly] = useState(false);
-  const [detailSkill, setDetailSkill] = useState<OfficialSkill | null>(null);
-  const [hubDetail, setHubDetail] = useState<HermesHubSkill | null>(null);
   const [runSkill, setRunSkill] = useState<OfficialSkill | null>(null);
   const [formValues, setFormValues] = useState<Record<string, string>>({});
   const [showPreview, setShowPreview] = useState(false);
 
-  const toggleSkill = (id: string) => {
-    const enabledSkills = config.enabledSkills.includes(id) ? config.enabledSkills.filter((item) => item !== id) : [...config.enabledSkills, id];
-    updateConfig({ ...config, enabledSkills });
-  };
-
   const query = search.trim().toLowerCase();
-  const filteredOfficial = officialSkills.filter((skill) => {
-    if (category !== "全部" && skill.category !== category) return false;
-    if (riskFilter !== "全部" && skill.riskLevel !== riskFilter) return false;
-    if (enabledOnly && !config.enabledSkills.includes(skill.id)) return false;
-    if (query && !skill.name.toLowerCase().includes(query) && !skill.description.toLowerCase().includes(query)) return false;
-    return true;
-  });
-  const filteredHub = hermesHubSkills.filter((skill) => {
-    if (category !== "全部" && skill.category !== category) return false;
-    if (riskFilter !== "全部" && skill.riskLevel !== riskFilter) return false;
-    if (query && !skill.name.toLowerCase().includes(query) && !skill.description.toLowerCase().includes(query)) return false;
-    return true;
-  });
-  const enabledList = officialSkills.filter((skill) => config.enabledSkills.includes(skill.id));
 
-  const riskColor = (level: string) => level === "high" ? "danger" : level === "medium" ? "warning" : "success";
-  const riskLabel = (level: string) => level === "high" ? "高" : level === "medium" ? "中" : "低";
+  // All items: official skills (builtin workflows) + hub skills (coming soon / plugins)
+  const allItems = [
+    ...officialSkills.map(s => ({ ...s, type: s.type || "builtin_workflow" as const, status: s.status || "available" as const, isOfficial: true })),
+    ...hermesHubSkills.map(s => ({ ...s, name: s.name, description: s.description, type: (s.type || "openclaw_plugin") as "openclaw_plugin" | "coming_soon", status: "planned" as const, isOfficial: false, inputFields: [] as SkillInputField[], fullPrompt: "", shortPrompt: "", version: "", author: "", verified: false, riskLevel: s.riskLevel as "low" | "medium" | "high", requiredPermissions: s.requiredPermissions, recommendedUseCases: [], examples: [], category: s.category })),
+  ];
+
+  const filtered = allItems.filter(item => {
+    if (category !== "全部" && item.category !== category) return false;
+    if (query && !item.name.toLowerCase().includes(query) && !item.description.toLowerCase().includes(query)) return false;
+    return true;
+  });
+
+  const officialCategories = ["全部", "文件处理", "数据处理", "写作办公", "学习资料", "开发调试", "自媒体", "校园副业", "通用办公", "编程辅助", "娱乐摸鱼"];
+  const openclawPlaceholderCategories = ["OpenClaw 插件", "自动化", "AI 工具", "数据分析", "安全审计", "开发工具"];
 
   const openRun = (skill: OfficialSkill) => {
     setRunSkill(skill);
@@ -2545,160 +3227,221 @@ function SkillsPage({ config, updateConfig, setActive, setChatDraft, setPendingN
     setRunSkill(null);
   };
 
-  const categories = tab === "hub" ? ["全部", ...hermesHubCategories] : ["全部", ...officialCategories];
+  const typeBadge = (type: string) => (
+    <Badge tone={type === "builtin_workflow" ? "info" : type === "openclaw_plugin" ? "warning" : "muted"}>
+      {type === "builtin_workflow" ? "内置工作流" : type === "openclaw_plugin" ? "OpenClaw 插件" : "即将支持"}
+    </Badge>
+  );
+
+  // TASK-027C-F: risk/permission helpers
+  const riskTone = (level: string): "success" | "warning" | "danger" | "muted" =>
+    level === "low" ? "success" : level === "medium" ? "warning" : level === "high" ? "danger" : "muted";
+  const riskLabel = (level: string): string =>
+    level === "low" ? "低风险" : level === "medium" ? "中风险" : level === "high" ? "高风险" : "未审计";
+  const permLabel = (p: string): string => {
+    const map: Record<string, string> = { file_read: "文件读取", file_write: "文件写入", network: "网络访问", shell: "执行命令", env: "环境变量", config: "配置访问", api_key: "密钥访问", workspace: "工作区", unknown: "权限未知" };
+    return map[p] || p;
+  };
+
+  // TASK-027C-D/E: Install/uninstall state
+  const [installedIds, setInstalledIds] = useState<Set<string>>(new Set());
+  const [installingId, setInstallingId] = useState<string | null>(null);
+  const [installConfirm, setInstallConfirm] = useState<{ id: string; name: string; kind: string; risk: string; perms: string[]; source: string } | null>(null);
+  const [installConfirmChecked, setInstallConfirmChecked] = useState(false);
+  const [installError, setInstallError] = useState("");
+
+  useEffect(() => {
+    invoke<Array<{ catalogId?: string }>>("read_install_records").then(r => {
+      const ids = new Set<string>();
+      (Array.isArray(r) ? r : []).forEach(rec => {
+        if (rec.catalogId) ids.add(rec.catalogId);
+      });
+      setInstalledIds(ids);
+    }).catch(() => {});
+  }, []);
+
+  const handleInstall = async () => {
+    if (!installConfirm) return;
+    setInstallingId(installConfirm.id);
+    try {
+      await invoke("install_capability", {
+        catalogId: installConfirm.id,
+        name: installConfirm.name,
+        kind: installConfirm.kind,
+        riskLevel: installConfirm.risk,
+      });
+      setInstalledIds(prev => new Set([...prev, installConfirm.id]));
+    } catch (err) {
+      setInstallError(`安装失败：${getErrorMessage(err)}`);
+    }
+    setInstallingId(null);
+    setInstallConfirm(null);
+    setInstallConfirmChecked(false);
+  };
+
+  const handleUninstall = async (catalogId: string, kind: string) => {
+    setInstallingId(catalogId);
+    try {
+      await invoke("uninstall_capability", { catalogId, kind });
+      setInstalledIds(prev => { const next = new Set(prev); next.delete(catalogId); return next; });
+    } catch (err) {
+      setInstallError(`卸载失败：${getErrorMessage(err)}`);
+    }
+    setInstallingId(null);
+  };
+
+  const needsHardConfirm = (risk: string) => risk === "high" || risk === "unknown";
 
   return (
     <div className="space-y-4">
       <Card>
         <CardHeader>
-          <CardTitle>Skill Center</CardTitle>
-          <CardDescription>Skill 是 Agent 的可复用工作流。选择技能后，Hermes Agent 会按固定流程帮你完成任务。当前内置官方模板技能；高级扩展技能将在后续版本开放。</CardDescription>
-          <div className="mt-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-700 dark:text-emerald-300">当前所有技能均为本地模板，不会执行本地命令，不会修改系统文件。</div>
+          <CardTitle>能力中心</CardTitle>
+          <CardDescription>把常用任务做成可复用能力，支持对话、文件、数据、写作和轻量娱乐。当前以内置工作流为主，OpenClaw 插件接入规划中。</CardDescription>
+          <div className="mt-2 rounded-lg border border-blue-500/20 bg-blue-500/5 px-3 py-2 text-xs text-blue-700 dark:text-blue-300">内置工作流为本地 prompt 模板，不会执行系统命令。真实插件能力将在后续版本接入。</div>
         </CardHeader>
       </Card>
+      {installError && <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-2 text-xs text-rose-700 dark:text-rose-400">{installError}</div>}
 
       <div className="flex flex-wrap items-center gap-2">
-        <Button size="sm" variant={tab === "official" ? "default" : "outline"} onClick={() => { setTab("official"); setCategory("全部"); }}>官方模板</Button>
-        <Button size="sm" variant={tab === "enabled" ? "default" : "outline"} onClick={() => setTab("enabled")}>已启用 ({enabledList.length})</Button>
-        <Button size="sm" variant={tab === "hub" ? "default" : "outline"} onClick={() => { setTab("hub"); setCategory("全部"); }}>扩展预览</Button>
-        <select className="rounded-xl border bg-background px-2 py-1 text-sm" value={riskFilter} onChange={(e) => setRiskFilter(e.target.value)}>
-          <option value="全部">全部风险</option>
-          <option value="low">低风险</option>
-          <option value="medium">中风险</option>
-          <option value="high">高风险</option>
-        </select>
-        {tab === "official" && (
-          <label className="flex items-center gap-1.5 text-sm text-muted-foreground">
-            <input type="checkbox" checked={enabledOnly} onChange={(e) => setEnabledOnly(e.target.checked)} className="rounded" />只看已启用
-          </label>
-        )}
-        <Input className="ml-auto max-w-[220px]" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="搜索技能" />
+        <Input className="max-w-[200px]" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="搜索能力" />
+        {officialCategories.map((cat) => (
+          <Button key={cat} size="sm" variant={category === cat ? "default" : "outline"} onClick={() => setCategory(cat)}>{cat}</Button>
+        ))}
       </div>
 
-      {tab !== "enabled" && (
-        <div className="flex flex-wrap gap-2">
-          {categories.map((item) => <Button key={item} size="sm" variant={category === item ? "default" : "outline"} onClick={() => setCategory(item)}>{item}</Button>)}
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        {filtered.map((item) => {
+          const isAvailable = item.status === "available" || (item as any).isOfficial;
+          const isPlanned = item.status === "planned" || item.type === "openclaw_plugin" || item.type === "coming_soon";
+          return (
+          <Card key={item.id} className="group flex flex-col transition-colors hover:border-primary/20">
+            <CardHeader className="pb-2">
+              <div className="flex items-start justify-between gap-2">
+                <CardTitle className="text-sm">{item.name}</CardTitle>
+              </div>
+              <CardDescription className="line-clamp-2 text-xs">{item.description}</CardDescription>
+            </CardHeader>
+            <CardContent className="flex-1 space-y-2 pt-0">
+              <div className="flex flex-wrap gap-1.5">
+                <Badge tone="info">{item.category}</Badge>
+                {isAvailable ? typeBadge("builtin_workflow") : isPlanned ? typeBadge("openclaw_plugin") : typeBadge("coming_soon")}
+                <Badge tone={riskTone((item as any).riskLevel || (isAvailable ? "low" : isPlanned ? "unknown" : "unknown"))}>
+                  {riskLabel((item as any).riskLevel || (isAvailable ? "low" : isPlanned ? "unknown" : "unknown"))}
+                </Badge>
+              </div>
+              <div className="flex gap-2 pt-1">
+                {isAvailable && (item as any).isOfficial ? (
+                  <Button size="sm" className="text-xs" onClick={() => openRun(item as OfficialSkill)}>使用工作流</Button>
+                ) : isPlanned ? (
+                  <Button size="sm" variant="outline" disabled className="text-xs">接入规划中</Button>
+                ) : (
+                  <Button size="sm" variant="outline" disabled className="text-xs">即将支持</Button>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        )})}
+      </div>
+      {filtered.length === 0 && <p className="text-sm text-muted-foreground">这个分类暂时没有可用能力</p>}
+
+      {/* TASK-027C-D/E: Install confirmation modal */}
+      {installConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => { setInstallConfirm(null); setInstallConfirmChecked(false); }}>
+          <Card className="w-full max-w-md" onClick={e => e.stopPropagation()}>
+            <CardHeader>
+              <CardTitle className="text-lg">安装能力</CardTitle>
+              <CardDescription>安装前确认权限和风险</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3 text-sm">
+              <div className="flex flex-wrap gap-1.5">
+                <Badge tone="info">{installConfirm.name}</Badge>
+                <Badge tone="info">{installConfirm.source}</Badge>
+                <Badge tone={riskTone(installConfirm.risk)}>{riskLabel(installConfirm.risk)}</Badge>
+              </div>
+              {installConfirm.perms.length > 0 && <p className="text-xs text-muted-foreground">权限：{installConfirm.perms.map(permLabel).join("、")}</p>}
+              <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-3 text-xs space-y-1">
+                <p className="font-medium text-amber-700 dark:text-amber-300">免责声明</p>
+                <p className="text-amber-600 dark:text-amber-400">第三方 Skill/Plugin 可能访问文件、联网或执行本地命令。请仅安装你信任的来源。安装后产生的行为由该 Skill/Plugin 提供方负责，本应用仅提供安装入口和风险提示。</p>
+              </div>
+              {needsHardConfirm(installConfirm.risk) && (
+                <label className="flex items-start gap-2 text-xs">
+                  <input type="checkbox" checked={installConfirmChecked} onChange={e => setInstallConfirmChecked(e.target.checked)} className="mt-0.5" />
+                  <span>我理解该能力{installConfirm.risk === "high" ? "可能执行命令、访问文件或联网" : "尚未审计，可能存在安全风险"}，并愿意继续安装。</span>
+                </label>
+              )}
+              <div className="flex gap-2 pt-1">
+                <Button className="flex-1" onClick={handleInstall} disabled={installingId !== null || (needsHardConfirm(installConfirm.risk) && !installConfirmChecked)}>
+                  {installingId ? <Loader2 className="h-4 w-4 animate-spin" /> : null}确认安装
+                </Button>
+                <Button variant="outline" onClick={() => { setInstallConfirm(null); setInstallConfirmChecked(false); }}>取消</Button>
+              </div>
+            </CardContent>
+          </Card>
         </div>
       )}
 
-      {/* Official Tab */}
-      {tab === "official" && (
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3 [&>*]:transition-all [&>*]:duration-200">
-          {filteredOfficial.map((skill) => (
-            <Card key={skill.id} className="group flex flex-col hover:-translate-y-0.5 hover:shadow-md" accent={skill.riskLevel === "high" ? "#F43F5E" : skill.riskLevel === "medium" ? "#F59E0B" : "#10B981"}>
+      {/* TASK-027C-B: External capability catalog */}
+      <div className="space-y-3 pt-4 border-t">
+        <div>
+          <h3 className="text-sm font-medium">外部能力目录</h3>
+          <p className="text-xs text-muted-foreground mt-0.5">浏览可接入的 Skill/Plugin，安装功能将在权限确认和安全审计后开放。高风险能力需要二次确认。</p>
+        </div>
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {[
+            { id:"ext-file-summary", name:"文件总结", desc:"自动总结文档/PDF/文本核心内容", source:"clawhub" as const, kind:"skill" as const, category:"文件处理", risk:"medium" as const, perms:["file_read"], publisher:"ClawHub" },
+            { id:"ext-table-analyze", name:"表格分析", desc:"CSV/Excel 数据清洗和洞察提取", source:"clawhub" as const, kind:"skill" as const, category:"数据处理", risk:"medium" as const, perms:["file_read"], publisher:"ClawHub" },
+            { id:"ext-web-research", name:"网页资料整理", desc:"搜索并汇总网页资料为结构化笔记", source:"clawhub" as const, kind:"skill" as const, category:"文件处理", risk:"medium" as const, perms:["file_read","network"], publisher:"ClawHub" },
+            { id:"ext-github-helper", name:"GitHub 辅助", desc:"管理 Issue、PR 和代码审查摘要", source:"skillhub" as const, kind:"plugin" as const, category:"开发调试", risk:"high" as const, perms:["network","shell"], publisher:"SkillHub" },
+            { id:"ext-browser-auto", name:"浏览器自动化", desc:"Playwright 网页操作和截图", source:"skillhub" as const, kind:"plugin" as const, category:"开发调试", risk:"high" as const, perms:["network","shell"], publisher:"SkillHub" },
+            { id:"ext-memory-kb", name:"知识库记忆", desc:"本地向量检索和长期记忆", source:"openclaw" as const, kind:"plugin" as const, category:"文件处理", risk:"medium" as const, perms:["file_read","file_write"], publisher:"OpenClaw" },
+            { id:"ext-data-api", name:"数据 API 查询", desc:"连接 REST/GraphQL API 获取数据", source:"clawhub" as const, kind:"skill" as const, category:"数据处理", risk:"medium" as const, perms:["network"], publisher:"ClawHub" },
+            { id:"ext-fun-fact", name:"随机冷知识", desc:"每天一条有趣的冷知识", source:"curated" as const, kind:"skill" as const, category:"娱乐摸鱼", risk:"low" as const, perms:[], publisher:"Curated" },
+            { id:"ext-countdown", name:"下班倒计时", desc:"显示距离下班的剩余时间", source:"curated" as const, kind:"skill" as const, category:"娱乐摸鱼", risk:"low" as const, perms:[], publisher:"Curated" },
+          ].map(item => (
+            <Card key={item.id} className="group flex flex-col transition-colors hover:border-primary/20">
               <CardHeader className="pb-2">
                 <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0 flex-1"><CardTitle>{skill.name}</CardTitle></div>
-                  <Switch checked={config.enabledSkills.includes(skill.id)} onCheckedChange={() => toggleSkill(skill.id)} />
+                  <CardTitle className="text-sm">{item.name}</CardTitle>
                 </div>
-                <CardDescription className="line-clamp-2">{skill.description}</CardDescription>
+                <CardDescription className="line-clamp-2 text-xs">{item.desc}</CardDescription>
               </CardHeader>
-              <CardContent className="flex-1 space-y-3 pt-0">
-                <div className="flex flex-wrap gap-2"><Badge tone={riskColor(skill.riskLevel)}>风险 {riskLabel(skill.riskLevel)}</Badge><Badge tone="info">{skill.category}</Badge>{skill.verified && <Badge tone="success">官方认证</Badge>}</div>
-                {skill.recommendedUseCases.length > 0 && <p className="text-xs text-muted-foreground">场景：{skill.recommendedUseCases.join("、")}</p>}
-                <div className="text-[10px] text-muted-foreground">{config.enabledSkills.includes(skill.id) ? "已启用 · 在已启用列表可快速找到" : "未启用 · 启用后可在已启用列表快速找到"}</div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <Button size="sm" onClick={() => openRun(skill)}>运行技能</Button>
-                  <Button variant="outline" size="sm" onClick={() => setDetailSkill(skill)}>详情</Button>
+              <CardContent className="flex-1 space-y-2 pt-0">
+                <div className="flex flex-wrap gap-1.5">
+                  <Badge tone="info">{item.category}</Badge>
+                  <Badge tone={item.source === "clawhub" ? "info" : item.source === "skillhub" ? "warning" : item.source === "openclaw" ? "info" : "muted"}>
+                    {item.source === "clawhub" ? "ClawHub" : item.source === "skillhub" ? "SkillHub" : item.source === "openclaw" ? "OpenClaw" : "Curated"}
+                  </Badge>
+                  <Badge tone={item.kind === "skill" ? "info" : "warning"}>{item.kind === "skill" ? "Skill" : "Plugin"}</Badge>
+                  <Badge tone={riskTone(item.risk)}>{riskLabel(item.risk)}</Badge>
+                </div>
+                {item.perms.length > 0 && <p className="text-[11px] text-muted-foreground">权限：{item.perms.map(permLabel).join("、")}</p>}
+                <div className="flex gap-2 pt-1">
+                  {installedIds.has(item.id) ? (
+                    <Button size="sm" variant="outline" disabled={installingId === item.id}
+                      className="text-xs" onClick={() => handleUninstall(item.id, item.kind)}>
+                      {installingId === item.id ? "卸载中..." : "卸载"}
+                    </Button>
+                  ) : (
+                    <Button size="sm" disabled={installingId === item.id}
+                      className="text-xs" onClick={() => setInstallConfirm({ id:item.id, name:item.name, kind:item.kind, risk:item.risk, perms:item.perms, source:item.source })}>
+                      {installingId === item.id ? "安装中..." : "安装"}
+                    </Button>
+                  )}
                 </div>
               </CardContent>
             </Card>
           ))}
-          {filteredOfficial.length === 0 && (
-            <div className="col-span-full rounded-xl border bg-muted/30 p-8 text-center">
-              <div className="text-sm font-medium">没有匹配的官方模板技能</div>
-              <div className="mt-1 text-xs text-muted-foreground">尝试切换分类搜索，或查看已启用的技能列表。</div>
-            </div>
-          )}
         </div>
-      )}
+      </div>
 
-      {/* Hub Tab */}
-      {tab === "hub" && (
-        <div className="space-y-4">
-          <div className="rounded-xl border bg-muted/30 p-4 text-sm text-muted-foreground space-y-2">
-            <div>这些是未来可能接入的 Hermes 高级技能，需要联网、授权或额外配置。当前版本仅展示能力预览，暂不支持安装。</div>
-            <div className="text-xs">当前不会联网安装第三方技能，不会执行命令，不会修改 ~/.hermes。</div>
-          </div>
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3 [&>*]:transition-all [&>*]:duration-200">
-          {filteredHub.map((skill) => (
-            <Card key={skill.id} className="group hover:-translate-y-0.5 hover:shadow-md">
-              <CardHeader>
-                <div className="flex justify-between gap-3">
-                  <div><CardTitle>{skill.name}</CardTitle><CardDescription>{skill.description}</CardDescription></div>
-                  <Badge tone="muted">后续开放</Badge>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div className="flex flex-wrap gap-2"><Badge tone={riskColor(skill.riskLevel)}>风险 {riskLabel(skill.riskLevel)}</Badge><Badge tone="info">{skill.category}</Badge></div>
-                <p className="text-xs text-muted-foreground">适合：{skill.audience}</p>
-                <div className="flex flex-wrap gap-2">
-                  <Button variant="outline" size="sm" onClick={() => setHubDetail(skill)}>查看说明</Button>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-          {filteredHub.length === 0 && <div className="col-span-full p-4 text-center text-sm text-muted-foreground">没有匹配的扩展技能。</div>}
-          </div>
-        </div>
-      )}
+      {/* Security notice */}
+      <div className="rounded-xl border border-dashed border-muted-foreground/30 p-4 text-center text-sm text-muted-foreground">
+        <p className="font-medium">OpenClaw 插件</p>
+        <p className="mt-1 text-xs">接入规划中，当前不会安装外部插件。支持后可从 ClawHub 浏览并安装通过审核的插件。</p>
+      </div>
 
-      {/* Enabled Tab */}
-      {tab === "enabled" && (
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3 [&>*]:transition-all [&>*]:duration-200">
-          {enabledList.map((skill) => (
-            <Card key={skill.id} className="group hover:-translate-y-0.5 hover:shadow-md" accent="#10B981">
-              <CardHeader className="pb-2"><CardTitle>{skill.name}</CardTitle><CardDescription>{skill.description}</CardDescription></CardHeader>
-              <CardContent className="flex flex-wrap gap-2 pt-0">
-                <Button size="sm" onClick={() => openRun(skill)}>运行技能</Button>
-                <Button variant="outline" size="sm" onClick={() => toggleSkill(skill.id)}>停用</Button>
-              </CardContent>
-            </Card>
-          ))}
-          {enabledList.length === 0 && (
-            <div className="col-span-full rounded-xl border bg-muted/30 p-8 text-center text-sm text-muted-foreground">
-              还没有启用技能。你可以在"官方模板"中启用常用技能，方便下次快速找到。
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Detail Modal */}
-      {detailSkill && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4 animate-in fade-in" onClick={() => setDetailSkill(null)}>
-          <Card className="max-h-[80vh] w-full max-w-lg overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-            <CardHeader><CardTitle>{detailSkill.name}</CardTitle><CardDescription>{detailSkill.description}</CardDescription></CardHeader>
-            <CardContent className="space-y-4 text-sm">
-              <div className="flex flex-wrap gap-2"><Badge tone={riskColor(detailSkill.riskLevel)}>风险 {riskLabel(detailSkill.riskLevel)}</Badge><Badge tone="info">{detailSkill.category}</Badge><Badge tone="success">v{detailSkill.version}</Badge></div>
-              <div>适合场景：{detailSkill.recommendedUseCases.join("、")}</div>
-              <div>输入项：{detailSkill.inputFields.map((f) => f.label).join("、")}</div>
-              {detailSkill.examples.length > 0 && <div>示例输出：<pre className="mt-1 max-h-32 overflow-auto rounded-lg border bg-muted/30 p-2 text-xs">{detailSkill.examples[0].output}</pre></div>}
-              <div>完整提示词：<pre className="mt-1 max-h-40 overflow-auto rounded-lg border bg-muted/30 p-2 text-xs whitespace-pre-wrap">{detailSkill.fullPrompt}</pre></div>
-              <div className="text-xs text-muted-foreground">权限：{detailSkill.requiredPermissions.length > 0 ? detailSkill.requiredPermissions.join(", ") : "无"} · {detailSkill.author} · 已验证</div>
-              <div className="flex gap-2"><Button onClick={() => { openRun(detailSkill); setDetailSkill(null); }}>运行技能</Button><Button variant="outline" onClick={() => setDetailSkill(null)}>关闭</Button></div>
-            </CardContent>
-          </Card>
-        </div>
-      )}
-
-      {/* Hub Detail Modal */}
-      {hubDetail && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" onClick={() => setHubDetail(null)}>
-          <Card className="max-h-[80vh] w-full max-w-lg overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-            <CardHeader><CardTitle>{hubDetail.name}</CardTitle><CardDescription>{hubDetail.description}</CardDescription></CardHeader>
-            <CardContent className="space-y-4 text-sm">
-              <div className="flex flex-wrap gap-2"><Badge tone={riskColor(hubDetail.riskLevel)}>风险 {riskLabel(hubDetail.riskLevel)}</Badge><Badge tone="info">{hubDetail.category}</Badge><Badge tone="muted">后续开放</Badge></div>
-              <div>适合人群：{hubDetail.audience}</div>
-              {hubDetail.requiredPermissions.length > 0 && <div>可能需要权限：{hubDetail.requiredPermissions.join("、")}</div>}
-              {hubDetail.externalServices.length > 0 && <div>可能需要的外部服务：{hubDetail.externalServices.join("、")}</div>}
-              <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-300">当前版本不会安装或执行该技能。后续版本将支持安全安装。</div>
-              <Button variant="outline" onClick={() => setHubDetail(null)}>关闭</Button>
-            </CardContent>
-          </Card>
-        </div>
-      )}
-
-      {/* Skill Runner Drawer */}
+      {/* Skill Runner Drawer — keep unchanged */}
       {runSkill && (
         <div className="fixed inset-0 z-50">
           <div className="absolute inset-0 bg-black/40 transition-opacity" onClick={() => setRunSkill(null)} />
@@ -2707,23 +3450,13 @@ function SkillsPage({ config, updateConfig, setActive, setChatDraft, setPendingN
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <h3 className="text-lg font-semibold">{runSkill.name}</h3>
-                  <div className="mt-1.5 flex flex-wrap gap-1.5"><Badge tone={riskColor(runSkill.riskLevel)}>风险 {riskLabel(runSkill.riskLevel)}</Badge><Badge tone="info">{runSkill.category}</Badge><Badge tone="success">官方认证</Badge></div>
+                  <div className="mt-1.5 flex flex-wrap gap-1.5"><Badge tone="info">{runSkill.category}</Badge><Badge tone="info">内置工作流</Badge></div>
                   <p className="mt-2 text-xs text-muted-foreground">{runSkill.description}</p>
                 </div>
-                <Button variant="ghost" size="icon" onClick={() => setRunSkill(null)}><ChevronUp className="h-4 w-4 rotate-90" /></Button>
-              </div>
-              {/* Step indicator */}
-              <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
-                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary text-[10px] font-medium text-primary-foreground">1</span>填写信息
-                <ChevronDown className="h-2 w-2 opacity-30" />
-                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-muted text-[10px] font-medium">2</span>生成指令
-                <ChevronDown className="h-2 w-2 opacity-30" />
-                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-muted text-[10px] font-medium">3</span>进入对话
+                <Button variant="ghost" size="icon" onClick={() => setRunSkill(null)}><ChevronDown className="h-4 w-4 rotate-90" /></Button>
               </div>
             </div>
-
             <div className="space-y-4 px-5 py-4">
-              {/* Form fields */}
               {runSkill.inputFields.map((field) => (
                 <div key={field.id} className="space-y-1">
                   <label className="text-sm font-medium">{field.label}{field.required && <span className="text-rose-500"> *</span>}</label>
@@ -2738,24 +3471,15 @@ function SkillsPage({ config, updateConfig, setActive, setChatDraft, setPendingN
                   )}
                 </div>
               ))}
-
-              {/* Instruction preview */}
               <div>
                 <button onClick={() => setShowPreview(!showPreview)} className="flex items-center gap-1 text-xs text-muted-foreground hover:underline">
                   {showPreview ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
                   Agent 指令预览
                 </button>
                 {showPreview && (
-                  <div className="mt-2 max-h-48 overflow-y-auto rounded-xl border bg-muted/30 p-3">
-                    <pre className="whitespace-pre-wrap text-xs text-muted-foreground">{builtPrompt}</pre>
-                    <Button variant="ghost" size="sm" className="mt-2" onClick={() => navigator.clipboard.writeText(builtPrompt)}><Copy className="h-3 w-3" />复制指令</Button>
-                  </div>
+                  <pre className="mt-1 max-h-48 overflow-auto rounded-lg border bg-muted/30 p-2 text-xs text-muted-foreground">{builtPrompt}</pre>
                 )}
               </div>
-            </div>
-
-            {/* Bottom actions */}
-            <div className="sticky bottom-0 border-t bg-card/95 px-5 py-4 backdrop-blur">
               {missingRequired.length > 0 && (
                 <p className="mb-2 text-xs text-rose-500">请填写必填字段：{missingRequired.map((f) => f.label).join("、")}</p>
               )}
@@ -2987,14 +3711,14 @@ function MemoryPage() {
         <CardHeader>
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <CardTitle>Hermes 记忆</CardTitle>
-              <CardDescription>这里显示 Hermes Agent 的原生记忆文件。Hermes 会在对话中自动使用这些记忆，本页面当前只提供查看，不会修改文件。</CardDescription>
+              <CardTitle>Agent 记忆</CardTitle>
+              <CardDescription>这里显示 Agent 的原生记忆文件。Agent 会在对话中自动使用这些记忆，本页面当前只提供查看，不会修改文件。</CardDescription>
             </div>
             <Button variant="outline" onClick={loadMemory} disabled={loadingMemory}><RefreshCcw className={cn("h-4 w-4", loadingMemory && "animate-spin")} />重新扫描</Button>
           </div>
         </CardHeader>
         <CardContent className="grid gap-3 md:grid-cols-3">
-          <Metric label="Hermes 记忆目录" value={memory?.found ? "已检测到" : "未检测到"} tone={memory?.found ? "success" : "warning"} />
+          <Metric label="Agent 记忆目录" value={memory?.found ? "已检测到" : "未检测到"} tone={memory?.found ? "success" : "warning"} />
           <Metric label="已发现记忆文件" value={String(memory?.files.length ?? 0)} tone={(memory?.files.length ?? 0) > 0 ? "success" : "muted"} />
           <Metric label="最近扫描" value={checkedAt} tone="info" />
           {memoryError && <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-rose-700 dark:text-rose-400 md:col-span-3">{memoryError}</div>}
@@ -3003,10 +3727,10 @@ function MemoryPage() {
 
       <div className="grid gap-4 xl:grid-cols-[380px_1fr]">
         <Card>
-          <CardHeader><CardTitle>文件列表</CardTitle><CardDescription>扫描 Hermes 记忆目录下的记忆文件。</CardDescription></CardHeader>
+          <CardHeader><CardTitle>文件列表</CardTitle><CardDescription>扫描 Agent 记忆目录下的记忆文件。</CardDescription></CardHeader>
           <CardContent className="space-y-2">
-            {loadingMemory && <div className="text-sm text-muted-foreground"><Loader2 className="mr-2 inline h-4 w-4 animate-spin" />正在扫描 Hermes 原生记忆…</div>}
-            {!loadingMemory && memory?.files.length === 0 && <div className="rounded-xl border bg-muted/30 p-3 text-sm text-muted-foreground">未发现记忆文件。不同 Hermes 版本可能路径不同，文件不存在不会视为错误。</div>}
+            {loadingMemory && <div className="text-sm text-muted-foreground"><Loader2 className="mr-2 inline h-4 w-4 animate-spin" />正在扫描 Agent 原生记忆…</div>}
+            {!loadingMemory && memory?.files.length === 0 && <div className="rounded-xl border bg-muted/30 p-3 text-sm text-muted-foreground">未发现记忆文件。不同版本可能路径不同，文件不存在不会视为错误。</div>}
             {memory?.files.map((file) => (
               <button key={file.id} onClick={() => setSelectedId(file.id)} className={cn("w-full rounded-xl border p-3 text-left transition", selected?.id === file.id ? "border-primary/40 bg-primary/5" : "bg-card hover:bg-muted/40")}>
                 <div className="flex items-center justify-between gap-3">
@@ -3335,7 +4059,7 @@ function TutorialsPage({ config }: { config: AppConfig }) {
 
 function AboutPage({ config, updateConfig }: { config: AppConfig; updateConfig: (next: AppConfig) => Promise<void> }) {
   const [confirm, setConfirm] = useState(false);
-  return <div className="space-y-4"><Card><CardHeader><CardTitle>AI Agent 工作台 U盘版</CardTitle><CardDescription>AI Agent Workspace v0.1.1</CardDescription></CardHeader><CardContent className="grid gap-3 text-sm"><Metric label="Agent 服务" value="本机 Hermes 对话服务" tone="info" /><Metric label="对话模型" value="Hermes Agent" tone="success" /></CardContent></Card><Card><CardHeader><CardTitle>使用步骤</CardTitle><CardDescription>购买 U盘会赠送初始额度，用完后可联系续费。</CardDescription></CardHeader><CardContent className="space-y-3 text-sm text-muted-foreground">{["插入 U盘", "打开 AI Agent Workspace", "在 Hermes 管理页配置 Token 和模型", "确认 Hermes 对话服务运行中", "开始和 Hermes Agent 对话"].map((step, index) => <div key={step} className="flex gap-3"><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-primary text-xs text-primary-foreground">{index + 1}</span>{step}</div>)}</CardContent></Card><Card><CardContent className="pt-4"><button onClick={() => setConfirm(true)} className="text-[11px] text-muted-foreground underline-offset-2 hover:underline">清除本地配置（重置 Token 和设置）</button></CardContent></Card><ConfirmDialog open={confirm} onClose={() => setConfirm(false)} title="确认清除" description="此操作会清除本地保存的 Token 和配置，不会影响 Hermes 记忆文件。" confirmLabel="确认清除" onConfirm={() => clearConfig().then(updateConfig)} /></div>;
+  return <div className="space-y-4"><Card><CardHeader><CardTitle>AI Agent 工作台 U盘版</CardTitle><CardDescription>AI Agent Workspace v0.1.1</CardDescription></CardHeader><CardContent className="grid gap-3 text-sm"><Metric label="Agent 服务" value="本机 OpenClaw Gateway" tone="info" /><Metric label="对话模型" value="OpenClaw Agent" tone="success" /></CardContent></Card><Card><CardHeader><CardTitle>使用步骤</CardTitle><CardDescription>购买 U盘会赠送初始额度，用完后可联系续费。</CardDescription></CardHeader><CardContent className="space-y-3 text-sm text-muted-foreground">{["插入 U盘", "打开 AI Agent Workspace", "在 Agent 引擎页配置 Token 和模型", "确认 OpenClaw Gateway 运行中", "开始和 AI Agent 对话"].map((step, index) => <div key={step} className="flex gap-3"><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-primary text-xs text-primary-foreground">{index + 1}</span>{step}</div>)}</CardContent></Card><Card><CardContent className="pt-4"><button onClick={() => setConfirm(true)} className="text-[11px] text-muted-foreground underline-offset-2 hover:underline">清除本地配置（重置 Token 和设置）</button></CardContent></Card><ConfirmDialog open={confirm} onClose={() => setConfirm(false)} title="确认清除" description="此操作会清除本地保存的 Token 和配置，不会影响 Agent 记忆文件。" confirmLabel="确认清除" onConfirm={() => clearConfig().then(updateConfig)} /></div>;
 }
 
 function PhaseBadge({ phase }: { phase: ChatPhase }) {
@@ -3352,7 +4076,7 @@ function PhaseBadge({ phase }: { phase: ChatPhase }) {
 }
 
 function PlaceholderText({ phase, elapsedLive }: { phase: ChatPhase; elapsedLive: number }) {
-  return <div className="text-sm text-muted-foreground"><span className="animate-pulse">Hermes 正在回复</span><span>…</span></div>;
+  return <div className="text-sm text-muted-foreground"><span className="animate-pulse">{USE_OPENCLAW_BACKEND ? "AI Agent 正在思考" : "Hermes 正在回复"}</span><span>…</span></div>;
 }
 
 function ReasoningBlock({ content, isPlaceholder, phase }: { content: string; isPlaceholder?: boolean; phase?: ChatPhase }) {

@@ -7,3 +7,4 @@ dev.db
 *.log
 .DS_Store
 src-tauri/target
+.opencode/

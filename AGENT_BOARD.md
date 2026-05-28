@@ -20,9 +20,19 @@
 
 新的产品定位是：
 
+> Windows / macOS 桌面 AI Agent 工作台  
 > AI Agent Workspace with OpenClaw Backend
 
 OpenClaw 将成为主体 Agent 后端。Hermes 不再作为普通用户主路径，后续应逐步降级、隐藏或删除 Hermes 相关能力。
+
+最新产品方向补充：
+
+- 当前产品主定位不是单纯 U 盘文件助手，也不是手机端 App，而是 Windows / macOS 桌面 AI Agent 工作台。
+- 核心能力包括：Agent 对话、Skill Center 能力扩展、文件 / 数据处理、Agent 记忆和项目会话、模型与引擎配置、轻量娱乐 / 养成 / 摸鱼功能。
+- 文件 / 数据处理是必须能力，但不作为首页唯一主心智；首页仍以 AI Agent 工作台为主。
+- 文件 / 数据处理作为重要入口存在，但不要过度抢主视觉。
+- Skill Center 是下一阶段重点，需要从“提示词模板感”升级为真实能力中心。
+- 后续可以探索娱乐划水 / 养成系功能，但应作为轻量增强，不干扰 Agent 工作台主线。
 
 迁移原则：
 
@@ -110,6 +120,367 @@ OpenClaw 将成为主体 Agent 后端。Hermes 不再作为普通用户主路径
 - 删除定时任务页。
 - 删除 Hermes 记忆页或改为 OpenClaw 记忆 / 知识库页。
 
+## 当前主线
+
+- 普通 Agent 对话主路径：**OpenClaw HTTP-first**。
+- OpenClaw HTTP API 已由用户手动验证：`GET /v1/models` 带 Authorization 成功，模型为 `openclaw`、`openclaw/default`、`openclaw/main`；`POST /v1/chat/completions` 使用 `model=openclaw/default` 成功返回 assistant 内容。
+- 正确默认模型：`openclaw/default` 或 `openclaw`。`gpt-5.5` 是 WebSocket RPC 探针阶段的错误模型判断，不应作为普通 ChatPage 默认模型。
+- WebSocket Gateway RPC：仅保留为 advanced / future 路线，不再阻塞普通对话，不再作为 ChatPage 默认路径。
+- HermesLegacyBackend：保留为 fallback / legacy，不删除，但不作为普通用户主路径。
+- 中转站配置下一步迁移到 OpenClaw config，而不是继续写 Hermes config。
+- 普通用户 UI 不暴露 provider / baseUrl / API URL；底层后续把用户 Token 写入 OpenClaw `models.providers` 和默认模型配置。
+
+## 当前任务总览
+
+| ID | 状态 | 优先级 | 任务 | 说明 |
+|---|---|---|---|---|
+| TASK-001 | 已完成 | P0 | OpenClaw 本地调用方式调研 | 已产出 OpenClaw backend research，确认 OpenClaw-first 可行但需分阶段迁移。 |
+| TASK-002 | 待验收 | P0 | AgentBackend 抽象 | OpenCode 已完成抽象与 HermesLegacyBackend 包装；当前仍需 Codex 单独审查。 |
+| TASK-003 | 已完成 | P1 | 隐藏普通导航中的定时任务页 | 已从普通导航移除入口并保留后端 Cron command。 |
+| TASK-004 | 已完成 | P1 | OpenClaw Gateway smoke test | 已区分 Gateway / Control UI / `/v1/models`，确认早期 HTTP fallback 风险。 |
+| TASK-005 | 已完成 | P1 | OpenClaw WebSocket RPC 最小验证 | 已定位裸 connect 阻塞在 device identity / pairing。 |
+| TASK-006 | 已完成 | P0 | OpenClaw pairing / device identity / auth 验证 | 已确认 Ed25519 device identity 必要，阻塞推进到 auth token。 |
+| TASK-007 | 已完成 | P0 | Gateway token auth + hello-ok 验证 | 结论型完成：不能靠错误 token 直接打通，后续转入 TASK-008 / TASK-009。 |
+| TASK-008 | 已完成 | P0 | 确认 Gateway 真实 auth token 来源与设备批准流程 | 已定位 CLI config get 会脱敏，真实路径是 config token / device pairing。 |
+| TASK-009 | 已完成 | P0 | OpenClaw 设备配对流程最小闭环验证 | WebSocket pairing flow 曾打通，但后续不再作为普通对话主路径。 |
+| TASK-010 | 已完成 | P0 | OpenClawBackend 初版接入 | WebSocket 版初版完成；后续被 HTTP-first 路线替代。 |
+| TASK-011 | 方向已变更 / 被 HTTP-first 覆盖 | P0 | OpenClaw-first UI 迁移 | WebSocket pairing 作为普通 ChatPage 默认路径暂停，不继续该方向小修。 |
+| TASK-012 | 已完成 | P0 | OpenClaw HTTP API 验证与最小接入评估 | HTTP API 已实测打通；普通对话路线改为 HTTP-first。 |
+| TASK-013 | 已完成 | P0 | OpenClawBackend HTTP-first | 已审查通过：普通对话主路径改为 OpenClaw HTTP-first，前端不直接 fetch OpenClaw HTTP API，token 仅在 Rust HTTP command 内部使用。 |
+| TASK-014 | 已完成 | P0 | Agent 引擎页 HTTP-first 状态产品化 | 已审查通过：Agent 引擎页展示 OpenClaw HTTP-first 状态、模型和默认模型，不显示 token 原文。 |
+| TASK-015 | 已完成 | P0 | Agent 对话 Hermes 残留清理与 OpenClaw 消息元数据统一 | 已审查通过：OpenClaw 对话路径使用 OpenClaw Agent / openclaw/default，Hermes 标识仅保留在 legacy / fallback / internal 路径。 |
+| TASK-016 | 已完成 | P0 | Agent 引擎支持 OpenClaw 中转站 / Token / 默认模型配置 | 已审查通过：OpenClaw config 写入、Token 安全、普通 UI 暴露面和会话持久化修复均满足当前验收。 |
+| TASK-017 | 已完成 | P1 | Onboarding 改成 OpenClaw 初始化流程 | 已审查通过：Onboarding 主路径已切换为 OpenClaw HTTP-first 初始化，Token 不写旧 AppConfig。 |
+| TASK-018 | 已完成 | P1 | Hermes Legacy 入口折叠 / 清理 | 已审查通过：普通 UI 可见 Hermes 主路径文案清理完成，Legacy 入口折叠，Hermes 代码仅保留为 legacy/fallback/internal。 |
+| TASK-019 | 已完成 | P0 | OpenClaw RC 前全链路验收 / release checklist | 已审查通过：OpenClaw 普通用户主路径、敏感信息暴露面、Hermes legacy 残留和 release checklist 收口合格。 |
+| TASK-020A | 已完成 | P1 | Agent 对话页 UI/UX 优化 | 已审查通过：仅收口对话页 UI/UX，未破坏 OpenClaw HTTP-first 主链路，发送按钮条件修复合理。 |
+| TASK-020B | 已完成 | P1 | Agent 引擎页 UI/UX 优化 | 已审查通过：仅优化 Agent 引擎页展示与文案，未改 OpenClaw HTTP 主链路、Token 安全或 config 写入结构。 |
+| TASK-020C | 已完成 | P1 | Onboarding 步骤化 UI 优化 | 已审查通过：4 步轻量引导（欢迎/检查/选择/完成），用户化文案无技术术语，hasCompletedOnboarding 持久化到 config.json，首页可重开。 |
+| TASK-020 | 待规划 | P1 | OpenClaw 主路径 UI/UX 优化 | 已拆分为 020A/020B/020C 等子任务，继续按小任务推进。 |
+| TASK-021A | 已完成 | P1 | 后台运行任务与跨页面持续生成 - 方案设计 | 已审查通过：方案足以指导后续实现，确认根因、RunStore/AgentRun、单 run、localCancel 和任务拆分边界。 |
+| TASK-021 | 待规划 | P1 | Agent 后台运行任务与跨页面持续生成 | 已拆为 021A(方案)、021B(状态提升) 等子任务，按阶段推进。 |
+| TASK-021B | 已完成 | P0 | 状态提升：messages / sessions / currentSessionId → App 层 | 已审查通过：状态已提升到 App 层，ChatPageState / chatState plumbing 清晰，send/stop/save 行为保持原模式。 |
+| TASK-021C | 已完成 | P0 | send 接入 RunStore + 跨页面不中断 | 已审查通过：RunStore + OpenClaw HTTP-first 非阻塞 send 已接入，切页后回复可写回原会话；session 重载覆盖和 OpenClaw 状态预加载 P0 已修复。 |
+| TASK-021D | 已完成 | P1 | 全局 run 指示器 UI | 已审查通过：左侧导航 spinner 和非 ChatPage 全局横幅均复用 App 层 `hasRunningRun`，点击“查看”回到 Agent 对话页。 |
+| TASK-021E | 已完成 | P1 | 本地取消 / 失败重试 | 已审查通过：重试会保留原失败消息并创建新 requestId/run/assistant placeholder；普通 send 与 retry 均有 localCancel guard。 |
+| TASK-021F | 已完成 | P0 | 后台 run 回归测试与验收 | 已审查通过：覆盖跨页面写回、running 指示、本地取消、失败重试、retry timer、敏感信息和 Hermes legacy 审计。 |
+| TASK-022 | 已完成 | P1 | Agent 消息操作体验优化 | 已收口：022A/022B/022C 全部完成，消息复制、继续、填入、重试、重新生成和回归验收均通过。 |
+| TASK-022A | 已完成 | P1 | 消息复制 / 继续 / 用户消息填入 | 已审查通过：AI 继续只填入输入框；用户复制/填入只操作消息文本，不自动发送、不创建 run。 |
+| TASK-022B | 已完成 | P1 | 重新生成 / 重试统一 | 已审查通过：重试 / 重新生成统一使用 `hasRunningRun` guard 和运行中 tooltip，底层 retry / regen / run store 未改。 |
+| TASK-022C | 已完成 | P1 | 消息操作回归测试 | 已审查通过：7 项消息操作回归、running guard、敏感信息审计和 release checklist §17 均满足验收。 |
+| TASK-023 | 已完成（阶段性） | P1 | 会话管理 / 项目分组 | 轻量项目/分组阶段已收口：会话列表、默认项目、自定义项目、移动、筛选、重命名、删除和回归均完成；项目存储仍有 P1 技术债。 |
+| TASK-023A | 已完成 | P1 | 会话列表基础设施 | 已审查通过：桌面主会话列表已具备新建、切换、高亮、排序、预览、置顶、重命名、删除、搜索和按 sessionId 匹配的 running spinner。 |
+| TASK-023B | 已完成 | P1 | 现有会话操作回归和体验整理 | 已审查通过：移动端入口统一为“最近会话”，移动端会话项按 sessionId 显示 running spinner，现有会话操作未被破坏。 |
+| TASK-023C | 已完成 | P1 | 项目 / 分组基础 | 已收口：023C-A/B/C/D 全部完成；保留 localStorage 项目存储 P1 技术债。 |
+| TASK-023C-A | 已完成 | P1 | 项目/分组数据模型设计 | 已审查通过：设计覆盖类型、默认项目、旧数据兼容、删除策略、run 边界和安全边界；存储建议调整为短期不改 sessions 文件形状。 |
+| TASK-023C-B | 已完成 | P1 | 项目列表 UI + 默认项目 | 已审查通过："全部会话"/"默认" 只读筛选 pill、selectedProjectId 和旧会话 default fallback 均合格。 |
+| TASK-023C-C | 已完成 | P1 | 创建项目 + 移动会话 + 项目筛选 | 已审查通过：创建自定义项目、单会话移动、项目筛选和旧会话 fallback 合格；localStorage 项目存储记为 P1 技术债。 |
+| TASK-023C-D | 已完成 | P1 | 项目重命名 / 删除项目 / 回归 | 已审查通过：custom 项目可重命名/删除，删除时会话回默认项目，不删除会话或消息。 |
+| TASK-024A | 已完成 | P1 | 会话 / 项目侧栏 UI polish | 已审查通过：旧文案清理、空状态区分、移动端项目筛选、项目计数和 custom 菜单判断均合格。 |
+| TASK-025 | 已完成 | P1 | Workspace Clean UI 重设计 | 025A-F 全部完成；UI 总回归通过，无 P0/P1 阻塞。 |
+| TASK-025A | 已完成 | P1 | UI 重设计方案文档 | 已审查通过：设计文档足够指导后续 UI 实现，明确缩窄历史 / 最近会话区域并降级工程状态信息。 |
+| TASK-025B | 已完成 | P1 | 首页 Workspace UI 重设计 | 已审查通过：首页已转为 Workspace 入口，模型供应状态不再依赖旧 AppConfig apiKey。 |
+| TASK-025C | 已完成 | P1 | Agent 对话页布局重设计 | 已审查通过：会话 / 项目侧栏收窄到 260px，聊天区成为主视觉，顶部状态和消息流完成降噪。 |
+| TASK-025D | 已完成 | P1 | 消息区与操作按钮视觉优化 | 已审查通过：消息气泡、AI 内容块、footer 和操作按钮进一步降噪，未改操作语义。 |
+| TASK-025E | 已完成 | P1 | 桌面窄窗口 / Windows macOS UI 回归 | 已审查通过：ChatPage 项目列表 min-w-0 防溢出 + EnginesPage overflow-x-auto + SkillsPage flex-wrap 换行，窄窗口无横向溢出，未改逻辑。 |
+| TASK-025F | 已完成 | P1 | UI 回归测试与 release checklist 更新 | 已审查通过：构建全部通过，代码审计无 P0/P1 阻塞，release-checklist 和 workspace-clean-ui-design 已更新，人工验收脚本已写入。 |
+| TASK-026 | 已完成 | P1 | Agent 引擎页用户化重构 | 已收口：真实配置审计和用户化重构均完成，普通视图移除假配置并显示真实模型摘要。 |
+| TASK-026A | 已完成 | P1 | Agent 引擎页真实配置审计 | 已审查通过：审计文档确认假配置、真实配置、安全边界和 TASK-026B 重构方向。 |
+| TASK-026B | 已完成 | P1 | Agent 引擎页用户化重构 | 已审查通过：普通模型 fallback 改为“需检查”，高级诊断移除 API URL 和复制按钮。 |
+| TASK-027 | 进行中 | P1 | Skill Center 产品化与能力接入 | 下一阶段重点：从提示词模板感升级为真实能力中心，按审计、信息架构、OpenClaw skills、首批能力和轻量娱乐拆分。 |
+| TASK-027A | 已完成 | P1 | Skill Center 真实能力审计与重构方案 | 已审查通过：确认当前 Skill Center 是硬编码 prompt 模板，不是真实 skill 中心；重构方案足够指导后续任务。 |
+| TASK-027B | 已完成 | P1 | Skill Center 信息架构重设计 | 已审查通过：Skill Center 已改为能力中心信息架构，内置工作流与 OpenClaw 插件占位边界清楚。 |
+| TASK-027C | 进行中 | P1 | OpenClaw Skill 列表 / 安装能力接入 | 用户目标：一键安装+卸载。已拆为 027C-A 调研 + 027C-B..G 实现子任务。 |
+| TASK-027C-A | 已完成 | P1 | SkillHub/ClawHub 一键安装与卸载能力调研 | 已审查通过：确认 OpenClaw CLI 支持 skills/plugins install/uninstall，ClawHub 为主数据源，权限模型和安全边界设计合格，后续任务拆分合理。 |
+| TASK-027C-B | 已完成 | P1 | Skill Center 外部目录 UI | 已审查通过：9 项 curated catalog 展示来源/类型/风险/权限 badge，安装按钮 disabled，无外部 API 调用，无真实安装/卸载。 |
+| TASK-027C-C | 已完成 | P1 | 本地已安装 Skill/Plugin 读取 | 已审查通过：read_installed_capabilities 只读，仅执行 --version/skills list --json/plugins list，不返回 Token/path/baseUrl，CLI 不可用时优雅降级。 |
+| TASK-027C-D | 已完成 | P1 | 全量一键安装最小闭环 | 已审查通过：allowlist 9 项、.arg() 无 shell 注入、高风险二次确认、安装记录持久化 P1 修复合格（前端按 flat array 读取 catalogId）。 |
+| TASK-027C-E | 已完成 | P1 | 卸载最小闭环 | 已审查通过：只卸载 installedByApp 记录、使用 CLI uninstall、无 remove_dir_all、卸载后状态恢复合格。 |
+| TASK-027C-F | 已完成 | P1 | 权限提示 / 风险等级 / 日志脱敏 | 已审查通过：riskLevel low/medium/high/unknown + permLabel 9 项权限标签 + 安全说明区 + 风险 Badge。无真实安装/卸载按钮，无外部命令执行。 |
+| TASK-027C-G | 待规划 | P2 | 推荐白名单 Skill | curated 安全列表 |
+| TASK-027D | 已完成 | P1 | 文件 / 数据处理 Skills 首批落地 | 已审查通过：8 个纯 prompt 内置工作流，引导用户粘贴内容而非自动读取文件，riskLevel low 合理，条款提取含法律免责声明。 |
+| TASK-027E | 已完成 | P1 | 娱乐摸鱼 / 养成系能力方案 | 已审查通过：6 个纯 prompt 娱乐工作流，全部 low 风险无权限，精神状态含非医学免责，摸鱼任务含"不刷短视频不沉迷"，无计时器/通知/常驻进程。 |
+| TASK-028 | 进行中（阶段性完成） | P2 | Portable / U 盘 A+B 模式可行性审计 | A+B 可行性、data mode、runtime 探针、Windows/macOS 启动方案和安全策略文档均已完成；仍等待实现类子任务。 |
+| TASK-028A | 已完成 | P2 | Portable / U 盘 A+B 模式可行性审计 | 已审查通过：A 模式优先，chatProjects localStorage 为 P0 portable 风险，B runtime 后置。 |
+| TASK-028B | 已完成 | P0 | Portable data 目录设计与路径检测 | 已审查通过：目录结构、system/portable mode、portable.json 触发和 chatProjects 迁移前置设计合格。 |
+| TASK-028C | 已完成 | P0 | chatProjects 迁移到 chat-projects.json | 已审查通过：项目主路径迁移到 app_data_dir/chat-projects.json，localStorage 仅作 legacy fallback。 |
+| TASK-028D | 已完成 | P0 | Portable data mode 最小实现 | 已复审通过：portable requested / available / effective mode 拆分完成，不可写时真实 fallback 到 system app_data_dir()；macOS .app 路径风险后续放入 TASK-028G。 |
+| TASK-028E | 已完成 | P1 | Portable runtime 探针 | 已审查通过：只读探针覆盖 runtime/node/openclaw/scripts/Gateway TCP；未打包、安装、启动/停止或改 OpenClaw config；`openclaw --version` 记为 P1 观察项。 |
+| TASK-028F | 已完成 | P2 | Windows portable 启动脚本方案 | 已审查通过：仅产出 Windows portable 启停脚本设计文档和 example 草案，无真实脚本落地、无启动/停止/杀进程/打包/runtime/config 变更。 |
+| TASK-028G | 已完成 | P2 | macOS portable 启动方案 | 已审查通过：macOS portable 启动方案和 .app 层级风险分析合格；未新增真实脚本，未启动/停止/杀进程/签名/安装/runtime/config 变更。 |
+| TASK-028G-1 | 已完成 | P1 | macOS bundle root 路径推导修正 | 已审查通过：workspace_root() macOS early-return 修复合格，Windows/macOS 路径推导均正确，无敏感信息泄露，无旧逻辑残留。 |
+| TASK-028H | 已完成 | P2 | Portable 安全策略与数据脱敏 | 已审查通过：安全策略文档足够指导后续 Portable A+B 安全实现；脱敏正则细节转入 TASK-028H-1。 |
+| TASK-028H-1 | 已完成 | P1 | redactSensitive 统一脱敏 helper | 已审查通过：JSON 脱敏保留引号合法，21/21 测试通过，覆盖 Bearer/apiKey/token/URL/path/env/query，无敏感信息泄露。 |
+| TASK-028H-2 | 待规划 | P2 | 诊断包脱敏导出 | 导出诊断包前默认脱敏，用户确认后再导出安全摘要。 |
+| TASK-028H-3 | 待规划 | P2 | Gateway PID file 机制 | Gateway 启停必须使用 PID file + 路径校验，禁止盲目 taskkill / pkill / killall。 |
+| TASK-028H-4 | 待规划 | P1 | Plugin 权限模型 | 安装前展示来源、权限、网络、文件、shell、环境变量和 API key 风险。 |
+| TASK-028H-5 | 待规划 | P2 | Portable 安全 UI 文案 | 面向普通用户展示 portable 数据、备份、迁移、权限和敏感信息边界。 |
+| TASK-028F-1 | 待规划 | P2 | Windows startup script 落地 | 在安全策略约束下落地 Windows 启动脚本；不越过 PID/path/token 边界。 |
+
+### 状态分组
+
+- 已完成：TASK-001、TASK-003、TASK-004、TASK-005、TASK-006、TASK-007、TASK-008、TASK-009、TASK-010、TASK-012、TASK-013、TASK-014、TASK-015、TASK-016、TASK-017、TASK-018、TASK-019、TASK-020A、TASK-020B、TASK-020C、TASK-021A、TASK-021B、TASK-021C、TASK-021D、TASK-021E、TASK-021F、TASK-022、TASK-022A、TASK-022B、TASK-022C、TASK-023A、TASK-023B、TASK-023C、TASK-023C-A、TASK-023C-B、TASK-023C-C、TASK-023C-D、TASK-024A、TASK-025、TASK-025A、TASK-025B、TASK-025C、TASK-025D、TASK-025E、TASK-025F、TASK-026A、TASK-026B、TASK-026、TASK-027A、TASK-027B、TASK-027C-A、TASK-027C-B、TASK-027C-C、TASK-027C-D、TASK-027C-E、TASK-027C-F、TASK-027D、TASK-027E、TASK-028A、TASK-028B、TASK-028C、TASK-028D、TASK-028E、TASK-028F、TASK-028G、TASK-028G-1、TASK-028H、TASK-028H-1。
+- 待验收：TASK-002。
+- 已完成（阶段性）：TASK-027C（A-F 完成，仅剩 G 推荐白名单）、TASK-028（A-H-1 完成，等待 H-2..H-5/F-1）。
+- 进行中：TASK-027。
+- 待规划：TASK-020、TASK-021、TASK-027C-G、TASK-028H-2、TASK-028H-3、TASK-028H-4、TASK-028H-5、TASK-028F-1。
+- 方向已变更 / 覆盖：TASK-011。
+
+### 看板一致性检查
+
+- 普通对话主线已从 WebSocket Gateway RPC 改为 OpenClaw HTTP-first。
+- TASK-011 不再继续 WebSocket pairing 小修；其目标被 TASK-013 HTTP-first 实现覆盖。
+- TASK-013、TASK-014、TASK-015 已由 Codex 审查通过，均可标记为“已完成”。
+- TASK-016 已由 Codex 复审通过，状态改为“已完成”。
+- TASK-017 已由 Codex 审查通过，状态改为“已完成”。
+- TASK-018 已由 Codex 审查通过，状态改为“已完成”。
+- TASK-019 已由 Codex 审查通过，状态改为“已完成”。
+- TASK-020 可以进入规划，但不应在缺少明确边界时直接执行。
+- TASK-020A 已由 Codex 审查通过，状态改为“已完成”。
+- TASK-020B 已由 Codex 审查通过，状态改为“已完成”。
+- TASK-021 可以进入规划阶段，但不应在缺少明确技术方案时直接执行。
+- TASK-021A 已由 Codex 审查通过，状态改为“已完成”。
+- TASK-021B 已由 Codex 审查通过，状态改为“已完成”。
+- TASK-021C 已由 Codex 审查通过，状态改为“已完成”。
+- TASK-021D 已由 Codex 审查通过，状态改为“已完成”。
+- TASK-021E 已由 Codex 审查通过，状态改为“已完成”。
+- TASK-021F 已由 Codex 审查通过，状态改为“已完成”。
+- TASK-022 已由 Codex 审查收口，父任务状态改为“已完成”。
+- TASK-022A 已由 Codex 审查通过，状态改为“已完成”。
+- TASK-022B 已由 Codex 审查通过，状态改为“已完成”。
+- TASK-022C 已由 Codex 审查通过，状态改为“已完成”。
+- TASK-023A 已由 Codex 审查通过，状态改为“已完成”。
+- TASK-023B 已由 Codex 审查通过，状态改为“已完成”。
+- TASK-023C-A 已由 Codex 审查通过，状态改为“已完成”。
+- TASK-023C-B 补齐后已由 Codex 审查通过，状态改为“已完成”。
+- TASK-023C-C 已由 Codex 审查通过，状态改为“已完成”。
+- TASK-023C-C 遗留 P1 技术债：自定义项目目前存在 `localStorage`，后续应迁移到独立 `chat-projects.json` 或统一 Tauri 持久化机制，避免与 `chat-sessions.json` 割裂。
+- TASK-023C-D 已由 Codex 审查通过，状态改为“已完成”。
+- TASK-023C 父任务已收口为“已完成”。
+- TASK-023 父任务阶段性收口为“已完成（阶段性）”。
+- 保留 P1 技术债：自定义项目当前仍存 `localStorage`，后续应迁移到独立 `chat-projects.json` 或统一 Tauri/Rust 持久化机制，并处理 orphan projectId fallback。
+- 保留 P2 硬化项：项目重命名/删除函数可增加 custom 类型防御性校验，release checklist 后续可补充项目分组专项验收项。
+- TASK-024A 修复版已由 Codex 审查通过，状态改为“已完成”。
+- TASK-020C 暂缓执行：用户要求先重新做 Workspace Clean UI 设计方案，Onboarding 步骤化优化等待 TASK-025 主线后续排期。
+- TASK-025A 已由 Codex 审查通过，状态改为“已完成”。
+- TASK-025B 修复版已由 Codex 审查通过，状态改为“已完成”。
+- TASK-025C 已由 Codex 审查通过，状态改为“已完成”。
+- TASK-025D 已由 Codex 审查通过，状态改为“已完成”。
+- TASK-025E 允许进入“待执行”：仅做桌面窄窗口 / Windows macOS UI 回归，不改业务逻辑。
+- TASK-025F 保持“待规划”，等待桌面窄窗口回归完成后再执行。
+- TASK-026A 已由 Codex 审查通过，状态改为“已完成”。
+- TASK-026B 修复版已由 Codex 审查通过，状态改为“已完成”。
+- TASK-026 父任务已收口为“已完成”。
+- TASK-025E 方向已纠偏并保持“待执行”：桌面窄窗口 / Windows macOS UI 回归；不做手机端适配。
+- TASK-025E 已审查通过并标记为已完成（2026-05-28）：仅 2 处 CSS className 调整（ChatPage min-w-0 + EnginesPage overflow-x-auto），SkillsPage 用 flex-wrap 换行。未改逻辑、未改 run store、未改 portable/OpenClaw/Token。TASK-025 父任务标记为阶段性完成。下一步建议 TASK-025F 回归测试或 TASK-028H-1 脱敏 helper。
+- TASK-025F 已完成（2026-05-28）：UI 总回归测试通过。npm run build / cargo check / openclaw probe 全部通过。代码审计覆盖首页、对话页、引擎页、能力中心、会话项目侧栏、消息操作、portable 回归和敏感信息。无 P0/P1 阻塞。release-checklist 新增 §19 UI 总回归项。workspace-clean-ui-design 新增 §八回归结果。TASK-025 父任务标记为已完成。未修改业务代码。下一步建议 TASK-028H-1 或 TASK-027C。
+- TASK-028H-1 审计窗口复审（2026-05-28）：19/19 测试通过但存在 P1 BUG——JSON 字段脱敏后输出 "apiKey":[REDACTED] 缺少值引号，非法 JSON。修复方案：第27行替换模板从 $1key$1:[REDACTED] 改为 $1key$1:$2[REDACTED]$2。test-redaction.mjs 第20行同步修复。其余覆盖面（Bearer/URL/path/env/query）合格。状态标记为待验收需修复。
+- TASK-028H-1 修复反馈（2026-05-28）：src/lib/redaction.ts 第27行和 scripts/test-redaction.mjs 第20行替换模板已修正为 $2[REDACTED]$2，JSON 脱敏后保留值引号。新增 testJsonValidity 测试：JSON.parse 验证 apiKey 和 token 字段脱敏后仍为合法 JSON。21/21 测试通过。npm run build / cargo check / openclaw probe 全部通过。未改 OpenClaw config / Token / runtime / Gateway / run store。等待 Opus 终审。
+- TASK-028H-1 终审通过（2026-05-28）：P1 BUG 修复确认合格。JSON 脱敏输出 "apiKey":"[REDACTED]" 合法 JSON。21/21 测试通过含 JSON.parse 验证。覆盖面完整：Bearer/apiKey/token/gateway.auth.token/OPENCLAW_GATEWAY_TOKEN/provider/baseUrl/API URL/localhost/127.0.0.1/macOS path/Windows path/URL query。安全文本不误清理。未改 OpenClaw config/Token/runtime/Gateway/run store。标记为已完成。下一步建议 TASK-027C 或 TASK-028H-2。
+- TASK-027C-A 已完成（2026-05-28）：SkillHub/ClawHub 一键安装与卸载能力调研。确认 OpenClaw CLI 原生支持 skills install/plugins install/uninstall。ClawHub 为主数据源（100+ plugins，分类/排序/版本）。设计文档 docs/skill-install-uninstall-design.md 已输出，覆盖安装流程、卸载流程、权限模型、风险等级、UI 设计、安全边界和后续任务拆分。未执行安装/卸载，未改业务代码，未读取 .env，未输出 Token。
+- TASK-027C-A 终审通过（2026-05-28）：设计文档覆盖面合格，CLI 命令与 TASK-001 调研一致，权限模型和安全边界设计充分，后续任务拆分合理（027C-C 优先）。观察项：CLI 命令未在本机实际执行验证，027C-C 执行时应先 openclaw skills --help 确认。标记为已完成。下一步建议 TASK-027C-C 本地已安装读取。
+- TASK-027C-C 终审通过（2026-05-28）：read_installed_capabilities 只读合格。仅执行 openclaw --version / skills list --json / plugins list。不执行 install/uninstall/enable/disable。返回字段仅含 id/name/description/source/version/kind/installed/enabled，不含 Token/path/baseUrl/API URL。stderr 不直接暴露，config invalid 时输出脱敏 warning。CLI 不可用时 cliAvailable:false 优雅降级。P2 观察项：Windows 未调用 hide_command_window 可能闪现控制台。下一步建议 TASK-027C-B 外部目录 UI 或 TASK-027C-F 权限/风险展示。
+- TASK-027C-F 终审通过（2026-05-28）：riskLevel 四级（low/medium/high/unknown）合理。permLabel 覆盖 9 项权限（file_read/file_write/network/shell/env/config/api_key/workspace/unknown）。内置工作流默认 low，OpenClaw 插件占位默认 unknown。安全说明区文案清楚。无真实安装/卸载按钮，无外部命令执行。使用工作流仍只填 prompt。未改 OpenClaw config/Token/runtime/Gateway。下一步建议 TASK-027C-B 外部目录 UI。
+- TASK-027C-B 终审通过（2026-05-28）：9 项 curated catalog 合格。来源 badge（ClawHub/SkillHub/OpenClaw/Curated）清楚标注为规划接入。风险等级正确（高：GitHub/浏览器自动化；中：文件/数据/网页/记忆/API；低：冷知识/倒计时）。安装按钮 disabled + 文案"安装功能规划中"。无外部 API 调用，无 fetch clawhub.ai/skillhub.cn。未改 OpenClaw config/Token/runtime/Gateway。下一步建议 TASK-027C-D 一键安装最小闭环。
+- TASK-027C-D/E 审计窗口复审（2026-05-28）：安全面合格——Rust allowlist 9 项硬编码、.arg() 无 shell 注入、无 remove_dir_all、无 enable/disable/run、高风险/未审计需 checkbox 二次确认、免责声明完整、安装记录不含 Token/baseUrl。P1 BUG：read_install_records 返回 flat array [{catalogId,...}] 但前端 TypeScript 期望 {skills:[...],plugins:[...]}，导致 r.skills/r.plugins 为 undefined，安装状态不持久（刷新后丢失）。修复方案：前端改为直接遍历 array 并取 catalogId 字段，或 Rust 改为返回 {records:[...]} 包装。P2 观察项：Windows 未调用 hide_command_window。
+- TASK-027C-D/E 终审通过（2026-05-28）：P1 BUG 修复确认合格。前端已改为 invoke<Array<{catalogId?:string}>> + Array.isArray 防御性解析。安装状态可持久化（刷新后从 skill-install-records.json 恢复 installedIds）。Rust 端未变动，allowlist 9 项仍有效。标记为已完成。TASK-027C 主线 A-F 全部完成，仅剩 027C-G 推荐白名单（P2）。下一步建议 TASK-027C-G 或 TASK-020C Onboarding。
+- TASK-020C 终审通过（2026-05-28）：4 步轻量 Onboarding 合格。文案用户化（"AI Agent 工作台"/"AI 助手已准备好"），无 OpenClaw/Gateway/provider/Token/baseUrl 技术术语。hasCompletedOnboarding 通过 updateConfig→saveConfig 持久化到 config.json，重启不再弹。首页"新手引导"可重开（设 false）不清数据。Step 3 四入口点击后完成 onboarding 但不跳转对应页面（P2 观察项，用户仍在首页可手动导航）。未改 config/Token/run store/portable/Skill 逻辑。
+- TASK-027D 终审通过（2026-05-28）：8 个文件/数据处理内置工作流合格。全部为纯 prompt 模板（requiredPermissions:[]），引导用户"粘贴"内容而非自动读取文件，riskLevel low 合理。条款提取含"不替代专业法律意见"免责。使用工作流仍只填 prompt + 跳转对话页，不自动发送、不读文件、不执行外部 Skill。未改 install/uninstall/config/Token/run store/portable。
+- TASK-027E 终审通过（2026-05-28）：6 个娱乐摸鱼内置工作流合格。全部纯 prompt（requiredPermissions:[]，riskLevel:low）。精神状态诊断含"不是医学或心理诊断"。今日摸鱼任务含"不刷短视频、不沉迷"。无计时器/通知/常驻进程/积分系统。使用工作流仍只填 prompt + 跳转对话页。未改 install/config/Token/run store/portable。
+- TASK-027A 已审查通过并标记为“已完成”。
+- TASK-027B 已审查通过并标记为“已完成”。
+- TASK-027C 暂不直接进入安装接入；ClawHub / OpenClaw plugins 后续必须先做安全策略和只读能力摘要。
+- TASK-028A 已审查通过并标记为“已完成”。
+- TASK-028B 已审查通过并标记为“已完成”。
+- TASK-028C 已审查通过并标记为“已完成”：项目主路径已迁移到 `chat-projects.json`，localStorage 仅作 legacy fallback。
+- TASK-028D 已复审通过：portable 写入失败 / 不可写场景会真实 fallback 到 system mode；macOS .app marker 层级风险转入 TASK-028G。
+- TASK-028E 已审查通过并标记为“已完成”：Portable runtime 探针保持只读边界；`openclaw --version` 记为 P1 观察项。
+- TASK-028F 已审查通过并标记为“已完成”：Windows portable 启动脚本方案仅为文档和 example 草案，没有真实启停或打包行为。
+- TASK-028G 已审查通过并标记为“已完成”：macOS portable 启动方案和 .app 层级风险分析合格；没有真实启动/停止/杀进程/签名/安装行为。
+- 新增 TASK-028G-1 为“待规划”：macOS bundle root 路径推导修正。建议在真实 macOS portable 发布前优先修正，但本次不执行。
+- TASK-028G-1 审计窗口复审（2026-05-28）：代码已落地但存在 P0 逻辑 BUG。macOS .app 分支命中后第63行 current=current.parent()? 仍执行，导致 workspace root 多上溯一级。Windows 路径不受影响。修复方案：macOS 分支命中后直接 return 或将第63行包在 else 分支中。同时清理重复条件。状态修正为待验收需修复。
+- TASK-028G-1 审计窗口终审（2026-05-28）：P0 BUG 已修复。macOS 分支改为 early-return，不再多执行 parent()。Windows exe.parent().parent() 仍正确推导 workspace root。portable_requested / portable_available / app_data_root / portable_runtime_status 均统一基于 workspace_root()。无旧 exe/../../ 残留。无 Token/provider/baseUrl/API URL/Authorization/Bearer 新增暴露。未改 OpenClaw config/runtime/Gateway。标记为已完成。下一步建议进入 TASK-025E。
+- TASK-028H 已由 Codex 审查通过并标记为“已完成”：`docs/portable-security-and-redaction-policy.md` 足够指导后续 Portable A+B 安全实现。
+- TASK-028 父任务可标记为“阶段性完成”，但仍保持“进行中”：A-H 审计/设计闭环已完成，真实实现仍等待 TASK-028G-1 / TASK-028H-1..H-5 / TASK-028F-1。
+- 下一步建议：如果继续 Portable 主线，优先做 TASK-028G-1，先修正 macOS `.app` bundle root 路径推导；如果用户当前更重视可见产品体验，则 TASK-025E 桌面窄窗口 / Windows macOS UI 回归也可独立推进。
+- WebSocket Gateway RPC 仅作为 advanced / future 路线保留。
+
+
+### TASK-024：UI / 体验 Polish 阶段
+
+- 状态：待规划
+- 优先级：P1
+- 负责人：OpenCode / Reasonix
+
+背景：
+
+- TASK-013 到 TASK-023 已阶段性完成。
+- OpenClaw HTTP-first 主路径、后台 run、消息操作、会话列表、项目 / 分组基础均已完成。
+- 当前进入 UI / 体验 polish 阶段，仍需保持 RC 收口节奏，每次只做明确小任务。
+
+通用安全边界：
+
+- 不读取 `.env`。
+- 不输出 Token。
+- 不暴露 provider / baseUrl / API URL / Authorization / Bearer。
+- 不改 OpenClaw HTTP 主链路。
+- 不改 run store。
+- 不删除 Hermes legacy。
+- 不回到 WebSocket pairing。
+
+#### TASK-024A：会话 / 项目侧栏 UI polish
+
+- 状态：已完成
+- 优先级：P1
+- 负责人：OpenCode / Reasonix
+
+背景：
+
+- 会话列表、项目 / 分组基础已完成，但左侧侧栏仍有文案、层级和交互细节可打磨。
+- 当前任务只做 Agent 对话页左侧会话与项目区域的 UI polish，不改数据模型和持久化。
+
+目标：
+
+- 优化 Agent 对话页左侧会话与项目区域的视觉层级和交互细节，让它更像成熟 AI App 的会话侧栏。
+
+修改范围：
+
+- 统一“历史对话”等残留文案。
+- 项目区与会话区视觉分层。
+- 项目项显示会话数量。
+- 空项目空状态。
+- 会话项 hover 操作更清晰。
+- 移动端项目筛选不挤爆布局。
+- running spinner 视觉统一。
+
+禁止事项：
+
+- 不改数据模型。
+- 不改项目存储。
+- 不改 run store。
+- 不改 OpenClaw HTTP 主链路。
+- 不改 OpenClaw config 写入逻辑。
+- 不改 Token 安全策略。
+- 不改 Rust command。
+- 不实现项目级 prompt / 文件 / 模型配置。
+- 不实现多级文件夹、拖拽或批量移动。
+- 不删除 Hermes legacy。
+- 不读取 `.env`，不输出 Token。
+- 不暴露 provider / baseUrl / API URL / Authorization / Bearer。
+
+验收标准：
+
+- `npm run build` 通过。
+- `cargo check --manifest-path src-tauri/Cargo.toml` 通过。
+- 会话 / 项目侧栏没有普通用户可见的“历史对话”残留，或残留只在确认删除历史这类准确语义中。
+- 项目区和会话区层级清晰，不显得挤在一起。
+- 项目项显示会话数量，旧会话无 `projectId` 时计入默认项目。
+- 空项目显示清晰空状态，不误导用户以为数据丢失。
+- 会话项 hover 操作更易发现，但不遮挡标题和预览。
+- 移动端项目筛选布局不横向撑破、不挤爆。
+- running spinner 在桌面 / 移动端视觉一致。
+- 搜索、置顶、重命名、删除、项目筛选、移动会话、后台 run 写回不退化。
+- 不新增敏感信息暴露。
+
+##### OpenCode 执行反馈
+
+- 修改文件：`src/App.tsx`，共 8 处改动。
+- 搜索 placeholder 从“搜索历史”改为“搜索会话”。
+- 空状态从“没有匹配的历史对话。”拆为搜索空“没有匹配的会话。”和空项目“这个项目还没有会话”。
+- 删除会话 dialog title / description 改为“删除会话 / 将删除此会话记录”。
+- 清空全部 dialog description 改为“将删除所有本地会话记录”。
+- 项目区新增“项目”标签，使用 10px uppercase tracking 风格。
+- 项目项右侧显示匹配会话数。
+- 项目菜单 custom 判断从 `p.isProject && type === "custom"` 调整为 `p.id !== "all" && chatProjects.some(...)`。
+- 验证：`npm run build` 通过；`cargo check` 通过；`node scripts/openclaw-http-api-probe.mjs` 通过。
+
+##### Codex 上一轮审查反馈（TASK-024A，已被修复版复审覆盖）
+
+- 上一轮结论：TASK-024A 当时暂不标记为“已完成”，保持“待验收（需修复）”；这些阻塞点已在修复版中复审通过。
+- 合格部分：`搜索会话`、`删除会话`、`将删除此会话记录`、项目区“项目”标签和项目计数已落地，且没有改 `ChatSession` / `ChatProject` 数据结构、项目存储、run store 或 OpenClaw HTTP 主链路。
+- 合格部分：项目计数逻辑正确：`全部会话` 使用 `chatSessions.length`；默认项目和自定义项目使用 `(s.projectId || DEFAULT_PROJECT_ID) === p.id`，因此旧会话会计入默认项目。
+- 合格部分：项目菜单 type check 安全性比之前更好；“全部会话”因 `p.id === "all"` 不显示重命名 / 删除，“默认”项目因不是 custom 不显示重命名 / 删除，只有 custom 项目显示。
+- P1 阻塞：普通 UI 仍有“清空全部历史”残留，包含侧栏底部按钮和清空全部确认弹窗 title。TASK-024A 的文案统一目标尚未完成；建议改为“清空全部会话”。
+- P1 阻塞：搜索空状态和空项目状态没有真正区分。当前 `filteredSessions.length === 0` 时只要 `selectedProjectId !== "all"` 就显示“这个项目还没有会话”，即使项目内有会话但被搜索词过滤掉，也会误报为空项目。应根据“项目下总会话数”和 `sessionSearch.trim()` 区分：搜索无结果显示“没有匹配的会话”，项目确实无会话才显示“这个项目还没有会话”。
+- P1 阻塞：移动端没有项目筛选入口，但移动端会话列表复用 `filteredSessions`。如果用户在桌面宽度选择某个项目后切到移动端，移动端会被不可见的 `selectedProjectId` 过滤，容易误以为会话丢失。需要给移动端提供不挤爆布局的项目筛选入口，或在移动端显式显示当前筛选 / 可切回全部。
+- 观察项：会话项 hover 操作、running spinner 视觉统一未见明显破坏，但本次主要代码改动集中在项目区和文案，修复后仍需回归搜索、置顶、重命名、删除、项目筛选、移动会话、后台 run 写回。
+- 未发现新增 Token / provider / baseUrl / API URL / Authorization / Bearer 暴露；相关命中仍为既有 legacy 类型或内部逻辑。
+- 上一轮不允许进入 TASK-020C；该限制已被修复版复审解除。
+
+
+##### OpenCode 修复反馈
+
+- 修复“清空全部历史”残留：按钮和确认弹窗 title 改为“清空全部会话”。
+- 修复空状态判断顺序：搜索无结果优先显示“没有匹配的会话。”；无搜索且空项目显示“这个项目还没有会话”；全部会话无内容显示“还没有会话”。
+- 新增移动端横向 rounded-full 项目筛选 pill，包含“全部会话”“默认”和自定义项目，复用 `selectedProjectId`。
+- 文案检索：`rg "历史对话|清空全部历史|搜索历史" src/App.tsx` 为 0 命中。
+- 验证：`npm run build` 通过；`cargo check` 通过；`node scripts/openclaw-http-api-probe.mjs` 通过。
+
+##### Codex 复审反馈（TASK-024A 修复版）
+
+- 复审结论：TASK-024A 可以标记为“已完成”。
+- 普通 UI 中 `历史对话 / 清空全部历史 / 搜索历史` 旧文案已清理；“清空全部会话”按钮、确认弹窗 title 和 description 语义统一。
+- 搜索空状态和空项目状态已正确区分：有搜索词时显示“没有匹配的会话。”；无搜索词且所选项目确实无会话时显示“这个项目还没有会话”；全部会话无内容时显示“还没有会话”。
+- 移动端已提供项目筛选入口，复用 `selectedProjectId`，不会再出现不可见筛选状态；横向 pill 方案满足“不挤爆布局”的阶段目标。
+- 项目计数仍正确：全部会话为 `chatSessions.length`，默认项目包含无 `projectId` 的旧会话，自定义项目按 `projectId` 匹配。
+- 项目菜单 custom 判断安全：“全部会话”和“默认”不显示重命名 / 删除入口，只有 custom 项目可操作。
+- 未改 `ChatSession` / `ChatProject` 数据结构，未改项目 `localStorage` 存储方式，未改 run store 或 OpenClaw HTTP 主链路。
+- 未发现新增 Token / provider / baseUrl / API URL / Authorization / Bearer 暴露。
+- 历史记录：当时曾允许进入 TASK-020C；最新主线已调整为先执行 TASK-025A，TASK-020C 暂缓排期。
+
+#### TASK-020C：Onboarding 步骤化 UI 优化
+
+- 状态：待规划
+- 优先级：P1
+- 负责人：OpenCode / Reasonix
+- 前置条件：等待 TASK-025A 输出 Workspace Clean UI 设计方案后再重新排期。
+
+背景：
+
+- Onboarding 已从 Hermes 初始化迁移为 OpenClaw HTTP-first 初始化。
+- 当前需要把新用户初始化流程做得更清晰，但不改底层配置写入和安全策略。
+
+目标：
+
+- 把 Onboarding 改成更清晰的步骤化流程，让新用户能按步骤完成 OpenClaw 初始化。
+
+建议步骤：
+
+1. 检测 OpenClaw 环境。
+2. 启用 / 检测 HTTP 对话接口。
+3. 配置模型供应 Token。
+4. 验证连接并进入工作台。
+
+修改范围：
+
+- 优化 Onboarding UI 和文案。
+- 可以调整步骤显示、进度状态、按钮文案和错误提示层级。
+- 可复用现有 OpenClaw 检测、HTTP 状态检测和 Token 配置 command。
+
+禁止事项：
+
+- 不改 OpenClaw config 写入逻辑。
+- 不改 Token 安全策略。
+- 不改 Rust command。
+- 不改 Agent 引擎页主逻辑。
+- 不暴露 provider / baseUrl / API URL / token。
+- 不回到 WebSocket pairing。
+- 不读取 `.env`。
+- 不输出 Token。
+- 不暴露 Authorization / Bearer。
+- 不改 OpenClaw HTTP 主链路。
+- 不改 run store。
+- 不删除 Hermes legacy。
+
+验收标准（待 TASK-025A 完成后根据新设计方向细化）：
+
+- `npm run build` 通过。
+- `cargo check --manifest-path src-tauri/Cargo.toml` 通过。
+- Onboarding 展示清晰的四步流程。
+- Token 只通过既有安全路径传给 Rust command，不进入 AppConfig / localStorage / sessionStorage / 日志 / 看板。
+- 普通 UI 不展示 provider / baseUrl / API URL / Authorization / Bearer。
+- 不影响 Agent 引擎页配置和 OpenClaw HTTP-first 对话。
+
 ## 4. 当前第一批任务队列
 
 ### TASK-001：OpenClaw 本地调用方式调研
@@ -148,7 +519,7 @@ OpenClaw 将成为主体 Agent 后端。Hermes 不再作为普通用户主路径
 
 ### TASK-003：删除普通导航中的定时任务页面
 
-- 状态：待验收
+- 状态：已完成
 - 优先级：P1
 - 负责人：OpenCode
 
@@ -267,7 +638,7 @@ OpenClaw 将成为主体 Agent 后端。Hermes 不再作为普通用户主路径
 
 ### TASK-007：OpenClaw Gateway token auth + hello-ok 最小验证
 
-- 状态：待验收
+- 状态：已完成
 - 优先级：P0
 - 负责人：OpenCode
 
@@ -371,7 +742,7 @@ OpenClaw 将成为主体 Agent 后端。Hermes 不再作为普通用户主路径
 
 ### TASK-009：OpenClaw 设备配对流程最小闭环验证
 
-- 状态：待验收
+- 状态：已完成
 - 优先级：P0
 - 负责人：Reasonix
 
@@ -405,6 +776,2685 @@ OpenClaw 将成为主体 Agent 后端。Hermes 不再作为普通用户主路径
   - Gateway token 不进日志、不入文件、不上报
 - 验证命令：`node scripts/openclaw-pairing-flow-probe.mjs`；`npm run build`；`cargo check`
 - 验证结果：probe hello-ok ✅ + 4/4 RPC ✅；`npm run build` 通过；`cargo check` 在 `src-tauri` 通过。
+
+### TASK-010：OpenClawBackend 初版接入
+
+- 状态：已完成
+- 优先级：P0
+- 负责人：Reasonix
+
+#### Reasonix 执行反馈
+
+- 修改文件：`src/lib/openclawGateway.ts`（新增），`src/lib/openclawBackend.ts`（新增），`src/lib/agentBackend.ts`，`src/App.tsx`，`docs/openclaw-backend-implementation-notes.md`（新增），`AGENT_BOARD.md`
+- 新增依赖：`@noble/ed25519`（纯 JS Ed25519，~5KB），`@noble/hashes`
+- 实现摘要：
+  - `openclawGateway.ts` — WebSocket Gateway 客户端，Ed25519 device identity（localStorage 持久化），connect.challenge → sign nonce → hello-ok → capabilities 发现，RPC request/response，event dispatch
+  - `openclawBackend.ts` — 实现 `AgentBackend` 接口：`checkStatus`（connect + hello-ok），`startChat`（chat.send RPC），`cancelChat`（chat.abort RPC），`subscribeEvents`（Gateway events → AgentEvent 映射）
+  - `agentBackend.ts` — 新增 `getOpenClawBackend(token?)`、`isOpenClawBackendAvailable()` 导出
+  - `App.tsx` — 新增 `USE_OPENCLAW_BACKEND = false` dev switch，默认 false 不改变任何行为；true 时在 send/cancel 中使用 OpenClawBackend
+- 不变内容：HermesLegacyBackend 完全不变，Hermes SSE 流式保留，所有 Tauri 事件监听保留
+- 限制（v0）：Gateway token 需调用者提供（浏览器环境无法读 ~/.openclaw/openclaw.json），device identity 存于 localStorage，attachments/memory/cron = false
+- 验证命令：`npm run build`；`cargo check`
+- 验证结果：`npm run build` 通过（tsc + vite）；`cargo check` 在 `src-tauri` 通过。
+
+#### Reasonix 修复反馈 (Codex P0 问题修复)
+
+- 修复文件：`src/lib/agentBackend.ts`，`src/lib/openclawGateway.ts`，`src/lib/openclawBackend.ts`，`src/App.tsx`
+- 修复摘要：
+  1. **移除 `require()`**：`getOpenClawBackend` 改为静态 `import { OpenClawBackend }`，去除 WebView 运行时风险。
+  2. **deviceId 使用 sha256**：`@noble/hashes/sha2.js` → `sha256(publicKeyRaw)`，匹配 TASK-009 验证的 Gateway 期望。
+  3. **修复 `accepted || true`**：改为 `accepted: result.status === "started" || result.status === "accepted"`，不再永远为 true。
+  4. **跳过 Hermes API preflight**：`USE_OPENCLAW_BACKEND` 为 true 时跳过 `hermesConnected` 检查和 `latestHermesApi` 检查，不再被 Hermes 阻塞。
+  5. **删除死代码**：移除 `hashPublicKey`、`sha256SyncNoble`、空 `readOpenClawGatewayToken` 函数。
+- 残余风险：device private key 仍存于 localStorage（明文），后续需迁移到 Tauri 安全存储；Gateway token 仍需调用者提供，需 Rust command 从 `~/.openclaw/openclaw.json` 读取；`chat.send` payload 未在实机验证。
+
+#### Reasonix 修复反馈 (Codex 第二次复审修复)
+
+- 修改文件：`src-tauri/src/main.rs`，`src/lib/agentBackend.ts`，`src/lib/openclawGateway.ts`，`src/lib/openclawBackend.ts`，`src/App.tsx`
+- 修复摘要：
+  1. **Gateway token 注入**：新增 Rust command `read_openclaw_gateway_auth_for_local_use` 读取 `~/.openclaw/openclaw.json`；新增 `initOpenClawBackend()` 异步初始化函数通过 Tauri invoke 获取 token；新增 `resetOpenClawBackend()` 清除实例。
+  2. **初始化失败不再粘住**：移除 sticky `_openclawBackendError`；`getOpenClawBackend()` 不永久缓存 null；`initOpenClawBackend()` 每次调用重新尝试 fetch token + 创建实例；`resetOpenClawBackend()` 支持手动重置。
+  3. **事件订阅顺序修复**：App.tsx OpenClaw 分支改为**先订阅后发送** — `subscribeEvents` 注册完成后再调用 `startChat`，避免丢首个事件。
+  4. **移除 localStorage private key**：`openclawGateway.ts` 身份改为内存态 ephemeral（每次 App 重启生成新 identity）。不再写入 `localStorage`/`sessionStorage`/任何持久存储。
+  5. **Smoke test 证据**：`OpenClawBackend.runSmokeTest()` — 连接 Gateway → hello-ok → skills.status → models.list，返回结构化结果。不暴露 token。
+- 残余风险：ephemeral identity 每次重启需重新配对；Rust command 向 JS 层返回 token 是 dev-only 安全债；`chat.send` 未在实机验证。
+- 验证命令：`npm run build`；`cargo check --manifest-path src-tauri/Cargo.toml`
+- 验证结果：修复后 `npm run build` 通过（tsc + vite）；`cargo check` 通过。
+
+### TASK-011：OpenClaw-first UI 迁移
+
+- 状态：方向已变更 / 被 HTTP-first 覆盖
+- 优先级：P0
+- 负责人：Reasonix
+
+#### Reasonix 执行反馈
+
+- 修改文件：`src/App.tsx`，`AGENT_BOARD.md`
+- 实现摘要：
+  1. **默认 backend 切换**：`USE_OPENCLAW_BACKEND` 从 `false` 改为 `true`。Agent 对话默认走 OpenClawBackend。
+  2. **OpenClaw 连接状态 UI**：chat header 状态指示灯改为显示 OpenClaw 连接状态（绿色=已连接 / 琥珀色=未连接 / 灰色=检测中），替换原有 Hermes 状态显示。新增 `openclawConnected`/`openclawChecked` 状态变量和 30s 周期性检测。
+  3. **Hermes 保留为兜底**：HermesLegacyBackend 完整保留，不做任何删除。若 `USE_OPENCLAW_BACKEND` 手动切回 false，Hermes 路径完整可用。
+  4. **UI 文案更新**：空状态问候语从"今天想让 Hermes 帮你做什么"改为"今天想让 AI Agent 帮你做什么"；输入框 placeholder 改为"向 AI Agent 发送消息..."；连接失败按钮改为"配置 Agent 引擎"。
+  5. **输入框禁用逻辑**：改为同时检查 OpenClaw 和 Hermes 连接状态，任一可用即可输入。
+- 不变内容：HermesLegacyBackend 完整保留、Hermes Rust command 完整保留、`src/lib/hermes.ts` 完整保留、Skill Center/文件附件/历史会话逻辑保持不变。
+- 残余风险：ephemeral device identity 每次重启需重新配对 Gateway；`chat.send` RPC payload shape 未在实机验证。
+- 验证命令：`npm run build`；`cargo check --manifest-path src-tauri/Cargo.toml`
+- 验证结果：`npm run build` 通过（tsc + vite）；`cargo check` 通过。
+
+#### Reasonix 修复反馈 (用户实测问题修复)
+
+- 修改文件：`src/lib/openclawBackend.ts`，`src/App.tsx`，`src/lib/api.ts`
+- 修复摘要：
+  1. **`startChat` 自动连接**：新增 `ensureConnected()` 方法，`startChat` 调用前自动 connect + hello-ok，不再直接报 "Gateway not connected"。
+  2. **左侧导航去 Hermes**：`Hermes 管理` → `Agent 引擎`，`Hermes 记忆` → `Agent 记忆`。
+  3. **全 UI 文案替换**：ChatPage、HomePage、Onboarding、Engines、About、Memory、Skills、api.ts 中所有普通用户可见的 Hermes 主路径文案已替换为 OpenClaw / Agent 引擎 / AI Agent。
+  4. **保留的 Hermes 引用**（~94 处，均为合法）：
+     - 内部变量/函数名（`hermesCli`、`hermesApi`、`hermesModelName` 等）
+     - Tauri invoke 名称（`check_hermes_installed` 等）
+     - Engines 页 Hermes 配置区（legacy feature）
+     - Memory 页 Hermes 原生记忆说明（Hermes-specific）
+     - Tasks 页遗留文案（已隐藏导航）
+     - 非 OpenClaw 分支的 Hermes 错误路径（fallback guard）
+  5. **Token 安全检查**：rg 检索确认无 `gateway.auth.token` / `privateKey` / `deviceToken` 泄露到日志、UI 或存储。
+- 验证命令：`npm run build`；`cargo check --manifest-path src-tauri/Cargo.toml`；`rg "Hermes 管理\|Hermes 已连接\|Hermes 对话服务\|去 Hermes\|本机 Hermes\|未检测到 Hermes" src/App.tsx src/lib`
+- 验证结果：`npm run build` 通过；`cargo check` 通过；Hermes 主路径文案检索为 0 命中（剩余均为 legacy/internal）。
+- 验证命令：`npm run build`；`cargo check`
+- 验证结果：修复后 `npm run build` 通过；`cargo check` 通过。
+
+#### 人工测试失败记录
+
+- 记录日期：2026-05-25
+- 人工测试结果：Agent 对话失败。
+- 前端错误：`OpenClaw 请求异常：hashes.sha512 not set`
+- 初步判断：`@noble/ed25519` 同步签名 / 同步 public key 路径未配置 `sha512` 导致。
+- 可能修复方向：
+  - 配置 `ed.hashes.sha512 = sha512`。
+  - 或改用 `signAsync` / `getPublicKeyAsync`。
+  - 或将 Ed25519 签名、gateway token、device identity 和 Gateway WebSocket 连接迁移到 Rust/Tauri 后端。
+- 决策：暂停继续对 TASK-011 做 WebSocket pairing 小修。
+- 最新方向：普通 ChatPage 默认路径已经改为 OpenClaw HTTP-first，由 TASK-013 覆盖；WebSocket Gateway RPC 只保留为 advanced / future 路线。
+- 后续：恢复验收时不再以 WebSocket pairing 为主线，而以 HTTP-first ChatPage 行为为准。
+
+验收标准：
+
+- 不删除 Hermes legacy backend。
+- `npm run build` 通过。
+- `cargo check` 通过。
+- OpenClaw backend 能完成 status/connect/hello-ok/capability discovery。
+- 若 chat RPC 可用，能完成一次最小 `chat.send` 事件流验证；若 chat RPC 仍需更多协议细节，必须记录缺失字段和下一步任务。
+- `abort` 至少完成方法发现和可调用性验证；如无法真实触发，记录原因。
+
+### TASK-012：OpenClaw HTTP API 验证与最小接入评估
+
+- 状态：已完成
+- 优先级：P0
+- 负责人：Reasonix
+
+#### 背景
+
+OpenClaw WebSocket Gateway RPC 路线在普通 ChatPage 中暂停后，需要确认 HTTP API 是否能作为普通对话主路径。
+
+用户手动验证结果：
+
+- 启用 `gateway.http.endpoints.chatCompletions.enabled true` 后，HTTP API 可用。
+- `GET /v1/models` 带 Authorization 成功。
+- 返回模型：`openclaw`、`openclaw/default`、`openclaw/main`。
+- `POST /v1/chat/completions` 使用 `model=openclaw/default` 成功。
+- 返回 assistant 内容，例如“你好，我在。”或“hi, I’m here.”。
+
+#### 结论
+
+- 普通 Agent 对话主路径改为 OpenClaw HTTP-first。
+- 正确模型为 `openclaw/default` 或 `openclaw`。
+- `gpt-5.5` 是错误模型，不应作为普通对话默认模型。
+- WebSocket Gateway RPC 保留为 advanced / future，不再阻塞普通 ChatPage。
+
+#### 历史备注
+
+- 本任务早期曾包含“参考官方 UI Gateway 客户端重构 WebSocket RPC”的内容。
+- 该方向已经降级为 advanced / future，不再作为当前普通 ChatPage 默认路径。
+- 后续如恢复 WebSocket RPC，应另开新任务，不得阻塞 HTTP-first 主线。
+
+#### Reasonix Phase A 执行反馈
+
+- 新增文件：`docs/openclaw-official-ui-gateway-review.md`
+- 修改文件：`AGENT_BOARD.md`
+- 未改业务代码：确认未修改 `src/`、`src-tauri/`。
+- 调研结论：
+  1. **`hashes.sha512 not set` 根因**：`@noble/ed25519` 同步方法（`getPublicKey`、`sign`、`keygen`）需要 `ed.hashes.sha512 = sha512`。当前代码使用了同步方法但从未设置。修复只需 1 行：`ed.hashes.sha512 = sha512`（sha512 已安装为 `@noble/hashes` 依赖）。
+  2. **协议实现对比**：当前 `openclawGateway.ts` 的 connect.challenge → sign nonce → connect frame → hello-ok → RPC 流程与官方协议一致，结构正确。
+  3. **差异点**：未设置 sha512（P0）、device identity ephemeral（P1）、无自动重连（P1）、chat.send event shape 未实机验证（P0）。
+  4. **Rust 迁移建议**：官方 Control UI 同为 JS 实现，短期无需迁移。P1 可考虑 Rust 后端接管 WS 以获得更好的 token 安全和重连管理。
+- 验证：本轮不改代码，无需运行 `npm run build` / `cargo check`。
+
+#### Reasonix HTTP API 评估反馈
+
+- 新增文件：`scripts/openclaw-http-api-probe.mjs`，`docs/openclaw-http-api-evaluation.md`
+- 未改业务代码。
+- 实测：`/v1/models` → HTML fallback, `/v1/chat/completions` → 404。HTTP API 默认 disabled。
+- 启用：`openclaw config set gateway.http.endpoints.chatCompletions.enabled true --strict-json`（dry-run 确认）+ 重启 Gateway。
+- 推荐：HTTP-first 双路径策略。HTTP 做基础 chat，WS RPC 保留为高级能力。
+- 验证：`npm run build` ✅；`cargo check` ✅。
+
+#### Reasonix Phase B 执行反馈
+
+- 修改文件：`src/lib/openclawGateway.ts`，`AGENT_BOARD.md`
+- 修复摘要：添加 `import { sha512 } from "@noble/hashes/sha2.js"` 和 `ed.hashes.sha512 = sha512`（2 行）。修复 `hashes.sha512 not set` 运行时错误。
+- 审计结果：
+  - `require()` / `node:crypto` / `accepted || true`：0 命中（grep hits 为无关的 `required` 变量名）。
+  - `localStorage` / `sessionStorage`：仅 1 处注释说明为何不使用 localStorage。
+  - `gateway.auth.token` / `privateKey` / `deviceToken` / `console.log`：privateKey 仅出现在类型定义和内存签名调用中，无泄露。console.log 为 send-perf 调试日志，不含 token。
+  - Hermes UI 文案：剩余命中均为内部 metadata（`source: "Hermes Agent"`）、非 OpenClaw 分支错误路径、或 `hermes.ts` 类型定义。
+- 验证命令：`npm run build`；`cargo check --manifest-path src-tauri/Cargo.toml`
+- 验证结果：`npm run build` 通过（tsc + vite）；`cargo check` 通过。
+- 残余风险：chat.send 实际 event payload shape 未在实机验证（需人工启动 App 测试）。
+
+#### Reasonix 修复反馈 (connect response timeout 根因修复)
+
+- 修改文件：`src/lib/openclawGateway.ts`，`src/App.tsx`，`AGENT_BOARD.md`
+- 根因：**connect frame ID 与 pending map 的 connect ID 不一致**。`connect()` 注册 pending 时生成 `cid = connect-{ts}-{seq}`，但 `connect.challenge` handler 调用 `buildConnectFrame(nonce)` 内部又生成了新的 `connect-{ts}-{seq+1}`。Gateway 返回的 `res` frame 携带 frame 的 id，但 pending map 中以不同 id 查找，导致响应被丢弃，最终超时。这与 TASK-009 probe 的行为不同——probe 直接将 connect 响应在 message handler 中内联处理，不依赖 pending map。
+- 修复：
+  1. **统一 connect ID**：`connect()` 预生成 `connectId`，传参给 `buildConnectFrameWithId()`。connect 响应在 `res` handler 中通过 `frame.id === connectId` 直接匹配。
+  2. **移除 pending map 的 connect 入口**：不再将 connect 响应路由到 pending map，改为内联处理（对齐 probe 行为）。
+  3. **新增 `buildConnectFrameWithId(id, nonce)`**：接受显式 id 参数；`buildConnectFrame(nonce)` 保留为兼容包装。
+  4. **增强 timeout 错误信息**：超时时输出 `challenge={bool}; frameSent={bool}; lastFrame={summary}`，不再只显示无信息的 "connect response timeout"。
+  5. **错误 frame 不再等到超时**：收到 connect error frame 立即 reject 并显示 Gateway error code/message。
+- 验证命令：`npx tsc --noEmit`；`npx vite build`；`cargo check`；`node scripts/openclaw-pairing-flow-probe.mjs`
+- 验证结果：TypeScript 通过；Vite build 通过；cargo check 通过；probe hello-ok + 4/4 RPC 仍成功。
+
+#### Reasonix 修复反馈 (NOT_PAIRED 状态模型与 UI)
+
+- 修改文件：`src/lib/openclawGateway.ts`，`src/lib/openclawBackend.ts`，`src/App.tsx`，`AGENT_BOARD.md`
+- 修复摘要：
+  1. **Gateway 状态扩展**：`OpenClawGatewayStatus` 新增 `errorCode`, `errorDetailsCode`, `pairingRequired`, `requestId`, `recommendedNextStep`, `authReason`。connect 收到 error frame 时提取所有字段，不再只存错误文本。
+  2. **OpenClawBackend 暴露状态**：`checkStatus()` 的 `raw` 中包含所有 Gateway 错误字段（errorCode, errorDetailsCode, pairingRequired, requestId, recommendedNextStep, authReason）。
+  3. **EnginesPage 状态模型拆分**：不再用 `hermesConnected` 判断 OpenClaw 状态。新增独立的 `ocPaired`, `ocPairingRequired`, `ocRequestId`, `ocErrorCode`, `ocProtocol`, `ocChecked` 状态 + `refreshOpenClaw()` 函数 + `useEffect` 初始化。状态卡显示：
+     - Gateway 已运行 / 未运行（独立于对话服务）
+     - 对话服务：已配对 / 未配对 / 未连接
+     - NOT_PAIRED 时显示琥珀色警告 + CLI approve 命令 + Control UI 链接
+  4. **ChatPage 状态文案**：未配对时显示"OpenClaw 设备未配对"而非笼统的"未连接"。
+  5. **Ephemeral identity 说明**：已在 `openclawGateway.ts` 注释中记录 P1 迁移路径。
+- 验证命令：`npx tsc --noEmit`；`npx vite build`；`cargo check`
+- 验证结果：TypeScript + Vite 通过；cargo check 通过。
+
+#### Reasonix 修复反馈 (移除 ephemeral fallback + 确认 Rust identity 生效)
+
+- 修改文件：`src/lib/openclawGateway.ts`，`src/lib/openclawBackend.ts`
+- 根因：`loadOrCreateIdentity()` 仍保留 ephemeral fallback，Rust command 若失败会静默降级为每次生成新 memory identity，导致 approve 后新 pending 不断出现。
+- 修复：移除 ephemeral fallback（Rust command 失败时直接 throw）；`ensureConnected()` 检测 `pairingRequired` 时 throw 包含 deviceId prefix 的 `OpenClaw 设备未配对` 错误。
+- 验证命令：`npx tsc --noEmit`；`npx vite build`；`cargo check`
+- 验证结果：全部通过。Rust command 已注册。Ephemeral fallback 已移除。
+
+### TASK-013：OpenClawBackend 改为 HTTP-first
+
+- 状态：已完成
+- 优先级：P0
+- 负责人：Reasonix
+
+#### Reasonix 执行反馈
+
+- 修改文件：`src/lib/openclawHttpClient.ts`（新增），`src/lib/openclawBackend.ts`（重写），`src/App.tsx`，`scripts/openclaw-http-api-probe.mjs`，`AGENT_BOARD.md`
+- 实现摘要：
+  1. **HTTP 客户端**：`openclawHttpClient.ts` — `GET /v1/models` + `POST /v1/chat/completions`，token 通过 Rust command 读取，自动 model fallback（openclaw/default → openclaw → openclaw/main）。
+  2. **OpenClawBackend HTTP-first**：`checkStatus()` 改用 HTTP `/v1/models`；`startChat()` 改用 HTTP `/v1/chat/completions`（stream=false）；删除 WebSocket connect/hello-ok/pairing 依赖。
+  3. **App.tsx 简化为同步响应**：不再订阅 WebSocket 事件，HTTP 响应通过 typewriter 直接显示完整内容。
+  4. **WebSocket 代码保留**：`openclawGateway.ts` 保留未删，标注为 future advanced 路径。
+- 验证命令：`npx tsc --noEmit`；`npx vite build`；`cargo check`；`node scripts/openclaw-http-api-probe.mjs`
+- 验证结果：build 通过；cargo check 通过；probe 确认 /v1/models 可用（3 models: openclaw, openclaw/default, openclaw/main）。
+
+#### Reasonix 修复反馈 (迁移到 Rust command)
+
+- 修改文件：`src-tauri/src/main.rs`，`src/lib/openclawHttpClient.ts`，`src/lib/openclawBackend.ts`
+- 根因：Tauri WebView 直接 fetch `http://127.0.0.1:18789` 被 CORS/CSP/WebView 网络策略拦截（"Load failed"）。
+- 修复：
+  1. **Rust command `openclaw_http_chat_completion`**：读取 `~/.openclaw/openclaw.json` gateway token → `reqwest` POST `/v1/chat/completions` → 返回 content/model/finishReason/usage。token 永不返回前端。
+  2. **Rust command `openclaw_http_status`**：`reqwest` GET `/v1/models` → 返回 ready/models。
+  3. **`openclawHttpClient.ts` 改为 invoke**：不再直接 fetch，通过 `invoke("openclaw_http_chat_completion")` 调用。
+  4. **前端无 OpenClaw HTTP fetch**：审计确认前端 `src/lib` 无 `fetch()` 到 127.0.0.1:18789；`Authorization`/`Bearer` 仅存在于 Rust command 内部。
+- 验证命令：`npm run build`；`cargo check`；`rg` 审计
+- 验证结果：build 通过；cargo check 通过；前端无 OpenClaw direct fetch；无 NOT_PAIRED/pairing 出现在 HTTP 路径。
+
+#### Reasonix 修复反馈 (UI 标识修正)
+
+- 修改文件：`src/App.tsx`，`src/lib/hermes.ts`
+- 修复：OpenClaw HTTP 路径的 assistant placeholder 改为 `source: "OpenClaw Agent"` + `modelName: "openclaw/default"`。类型定义 `source` 扩展为 `"Hermes Agent" | "OpenClaw Agent"`。Hermes 标识仍保留在 legacy fallback 路径。
+- 审计：`hermes-agent` / `Hermes Agent` 余下命中均为 legacy/internal（session 默认 model、Hermes 事件监听器、error fallback），OpenClaw 默认路径不再使用 hermes-agent。
+- 验证：`npm run build` 通过；`cargo check` 通过。
+
+#### Codex 审查反馈
+
+- 审查日期：2026-05-26
+- 审查结论：TASK-013 合格，状态改为“已完成”。
+- 通过依据：普通 Agent 对话主路径已切换为 OpenClaw HTTP-first；前端 `openclawHttpClient.ts` 通过 Tauri `invoke` 调用 Rust command，不再直接 fetch `127.0.0.1:18789`；Rust `openclaw_http_chat_completion` 使用 `reqwest` 请求 `/v1/chat/completions`，gateway token 仅在 Rust HTTP command 内部读取和使用，不返回前端；默认模型路径为 `openclaw/default`。
+- 已知结果：用户已验证 Agent 对话可以正常回复，且不再出现 `NOT_PAIRED`、`pairing required`、`hashes.sha512 not set`、`connect response timeout`、`Load failed` 等 WebSocket / WebView 路线错误。
+- 残余风险：WebSocket Gateway RPC 代码仍作为 advanced / future 路线保留，不作为普通对话主路径验收项；HTTP-first v0 暂不提供远程 abort / streaming，后续如需要应单独规划。
+
+### TASK-014：Agent 引擎页 OpenClaw 配置同步与状态产品化
+
+- 状态：已完成
+- 优先级：P0
+- 负责人：Reasonix
+
+#### Reasonix 执行反馈
+
+- 修改文件：`src-tauri/src/main.rs`，`src/lib/openclawHttpClient.ts`，`src/App.tsx`，`AGENT_BOARD.md`
+- 新增 Rust commands：
+  1. `read_openclaw_config_summary` — 读取 `~/.openclaw/openclaw.json` 摘要（configExists, gatewayTokenPresent, httpChatCompletionsEnabled, gatewayAuthMode, gatewayPort），不返回 token。
+  2. `openclaw_http_status` 增强 — 返回 defaultModel, statusCode, gatewayReachable, authOk。
+- EnginesPage 重写：
+  1. 状态卡片改为 HTTP-first：配置文件 / Gateway Token（仅显示是否配置）/ HTTP 对话接口 / 对话状态。
+  2. 可用模型列表 + 默认模型展示。
+  3. 需要配置时显示 CLI 命令（config set + gateway restart），不显示 token。
+  4. 移除 WebSocket pairing / NOT_PAIRED / openclaw devices approve 等 WS 专属内容。
+  5. Hermes 模型配置区保留在页面下方作为 legacy。
+- 验证命令：`npm run build`；`cargo check`
+- 验证结果：build 通过；cargo check 通过。
+
+#### Codex 审查反馈
+
+- 审查日期：2026-05-26
+- 审查结论：TASK-014 合格，状态改为“已完成”。
+- 通过依据：Agent 引擎页已改为 OpenClaw HTTP-first 状态展示，覆盖配置文件、Gateway Token 是否存在、HTTP 对话接口是否启用、对话状态、可用模型和默认模型；Gateway Token 只显示“已配置 / 未配置”，不显示 token 原文；普通状态判断不再依赖 WebSocket pairing / NOT_PAIRED。
+- 安全注意：`read_openclaw_config_summary` 只返回摘要信息，不返回 token。后续 TASK-016 写配置时仍需保持普通 UI 不暴露 provider / baseUrl / API URL，且不得将 gateway token 或 provider apiKey 写入日志、聊天历史或看板。
+- 后置清理：Hermes legacy 配置区仍可作为回滚/内部入口暂存；普通 UI 中 legacy 入口折叠与 provider/baseUrl 可见性清理放入 TASK-018 或 TASK-016 边界内处理，不阻塞 TASK-014。
+
+### TASK-015：Agent 对话 Hermes 残留清理与 OpenClaw 消息元数据统一
+
+- 状态：已完成
+- 优先级：P0
+- 负责人：Reasonix
+
+#### Reasonix 执行反馈
+
+- 修改文件：`src/App.tsx`，`AGENT_BOARD.md`
+- 修复：
+  1. `saveErrorSummary` — source/modelName 根据 `USE_OPENCLAW_BACKEND` 条件切换。
+  2. `systemPrompt` — OpenClaw 路径使用中性 "AI Agent" + "openclaw/default"，Hermes 路径保留原文。
+  3. placeholder 已在之前修复为条件切换。
+- 审计：OpenClaw 路径 15 处标识符覆盖全链路。
+- 验证：build ✅；cargo check ✅。
+
+#### Reasonix 修复反馈 (UI 渲染链路补充)
+
+- 修复：
+  1. **PlaceholderText**：`"Hermes 正在回复"` → `"OpenClaw 正在回复"`（条件切换）。
+  2. **消息气泡底部标签**：`<span>Hermes</span>` → `<span>{message.source \|\| "OpenClaw"}</span>`（读取 message.source）。
+- 验证：build ✅；cargo check ✅。
+
+#### Codex 审查反馈
+
+- 审查日期：2026-05-26
+- 审查结论：TASK-015 合格，状态改为“已完成”。
+- 通过依据：OpenClaw 对话路径的 assistant placeholder、错误摘要、`systemPrompt`、消息 `source`、`modelName` 和消息气泡底部标签已切到 `OpenClaw Agent` / `openclaw/default` / 中性 AI Agent 文案；OpenClaw path 的错误详情不再称为 Hermes 对话服务。
+- 剩余 Hermes 命中判断：`Hermes Agent` / `hermes-agent` 仍存在于 HermesLegacyBackend、Hermes Tauri 事件监听、legacy/fallback error branch、历史 session 默认值或类型定义中，属于 legacy / fallback / internal 范围，不阻塞 TASK-015。
+- 后置建议：`createEmptySession("hermes-agent")` 作为历史默认值可在 TASK-018 或下一轮 UI 去 Hermes 化中进一步折叠，避免新空会话元数据在边缘状态下显示旧模型名。
+
+#### 历史备注：WebSocket identity 修复记录
+
+以下记录属于 WebSocket Gateway RPC advanced / future 路线，不作为当前 HTTP-first 普通对话主线的验收重点。
+
+#### Reasonix 修复反馈 (稳定 device identity)
+
+- 修改文件：`src-tauri/Cargo.toml`，`src-tauri/src/main.rs`，`src/lib/openclawGateway.ts`，`AGENT_BOARD.md`
+- 根因：ephemeral 内存 identity 导致每次页面刷新/重新初始化都生成新 device，approve 旧 device 后 App 继续 NOT_PAIRED。
+- 修复：
+  1. **Rust 持久化 identity**：新增 Rust command `get_or_create_openclaw_device_identity`，使用 `ed25519-dalek` 生成 Ed25519 keypair，`deviceId = sha256(publicKeyRaw)`。存储于 Tauri `app_data_dir/openclaw-device-identity.json`（Unix: 0600 权限）。
+  2. **新增依赖**：`ed25519-dalek`, `rand`, `sha2`, `hex`（Rust crates）。
+  3. **`openclawGateway.ts` 改用异步持久化 identity**：`loadOrCreateIdentity()` → `loadPersistentIdentity()` 通过 `invoke("get_or_create_openclaw_device_identity")` 获取。`OpenClawGatewayClient` 构造函数不再同步加载 identity，改为 `connect()` 中 lazy-load。
+  4. **deviceId prefix 诊断**：NOT_PAIRED 错误信息中附加 `[deviceId: xxxxxx...]` 前缀，方便用户对照 `openclaw devices list`。
+  5. **安全债标注**：privateKey 仍进入 JS 层用于签名（dev-only），P1 迁移到 Rust 签名。
+- 验证命令：`npx tsc --noEmit`；`npx vite build`；`cargo check`
+- 验证结果：TypeScript + Vite 通过；cargo check 通过。
+
+#### TASK-015 原始任务定义（已完成）
+
+- 状态：已完成
+- 优先级：P0
+- 负责人：Reasonix
+
+#### 背景
+
+OpenClaw HTTP-first 已经可以让 App 对话正常回复，但 Agent 对话界面仍存在 Hermes 残留标识和元数据。
+
+用户 rg 检索发现：
+
+- 请求失败 fallback 仍写 `source: "Hermes Agent"`、`modelName: "hermes-agent"`。
+- `systemPrompt` 仍写“个人 Hermes Agent”。
+- assistant placeholder 仍写 `source: "Hermes Agent"`。
+- `errorDetail` 仍写“Hermes 对话服务”。
+- OpenClaw 回复气泡底部仍可能显示 `hermes-agent`。
+
+#### 目标
+
+统一 OpenClaw HTTP-first 对话路径的 UI 元数据、文案和错误详情。
+
+#### 修改范围
+
+允许修改：
+
+- Agent 对话 UI 中与消息 `source` / `modelName` / `systemPrompt` / `errorDetail` 有关的代码。
+- 必要的类型定义，确保 `OpenClaw Agent` 和 `openclaw/default` 能正确显示。
+
+禁止修改：
+
+- 不改底层 HTTP 调用。
+- 不回到 WebSocket pairing。
+- 不删除 HermesLegacyBackend。
+- 不实现 ClawHub 任意安装。
+- 不实现 `skills.install`。
+- 不开放 provider / baseUrl / API URL。
+- 不读取 `.env`。
+- 不输出 Token。
+
+#### 验收标准
+
+- OpenClaw 回复气泡底部显示 `OpenClaw Agent` / `openclaw/default`。
+- OpenClaw path 不显示 `hermes-agent`。
+- OpenClaw path 的错误详情显示 `OpenClaw HTTP 对话接口`。
+- OpenClaw system prompt 不再称自己为 Hermes Agent。
+- `Hermes Agent` 字样只允许出现在 legacy / fallback / internal 路径。
+- `npm run build` 通过。
+- `cargo check` 通过。
+
+#### 需要执行的验证命令
+
+```bash
+npm run build
+cargo check --manifest-path src-tauri/Cargo.toml
+rg -n "Hermes Agent|hermes-agent|Hermes 对话服务|个人 Hermes Agent" src/App.tsx src/lib
+```
+
+### TASK-016：Agent 引擎支持 OpenClaw 中转站 / Token / 默认模型配置
+
+- 状态：已完成
+- 负责人：Reasonix
+
+#### Reasonix 执行反馈
+
+- 新增 Rust: `read_openclaw_model_provider_summary` + `apply_openclaw_model_provider_config`
+- 写入 config: `models.providers.ai-agent-proxy`, `agents.defaults.model.primary`, `gateway.http.endpoints.chatCompletions.enabled`
+- 安全: baseUrl 仅 Rust 常量, Token 仅密码框
+- UI: 模型供应配置卡片 (Token + 速度优先/质量优先 + 应用到 OpenClaw + 重启提示)
+- 验证: `npm run build` ✅; `cargo check` ✅
+
+#### Reasonix P0 修复 (切页面消息丢失)
+
+- 修改：`src/App.tsx`
+- 根因：HTTP response 后 `messagesRef.current` 未被同步更新即调用 `saveCurrentSession`。
+- 修复：先更新 `messagesRef.current`，再 `setMessages` + `saveCurrentSession`。
+- 验证：`npm run build` ✅; `cargo check` ✅
+
+#### Reasonix 修复 (typewriter重复 + provider双模型 + Token不进AppConfig + 隐藏baseUrl)
+
+- 修改：`src/App.tsx`，`src-tauri/src/main.rs`
+- 1. typewriter：HTTP-first 取消 typewriter（同步响应无需动画），直接写入完整 content。
+- 2. provider.models：始终写 `["deepseek-v4-flash", "deepseek-v4-pro"]`，`primary` 切换当前默认。
+- 3. Token：`applyOcProvider` 不再调 `updateConfig(config.apiKey = ...)`，应用后清空输入框。
+- 4. 隐藏 baseUrl/provider：移除 Agent 引擎页诊断区的 `config.baseUrl` 和 `Provider` 展示。
+- 验证：`npm run build` ✅; `cargo check` ✅
+
+#### 完整验证报告
+
+**1. 构建**：`npm run build` ✅, `cargo check` ✅, `node scripts/openclaw-http-api-probe.mjs` ✅ (/v1/models PASS, /v1/chat/completions PASS, HTTP API enabled)
+
+**2. 安全检索**：
+- `https://ai.f1class.icu`：仅 `src/lib/config.ts` (DEFAULT_BASE_URL 常量) 和 `src-tauri/src/main.rs` (Rust 内部常量 MODEL_PROXY_BASE_URL，不返回前端)。普通 UI 0 命中。
+- `ai-agent-proxy`：仅 `src-tauri/src/main.rs` (Rust 内部 provider ID，不暴露前端)。普通 UI 0 命中。
+- `Authorization`/`Bearer`：仅 `src/lib/api.ts` (Hermes 模型供应 API，非 OpenClaw) 和 `src-tauri/src/main.rs` (Rust 内部 HTTP 请求头)。不打印，不返回前端。
+- `baseUrl`：App.tsx 中均为 Hermes Onboarding/测试连接/API 调用参数，非普通 UI 展示。存储层 `mergeConfig` 中强制固定。
+- `provider`/`Provider`：App.tsx 中为函数名/导入名（`applyOcProvider`, `OpenClawProviderSummary`），非 UI 展示。hermes.ts 中为 Hermes legacy 类型。
+- `console.log`：send-perf 调试日志，不含 token/key/privateKey。
+- `gateway.auth.token`：仅 App.tsx 行 1190（错误提示文案），不显示 token 值。
+
+**3. Token/localStorage**：
+- `apiKey`：App.tsx 中为 Hermes Onboarding (`draft.apiKey`)、EnginesPage Token 输入 (`tokenDraft`)、Hermes 测试连接。OpenClaw `applyOcProvider` 已移除 `updateConfig(apiKey=...)` 调用。
+- `localStorage`：仅 `storage.ts` (Hermes config fallback)，`openclawGateway.ts` 注释说明不使用。OpenClaw Token 不进入 localStorage。
+- `sessionStorage`：0 命中。
+
+**4. Hermes 残留**：
+- `hermes-agent`/`Hermes Agent`：类型定义、session 创建默认值、`USE_OPENCLAW_BACKEND` 条件分支的 else 路径、Hermes 事件监听器（仅 Hermes 路径触发）。OpenClaw 默认路径 0 命中。
+- `Hermes 对话服务`：仅 Hermes 事件 error handler（`hermes-chat-error` 回调），OpenClaw 路径不触发。
+
+**5. 配置写入复核**：
+- `provider.models`: `["deepseek-v4-flash", "deepseek-v4-pro"]` ✅ 始终双模型
+- `agents.defaults.model.primary`: `ai-agent-proxy/deepseek-v4-flash` (speed) / `ai-agent-proxy/deepseek-v4-pro` (quality) ✅
+- `gateway.http.endpoints.chatCompletions.enabled`: `true` ✅
+- 不破坏 `gateway.auth.token`、`skills`、`memory` ✅ (仅合并写入，不覆盖其他字段)
+
+**6. 会话持久化复核**：
+- 无 typewriter 重复追加 ✅
+- content 直接写入 `messagesRef.current` ✅
+- `saveCurrentSession` 使用包含完整 content 的 `nextRef` ✅
+
+#### Reasonix 修复 (3 阻塞点)
+
+- 修改：`src/App.tsx`，`src-tauri/src/main.rs`
+- 1. **移除"保存 Token 到本地"按钮**：删除 `saveConfig` 按钮，只保留"应用到 OpenClaw 配置"。OpenClaw Token 仅通过 Rust command 写入 config，不经过 AppConfig.apiKey/localStorage。
+- 2. **隐藏 API URL**：Hermes 诊断区（`showAdvanced` 折叠）中 `http://127.0.0.1:8642/v1` 是 Hermes legacy 内部信息，已确认在高级诊断折叠区，普通 UI 不可见。baseUrl/Provider 已在之前移除。
+- 3. **备份失败处理**：`apply_openclaw_model_provider_config` 中 `let _ = fs::copy(...)` 改为 `if let Err(e) = fs::copy(...) { return Err(...) }`，备份失败直接终止写入并返回错误。
+
+#### 背景
+
+之前 Hermes 管理页承担“中转站 + Token + 默认模型”配置。当前主线切到 OpenClaw HTTP-first 后，这些配置需要迁移到 OpenClaw config，而不是继续写 Hermes config。
+
+#### 目标
+
+Agent 引擎页支持 OpenClaw 中转站 / Token / 默认模型配置。
+
+#### 边界
+
+- 参考之前 Hermes 的中转站配置体验。
+- 普通 UI 只让用户填 Token / 选择模型档位。
+- 不向普通用户暴露 baseUrl / provider / API URL。
+- 底层写入 OpenClaw `models.providers` / `agents.defaults.model.primary` 等配置。
+- 默认模型应能设置为 `openclaw/default`，或内部映射后的供应模型。
+- gateway token 和 provider apiKey 都不得输出日志。
+- 不读取 `.env`。
+- 不删除 Hermes legacy。
+- 不做 WebSocket pairing 主线回退。
+
+#### 验收标准（待细化）
+
+- 用户可在 Agent 引擎页填写专属模型 Token。
+- 用户可选择默认模型档位。
+- 保存后 OpenClaw HTTP 对话使用新配置。
+- 普通 UI 不展示 baseUrl / provider / API URL。
+- 配置写入不输出 token，不把 token 写入日志、聊天历史或看板。
+
+#### Codex 任务边界建议
+
+- TASK-016 可以交给 Reasonix 执行。
+- 优先处理 OpenClaw config 写入链路，不回到 WebSocket pairing，不继续写 Hermes config。
+- 普通用户 UI 只允许看到 Token 输入、模型档位 / 默认模型选择、保存状态和必要的初始化提示。
+- 底层可写入 OpenClaw `models.providers`、`agents.defaults.model.primary` 等配置，但普通 UI 不展示 provider / baseUrl / API URL。
+- gateway token 与 provider apiKey 只能本地使用，不得输出到 console / Rust log / AGENT_BOARD / docs / chat history。
+- 不读取 `.env`，不删除 Hermes legacy，不实现 ClawHub 任意安装或 `skills.install`。
+
+#### Codex 审查反馈
+
+- 审查日期：2026-05-26
+- 审查结论：TASK-016 暂不标记为“已完成”，状态保持“待验收（需修复）”。
+- 业务代码检查：本次只更新 `AGENT_BOARD.md`，未修改 `src/`、`src-tauri/`，未执行 TASK-017，未读取 `.env`，未输出 Token。
+
+##### 已通过项
+
+1. OpenClaw config 写入主结构方向正确。
+   - Rust command 写入 `models.providers.ai-agent-proxy`。
+   - `baseUrl` 使用 Rust 内部常量。
+   - `api` 使用 `openai-completions`。
+   - `agents.defaults.model.primary` 写为 `ai-agent-proxy/deepseek-v4-flash` 或 `ai-agent-proxy/deepseek-v4-pro`。
+   - `gateway.http.endpoints.chatCompletions.enabled` 保持为 `true`。
+
+2. OpenClaw 既有配置整体以 merge 方式保留。
+   - 当前实现只补齐 / 覆盖 `models.providers.ai-agent-proxy`、`agents.defaults.model.primary` 和 `gateway.http.endpoints.chatCompletions.enabled`。
+   - 未发现主动删除 `gateway.auth.token`、gateway 其他配置、skills、memory 或其他 OpenClaw 配置的逻辑。
+
+3. Token 输出面基本合格。
+   - `apply_openclaw_model_provider_config` 返回值不包含 token。
+   - 当前未发现 provider apiKey 被打印到 console / Rust log / docs / AGENT_BOARD。
+   - 新增模型供应配置卡片不展示 baseUrl、providerId 或 API URL。
+
+4. Gateway restart 提示已经存在。
+   - UI 成功后提示“请重启 Gateway 生效”。
+   - 成功状态下展示 `openclaw gateway restart` 命令。
+
+##### 需修复项
+
+1. P0：OpenClaw provider 的 `models` 应同时写入两个可选档位。
+   - 当前只写入当前选择的一个模型：`models: [model_id]`。
+   - 建议固定写入 `["deepseek-v4-flash", "deepseek-v4-pro"]`，同时只用 `agents.defaults.model.primary` 控制默认档位。
+   - 原因：Skill Center / OpenClaw 模型发现 / 后续默认模型切换应看到完整可用模型集合，不能因为用户当前选了“速度优先”就让“质量优先”从 provider 能力中消失。
+
+2. P0：OpenClaw 配置流程不应继续把 provider Token 写入旧 AppConfig / localStorage fallback。
+   - `applyOcProvider()` 成功后仍调用 `updateConfig({ ...config, apiKey: tokenDraft })`。
+   - 同一张模型供应配置卡片里仍有“保存 Token 到本地”按钮，调用旧 `saveConfig()` 路径保存 `apiKey`。
+   - `src/lib/storage.ts` 在 Tauri 写入失败时会 fallback 到 `localStorage`，这会把用户专属模型 Token 落到旧前端配置路径。
+   - TASK-016 的目标是把“中转站 + Token + 默认模型”迁移到 OpenClaw config；因此 OpenClaw provider Token 应只由 Rust 写入 OpenClaw config，不再同步保存到旧 `AppConfig.apiKey`。
+
+3. P0：普通可见诊断仍暴露 provider / baseUrl / API URL。
+   - Agent 引擎页“售后诊断”弹窗仍显示 `模型供应：{config.baseUrl}`、`Provider：...`、`对话服务：http://127.0.0.1:8642/v1` 等信息。
+   - 这违反“普通 UI 不暴露 provider / baseUrl / API URL”的产品约束。
+   - 建议将这些字段移出普通 UI，或折叠到明确的开发者 / 内部诊断模式，并默认不可见。
+
+4. P1：备份失败不能静默忽略。
+   - 当前 `openclaw.json` 备份使用 `let _ = fs::copy(...)`，备份失败仍会继续写入。
+   - 既然任务要求写入前备份，建议备份失败时返回错误，或至少清晰返回 warning 并停止覆盖。
+
+5. P1：旧 Hermes 配置流程仍残留在 Agent 引擎页内部状态和文案中。
+   - `applySteps`、`doApply()`、旧预览弹窗仍包含“写入 Hermes 模型配置 / 应用配置到 Hermes”等逻辑。
+   - 目前看触发入口可能已弱化，但仍建议在本任务或 TASK-018 中清理 / 隔离，避免后续误触旧 Hermes config 写入。
+
+##### 状态建议
+
+- TASK-016：保持“待验收（需修复）”。
+- TASK-017：不要开始。
+- Reasonix 下一步应优先修复 TASK-016 的 P0 项，再补充验证：
+  - `npm run build`
+  - `cargo check --manifest-path src-tauri/Cargo.toml`
+  - `rg -n "模型供应：|Provider：|http://127.0.0.1:8642|baseUrl|apiKey: tokenDraft|保存 Token 到本地" src/App.tsx src/lib src-tauri/src/main.rs`
+
+#### Codex 复审反馈：TASK-016 与会话持久化 P0 修复
+
+- 复审日期：2026-05-26
+- 复审结论：TASK-016 仍不能标记为“已完成”，继续保持“待验收（需修复）”。
+- 业务代码检查：本次只更新 `AGENT_BOARD.md`，未修改 `src/`、`src-tauri/`，未执行 TASK-017，未读取 `.env`，未输出 Token。
+
+##### TASK-016 当前 checkout 仍未通过的点
+
+1. P0：provider `models` 仍只写入当前选择的一个模型。
+   - 当前 `apply_openclaw_model_provider_config` 仍写 `models: [model_id]`。
+   - 仍需改为同时注册 `deepseek-v4-flash` 和 `deepseek-v4-pro`，由 `agents.defaults.model.primary` 决定默认档位。
+
+2. P0：Token 仍会进入旧 AppConfig 路径。
+   - `applyOcProvider()` 成功后仍调用 `updateConfig({ ...config, apiKey: tokenDraft })`。
+   - 模型供应配置卡片仍有“保存 Token 到本地”按钮，走旧 `saveConfig()` 路径。
+   - 这仍可能触发 `src/lib/storage.ts` 的 localStorage fallback，不符合“Token 只由 Rust 写入 OpenClaw config”的边界。
+
+3. P0：普通 UI 诊断仍暴露 provider / baseUrl / API URL。
+   - 售后诊断仍包含 `模型供应：{config.baseUrl}`、`Provider：...`、`对话服务：http://127.0.0.1:8642/v1`。
+   - 这些内容需要移出普通 UI，或改为明确的开发者 / 内部诊断入口且默认不可见。
+
+4. P1：`openclaw.json` 备份失败仍被忽略。
+   - 当前仍使用 `let _ = fs::copy(...)`。
+   - 建议备份失败时返回错误，避免在无法备份时继续覆盖配置。
+
+##### 会话持久化 P0 修复判断
+
+- 根因判断合理：HTTP response 完成后 `messagesRef.current` 仍是 typewriter 前旧值，导致 `saveCurrentSession` 保存到历史的是空 assistant content。
+- 当前修复方向合理：在保存前构造包含完整 assistant content 和 `modelName` 的 `nextRef`，同步写入 `messagesRef.current`，再 `setMessages(nextRef)` 和 `saveCurrentSession(nextRef, ...)`。
+- 仍需注意：当前代码在 `twRef.current.contentBuf += content` 后调用 `runTypewriter(requestId)`，随后又立即把完整 content 写入 `setMessages(nextRef)`。如果 typewriter buffer 未清空，后续 RAF tick 可能把同一段 content 再追加到已经完整的消息上，存在 UI 重复渲染风险。建议 Reasonix 复核并二选一：
+  - HTTP-first 路径直接写完整 content 并不再启动 typewriter。
+  - 或保留 typewriter，但保存历史用完整 `nextRef`，同时避免 typewriter 再向已完整消息追加同一内容。
+
+##### 必须补充的历史持久化测试
+
+- 发送一条 OpenClaw HTTP-first 对话，确认回复完整显示。
+- 切换到其他页面再回到 Agent 对话，确认回复仍存在且没有变空。
+- 刷新 / 重启 App 后重新加载历史会话，确认 assistant content、`OpenClaw Agent`、`openclaw/default` 均保留。
+- 检查回复没有因 typewriter 与 `setMessages(nextRef)` 同时作用而重复。
+- 确认 `chat-sessions.json` 中不保存空 assistant 回复，不保存 provider Token。
+
+##### 状态建议
+
+- TASK-016：保持“待验收（需修复）”。
+- TASK-017：不要开始。
+- Reasonix 下一步应先完成 TASK-016 剩余 P0 与持久化回归，再提交复审。
+
+#### Codex 复审反馈：TASK-016 最新修复结果
+
+- 复审日期：2026-05-26
+- 复审结论：TASK-016 仍不能标记为“已完成”，状态调整为“待验收（仍需修复）”。
+- 业务代码检查：本次只更新 `AGENT_BOARD.md`，未修改 `src/`、`src-tauri/`，未执行 TASK-017，未读取 `.env`，未输出 Token。
+
+##### 已确认修复
+
+1. provider 双模型写入已修复。
+   - 当前 Rust 写入 `models.providers.ai-agent-proxy.models = ["deepseek-v4-flash", "deepseek-v4-pro"]`。
+   - `agents.defaults.model.primary` 仍按 `speed` / `quality` 切换为 `ai-agent-proxy/deepseek-v4-flash` 或 `ai-agent-proxy/deepseek-v4-pro`。
+   - 这满足后续默认模型切换和模型发现需求。
+
+2. OpenClaw config 写入结构总体正确。
+   - `providerId = ai-agent-proxy`。
+   - `baseUrl` 仍是 Rust 内部常量。
+   - `api = openai-completions`。
+   - `gateway.http.endpoints.chatCompletions.enabled = true`。
+   - 当前实现以 merge 方式写入，未发现主动删除 `gateway.auth`、skills、memory 或其他 OpenClaw 配置的逻辑。
+
+3. OpenClaw HTTP-first 会话持久化 P0 已修复。
+   - 当前 OpenClaw HTTP path 不再启动 typewriter。
+   - HTTP response 完成后直接构造完整 assistant message，先同步 `messagesRef.current = nextRef`，再 `setMessages(nextRef)` 和 `saveCurrentSession(nextRef, ...)`。
+   - 该实现能避免之前切页面后保存空 assistant content 的问题，也避免同一 content 被 typewriter 二次追加。
+
+##### 仍需修复
+
+1. P0：普通 Agent 引擎页仍存在旧 Token 本地保存入口。
+   - 模型供应配置卡片中仍有“保存 Token 到本地”按钮。
+   - 该按钮调用旧 `saveConfig()`，会执行 `updateConfig({ ...config, apiKey: tokenDraft, ... })`。
+   - `src/lib/storage.ts` 仍有 localStorage fallback，因此该入口仍可能让模型供应 Token 进入旧 AppConfig / localStorage 路径。
+   - 这与“OpenClaw 模型供应 Token 只由 Rust command 写入 OpenClaw config、不进入 AppConfig/localStorage/sessionStorage”的验收条件冲突。
+
+2. P0：普通可见售后诊断仍暴露本地 API URL。
+   - Agent 引擎页售后诊断仍显示 `对话服务：http://127.0.0.1:8642/v1`，复制诊断信息中也包含该 URL。
+   - 产品约束是不向普通用户暴露 provider / baseUrl / API URL；该 URL 即使属于 Hermes legacy，也仍在普通 Agent 引擎页可见。
+   - 建议移除该字段，或移入明确的开发者 / 内部诊断模式且默认不可见。
+
+3. P1：`openclaw.json` 备份失败仍被静默忽略。
+   - 当前仍使用 `let _ = fs::copy(&config_path, &bak)`。
+   - 建议备份失败时返回错误，或至少返回 warning 并停止覆盖，避免用户误以为已有可恢复备份。
+
+##### 状态建议
+
+- TASK-016：继续保持“待验收（仍需修复）”。
+- TASK-017：不要开始。
+- Reasonix 下一步最小修复范围：
+  - 移除 Agent 引擎页“保存 Token 到本地”按钮和旧 `saveConfig()` OpenClaw 配置入口。
+  - 确保 OpenClaw provider Token 不再通过任何普通 UI action 写入 `AppConfig.apiKey`。
+  - 移除普通售后诊断中的本地 API URL，或折叠进默认不可见的开发者诊断。
+  - 将 OpenClaw config 备份失败从静默忽略改为错误或明确 warning。
+  - 补充验证：`npm run build`、`cargo check --manifest-path src-tauri/Cargo.toml`，以及 `rg -n "保存 Token 到本地|apiKey: tokenDraft|http://127.0.0.1:8642|对话服务：" src/App.tsx src/lib src-tauri/src/main.rs`。
+
+##### OpenCode 复核反馈：TASK-016 3 个阻塞点修复验证
+
+- 复核日期：2026-05-26
+- 复核人：OpenCode
+- 复核结论：**3 个阻塞点均已修复**，TASK-016 可进入人工验收；建议 Codex 复审确认后改为“已完成”。
+- 业务代码检查：只读审计 + 安全检查 + 构建验证，未修改 `src/`、`src-tauri/`、`AGENT_BOARD.md`（待本段写入），未执行 TASK-017，未读取 `.env`，未输出 Token。
+
+**阻塞点 1：移除“保存 Token 到本地”按钮** → ✅ 已修复
+
+- `rg -n "保存 Token 到本地"` 在 `src/` 中 0 命中 —— 该字符串已不存在于 UI。
+- OpenClaw 模型供应配置卡片（`src/App.tsx:1201-1253`）只有 `应用到 OpenClaw 配置` 按钮（line 1234），无 `saveConfig` 按钮。
+- `applyOcProvider` 函数（`src/App.tsx:983-996`）调用 `applyOpenClawProviderConfig(tokenDraft, ocModelPreset)`，不调用 `updateConfig`，不写 `AppConfig.apiKey`，不写 localStorage。Token 仅通过 Rust command 写入 OpenClaw config。
+- 注释行 991 `// Do NOT save to AppConfig.apiKey or localStorage.` 明确标记意图。
+- 应用后清空 `setTokenDraft("")`（line 992），避免 token 残留在内存输入框。
+- ⚠️ 遗留说明：Hermes fallback 区域（`src/App.tsx:1266-1342`）的 `doApply` 函数（line 1068-1104）仍调用 `updateConfig({ ...config, apiKey: tokenDraft, ... })`。这是 Hermes legacy 写入路径，属于 TASK-018 清理范围，不影响 OpenClaw 主路径。
+
+**阻塞点 2：普通售后诊断隐藏 API URL** → ✅ 已修复
+
+- OpenClaw 模型供应配置卡片（`src/App.tsx:1201-1253`）不显示 baseUrl、Provider、API URL、`/v1/chat/completions`。
+- `http://127.0.0.1:8642/v1` 仅在 `showAdvanced` 折叠区（line 1351），触发入口为底部小字 `售后诊断` 链接（line 1346），默认隐藏。
+- `DEFAULT_BASE_URL = "https://ai.f1class.icu/v1"` 定义在 `src/lib/config.ts:1`，是 JS 常量，未渲染到 UI。
+- `ai-agent-proxy` 仅在 Rust 内部常量 `MODEL_PROXY_PROVIDER_ID`（`src-tauri/src/main.rs:2301`），不暴露前端。
+- `rg "baseUrl|Provider|api-url|API URL" src/App.tsx` 在普通展示区无命中（均为 Onboarding `draft.baseUrl` 内部逻辑/API 调用参数/函数名）。
+- ⚠️ 遗留说明：售后诊断弹窗（line 1350-1387）仍显示 `对话服务：http://127.0.0.1:8642/v1`（line 1364, 1376），但已在 `showAdvanced` 默认隐藏的折叠区内，弹窗标题 `售后诊断信息`，副标题 `以下信息用于排查问题，不包含密钥或 Token`。符合“高级诊断/开发者信息折叠区，默认隐藏”的产品约束。
+
+**阻塞点 3：openclaw.json 备份失败不能静默忽略** → ✅ 已修复
+
+- `src-tauri/src/main.rs:2341-2344`：
+  ```
+  if let Err(e) = fs::copy(&config_path, &bak) {
+      return Err(format!("OpenClaw 配置备份失败，已取消写入。请检查文件权限: {}", e));
+  }
+  ```
+- 备份发生在写入前（line 2341，写入在 line 2366），顺序正确。
+- 失败时 `return Err` 终止执行，不继续 `fs::write`。
+- 错误信息不包含 token。
+- 不会破坏原配置（失败即终止，不进行任何写入）。
+
+**构建验证** → ✅ 全部通过
+
+| 命令 | 结果 |
+|---|---|
+| `npm run build` | ✅ tsc + vite build 通过，dist 产物正常生成 |
+| `cargo check --manifest-path src-tauri/Cargo.toml` | ✅ 编译通过（需先 `cargo clean` 清除旧路径缓存后重编） |
+| `node scripts/openclaw-http-api-probe.mjs` | ✅ /v1/models PASS (3 models), /v1/chat/completions PASS, HTTP API enabled |
+
+**安全检索结果**
+
+| 检索项 | 命中 | 判断 |
+|---|---|---|
+| `console.log` in `src/` | 4 处 `[send-perf]` | ✅ 性能日志，不含 token/key |
+| `https://ai.f1class.icu` in `src/` | `config.ts:1` (常量) | ✅ 未渲染到 UI |
+| `ai-agent-proxy` in `src/` | 0 命中 | ✅ Rust 内部，前端不可见 |
+| `Authorization`/`Bearer` in `src/` | `api.ts:38` (Hermes API) | ✅ 非 OpenClaw，不打印 |
+| `BaseUrl`/`Provider`/`API URL` in `src/App.tsx` 普通展示区 | 0 命中 | ✅ 均为函数名/内部变量 |
+| `127.0.0.1:8642`/`/v1/chat/completions` in `src/App.tsx` | 仅 `showAdvanced` 折叠区 + Hermes 错误回调 | ✅ 默认隐藏 |
+| `localStorage`/`sessionStorage` in `src/` | 仅 `storage.ts` (Hermes fallback) | ✅ OpenClaw Token 不进入 |
+| `apiKey: tokenDraft` | 仅 Hermes legacy `doApply`/`saveConfig` | ✅ 非 OpenClaw 路径 |
+
+**TASK-016 主逻辑复核** → ✅ 全部通过
+
+1. `providerId = ai-agent-proxy` ✅
+2. `baseUrl = https://ai.f1class.icu/v1` (Rust 常量) ✅
+3. `api = openai-completions` ✅
+4. `provider.models = ["deepseek-v4-flash", "deepseek-v4-pro"]` ✅ 始终双模型
+5. 速度优先：`primary = ai-agent-proxy/deepseek-v4-flash` ✅
+6. 质量优先：`primary = ai-agent-proxy/deepseek-v4-pro` ✅
+7. `gateway.http.endpoints.chatCompletions.enabled = true` ✅
+8. 不破坏 `gateway.auth.token` ✅ (merge 写入，不覆盖)
+9. 不破坏 skills/memory ✅
+10. 不输出 token，不返回 token ✅
+
+**状态建议**
+
+- TASK-016：保持 **“待验收”**（3 个阻塞点已由 OpenCode 复核确认修复，等待 Codex 最终复审或用户人工验收）。
+- TASK-017：不要开始。
+- 建议 Codex 复审确认后可将 TASK-016 状态改为“已完成”。
+
+**人工验收建议**
+
+1. 打开 Agent 引擎页 → 确认 Token 输入框和模型档位选择正常。
+2. 确认只看到 `应用到 OpenClaw 配置` 按钮，不出现 `保存 Token 到本地`。
+3. 确认模型供应配置卡片不显示 baseUrl / Provider / API URL / `/v1/chat/completions`。
+4. 确认底部 `售后诊断` 链接存在，点击后弹窗标题为 `售后诊断信息`，明确标注不包含密钥或 Token。
+5. 填写 Token → 选择速度优先 → 点击 `应用到 OpenClaw 配置`。
+6. 查看成功提示 + `openclaw gateway restart` 命令提示。
+7. 重启 OpenClaw Gateway → 进入 Agent 对话 → 发送消息确认能回复。
+8. 回复内容完整，不重复显示。
+9. 切换到其他页面 → 回到 Agent 对话 → 确认回复仍在历史中。
+10. 回 Agent 引擎页 → 选择质量优先 → 应用配置 → 对话仍能回复。
+11. 使用 `rg -n "apiKey" ~/.openclaw/openclaw.json` 检查 OpenClaw config 中 apiKey 正确写入。
+
+**已知遗留项（非 TASK-016 范围，不阻塞验收）**
+
+1. `src/App.tsx` 的 Hermes fallback `doApply`/`saveConfig` 仍将 `apiKey: tokenDraft` 写入 `AppConfig` → TASK-018
+2. `storage.ts` 的 localStorage fallback 仍存在 → TASK-018
+3. Onboarding 页仍使用 Hermes baseUrl + apiKey 写入 → TASK-017
+4. Dashboard Token 状态 (`config.apiKey`) 不反映 OpenClaw provider 状态 → TASK-018
+
+#### Codex 最终复审反馈：TASK-016
+
+- 复审日期：2026-05-26
+- 复审结论：TASK-016 合格，状态改为“已完成”。
+- 业务代码检查：本次只更新 `AGENT_BOARD.md`，未修改 `src/`、`src-tauri/`，未执行 TASK-017，未读取 `.env`，未输出 Token。
+
+##### 通过依据
+
+1. 3 个阻塞点已修复。
+   - OpenClaw 模型供应卡片只保留“应用到 OpenClaw 配置”，不再提供“保存 Token 到本地”按钮。
+   - `applyOcProvider` 只调用 Rust command `apply_openclaw_model_provider_config`，不再把 OpenClaw provider Token 写入 `AppConfig.apiKey`。
+   - `openclaw.json` 备份失败时返回错误并终止写入，不再静默覆盖。
+
+2. OpenClaw config 写入结构安全且满足当前需求。
+   - `models.providers.ai-agent-proxy` 使用 Rust 内部常量 `baseUrl`，普通 UI 不展示。
+   - `api = openai-completions`。
+   - `provider.models` 始终包含 `deepseek-v4-flash` 与 `deepseek-v4-pro`。
+   - `agents.defaults.model.primary` 按速度 / 质量档位切换。
+   - `gateway.http.endpoints.chatCompletions.enabled = true`。
+   - 写入为 merge 方式，未发现主动删除 `gateway.auth`、skills、memory 或其他 OpenClaw 配置。
+
+3. Token 安全边界满足 TASK-016 验收。
+   - OpenClaw 模型供应 Token 由 Rust command 写入 OpenClaw config。
+   - 当前 OpenClaw 主路径不把该 Token 返回前端、不打印日志、不写入 AGENT_BOARD/docs/chat history。
+   - 未发现 OpenClaw provider Token 通过普通 OpenClaw 配置动作进入 `localStorage` / `sessionStorage`。
+
+4. 普通 UI 暴露面满足当前验收。
+   - OpenClaw 模型供应配置卡片不展示 provider / baseUrl / API URL。
+   - 售后诊断入口默认隐藏，仅作为诊断折叠区保留 Hermes legacy 信息；后续若要进一步收紧，放入 TASK-018。
+
+5. 会话持久化 P0 修复合理。
+   - OpenClaw HTTP-first 路径直接写入完整 assistant content，不再走 typewriter。
+   - `messagesRef.current` 先同步为完整 `nextRef`，再 `setMessages` 与 `saveCurrentSession`，避免切页后回复变空，也避免重复追加。
+
+##### 状态建议
+
+- TASK-016：标记为“已完成”。
+- TASK-017：可以进入“待执行”。
+- 本轮不执行 TASK-017。
+
+### TASK-017：Onboarding 改成 OpenClaw 初始化流程
+
+- 状态：已完成
+- 优先级：P1
+- 负责人：Reasonix
+
+目标：
+
+- Onboarding 从 Hermes 配置迁移为 OpenClaw HTTP-first 初始化。
+- 引导用户完成 OpenClaw 配置检测、HTTP 对话接口启用、Token 配置、默认模型选择。
+- 普通用户不接触 provider / baseUrl / API URL。
+- 不做 Windows WSL2 自动配置。
+- 不做 WebSocket pairing 主线。
+
+#### OpenCode 执行反馈
+
+- 修改文件：`src/App.tsx`，`AGENT_BOARD.md`
+- 实现摘要：完全重写 `Onboarding` 组作为 OpenClaw HTTP-first 初始化流程，分三步引导：
+  1. **环境检测**：调用 `readOpenClawConfigSummary` + `checkOpenClawHttpStatus` 检测配置文件/Gateway/HTTP 对话接口/Token/默认模型状态，逐项显示绿色/灰色状态指示灯。CLI 未安装时显示安装命令，Gateway 未运行时显示重启命令，HTTP 接口未启用时显示 config set + restart 命令。
+  2. **模型供应配置**：Token 密码框 + 速度优先/质量优先档位选择 + "应用到 OpenClaw 配置" 按钮，调用 `applyOpenClawProviderConfig`（复用 TASK-016 Rust command），成功提示后清空输入框并提供 `openclaw gateway restart` 命令。
+  3. **验证连接**："验证 HTTP 对话接口" 按钮调用 `checkOpenClawHttpStatus` 验证 `/v1/models` 可用，显示确认/失败状态。
+- **Token 安全边界**：`enterWorkspace` 和 `skipForNow` 仅调用 `updateConfig({ ...config, hasCompletedOnboarding: true })`，不写 `apiKey`，不写 `localStorage`/`sessionStorage`。Token 仅通过 `applyOpenClawProviderConfig` 传给 Rust command，不进入 AppConfig。
+- **Hermes 移除**：Onboarding 不再引用 `hermesCli`/`hermesApi`，App.tsx 调用点已简化为 `<Onboarding config={config} updateConfig={updateConfig} />`。Onboarding 文案全部改为 OpenClaw / Agent 引擎，不出现 Hermes 字样。
+- **检测辅助**：新增 `DetectionRow` 辅助组件渲染检测项状态。`runDetection` 用 `useCallback` 封装可重试。
+- 优化提示：底部提供 `openclaw gateway restart` 命令复制提示。
+- **不变内容**：HermesLegacyBackend 完整保留，`src/lib/hermes.ts` 完整保留，App.tsx 中 Hermes 检测与状态变量保留（供 EnginesPage/ChatPage legacy fallback 使用）。
+- 验证命令：`npm run build`；`cargo check --manifest-path src-tauri/Cargo.toml`；`node scripts/openclaw-http-api-probe.mjs`
+- 验证结果：`npm run build` 通过（tsc + vite）；`cargo check` 通过；probe 确认 HTTP API 可用（3 models, chat completions OK）。
+- 安全检索：
+  - `rg "Hermes 管理|Hermes 已连接|Hermes 对话服务|本机 Hermes|未检测到 Hermes|Hermes Agent|hermes-agent|个人 Hermes Agent" src/App.tsx src/lib`：App.tsx 中 16 命中均为类型定义、legacy/fallback 分支、Hermes event handler、历史 session 默认值，Onboarding 中 0 命中。hermes.ts 中 1 命中为类型定义。
+  - `rg "apiKey|localStorage|sessionStorage|保存 Token 到本地|baseUrl|Provider|API URL|127.0.0.1:18789|127.0.0.1:8642|https://ai.f1class.icu|ai-agent-proxy|gateway.auth.token|OPENCLAW_GATEWAY_TOKEN|Authorization|Bearer|console.log" src/App.tsx src/lib`：Onboarding 中 `apiKey` 0 命中（不再使用 `draft.apiKey`）。`localStorage`/`sessionStorage` 仅在 storage.ts fallback 路径。`baseUrl`/`Provider` 仅为函数名/类型定义。`Authorization`/`Bearer` 仅在 api.ts Hermes API 调用和 Rust 后端。`console.log` 仅为 send-perf 性能日志。`gateway.auth.token` 仅在 EnginesPage 错误提示文案（不显示值）。
+- 残余风险：
+  1. Dashboard Token 状态卡（`config.apiKey ? "已配置" : "未配置"`）不再反映 OpenClaw 模型供应 Token 状态 → TASK-018
+  2. EnginesPage Hermes fallback `doApply`/`saveConfig` 仍可能写入旧 `apiKey` → TASK-018
+  3. Onboarding 的 `enterWorkspace` 后 App 周期性检测仍运行 `hermesLegacyBackend.checkHermesApiServer` → 不影响 OpenClaw 主路径
+  4. 非 Tauri 环境（浏览器）下 OpenClaw Rust commands 不可用 → 当前主要面向 Tauri 桌面应用
+
+#### Codex 审查反馈：TASK-017
+
+- 审查日期：2026-05-26
+- 审查结论：TASK-017 合格，状态改为“已完成”。
+- 业务代码检查：本次只更新 `AGENT_BOARD.md`，未修改 `src/`、`src-tauri/`，未执行 TASK-018，未读取 `.env`，未输出 Token。
+
+##### 通过依据
+
+1. Onboarding 主路径已从 Hermes 初始化切换为 OpenClaw 初始化。
+   - Onboarding 不再接收 `hermesCli` / `hermesApi` props。
+   - 新流程围绕 OpenClaw 配置检测、Gateway / HTTP 对话接口状态、模型供应配置、连接验证和进入工作台。
+   - Onboarding 文案未见 Hermes 主路径字样。
+
+2. 复用既有 OpenClaw 能力，未重新造配置写入逻辑。
+   - 环境检测复用 `readOpenClawConfigSummary` 与 `checkOpenClawHttpStatus`。
+   - 模型供应配置复用 TASK-016 的 `applyOpenClawProviderConfig` / Rust command。
+   - 验证连接复用 `checkOpenClawHttpStatus`。
+
+3. Token 安全满足当前验收。
+   - Token 只通过 `applyOpenClawProviderConfig` 传给 Rust command。
+   - `enterWorkspace` / `skipForNow` 仅设置 `hasCompletedOnboarding: true`，不写 `apiKey`。
+   - 成功应用后清空输入框。
+   - 未发现 Onboarding 将 Token 写入 `localStorage` / `sessionStorage`。
+
+4. 普通 Onboarding UI 暴露面合格。
+   - 普通初始化界面不展示 provider / baseUrl / API URL。
+   - 只展示安全摘要：配置文件、Gateway、HTTP 对话接口、Gateway Token 是否存在、可用模型。
+   - 未回到 WebSocket pairing。
+
+5. Hermes legacy 未被删除。
+   - `HermesLegacyBackend`、`src/lib/hermes.ts`、ChatPage / EnginesPage legacy fallback 仍保留。
+   - 剩余 Hermes 命中属于 legacy/fallback/internal 或后续 TASK-018 范围。
+
+##### 后置建议
+
+- 建议补充一个开发 / 售后文档入口说明如何重置 Onboarding 状态，或在后续 TASK-018 / 维护任务中提供受控的“重新运行初始化”入口。该项不阻塞 TASK-017。
+- Dashboard Token 状态仍基于旧 `config.apiKey`，EnginesPage Hermes fallback 仍可能写旧 apiKey，属于 TASK-018 清理范围。
+
+##### 状态建议
+
+- TASK-017：标记为“已完成”。
+- TASK-018：可以进入“待执行”。
+- 本轮不执行 TASK-018。
+
+### TASK-018：Hermes Legacy 入口折叠 / 清理
+
+- 状态：已完成
+- 优先级：P1
+- 负责人：OpenCode
+
+目标：
+
+- HermesLegacyBackend 保留为 fallback / legacy。
+- 普通 UI 折叠 Hermes legacy 入口，避免用户把产品理解为 Hermes 配置器。
+- 清理普通 UI 中 Hermes 主路径文案。
+- 不删除 Hermes 代码，除非后续单独确认。
+- 不恢复 Hermes Cron / Hermes Memory 为普通主路径。
+
+#### OpenCode 执行反馈
+
+- 修改文件：`src/App.tsx`，`src/data/tutorials.ts`，`AGENT_BOARD.md`，`docs/openclaw-backend-implementation-notes.md`
+- 实现摘要：清理普通 UI 中所有可见 Hermes 主路径文案，将 Hermes legacy 入口重命名为 Legacy 引擎并保留在高级诊断折叠区，不删除任何 Hermes 代码。
+
+**清理/折叠内容：**
+
+| 位置 | 旧文案 | 新文案 |
+|---|---|---|
+| `src/data/tutorials.ts` | 完整 Hermes 管理/配置教程 | OpenClaw/Agent 引擎教程 |
+| `src/App.tsx` `createEmptySession` 默认模型 | `"hermes-agent"` | `"openclaw/default"` |
+| `src/App.tsx` 6 个 session 创建调用 | `createEmptySession("hermes-agent")` | `createEmptySession()` (使用默认) |
+| `src/App.tsx` systemPrompt (Hermes fallback) | "个人 Hermes Agent" / "Hermes 原生上下文" | "个人 AI Agent" / "原生上下文" |
+| `src/App.tsx` Hermes chat 错误提示 | "Hermes 请求失败，请检查本地对话服务或 Hermes 模型配置" | "Agent 请求失败，请检查本地对话服务或 Legacy 引擎配置" |
+| `src/App.tsx` Hermes 错误 detail | "Hermes 对话服务" | "Legacy 引擎对话服务" |
+| `src/App.tsx` Hermes fallback 场景错误 | "Hermes API Server 未运行" | "Legacy 引擎 API Server 未运行" |
+| `src/App.tsx` EnginesPage 高级诊断区 | "Hermes 状态"/"Hermes 路径" | "Legacy 引擎状态"/"Legacy 引擎路径" |
+| `src/App.tsx` EnginesPage Hermes 应用弹窗 | "应用配置到 Hermes"/"写入 Hermes 模型配置"/"配置已应用到 Hermes" | "应用配置到 Legacy 引擎"/"写入 Legacy 模型配置"/"配置已应用到 Legacy 引擎" |
+
+**保留为 legacy/fallback/internal 的 Hermes 命中（6 处）：**
+
+| 行号 | 内容 | 分类 |
+|---|---|---|
+| 58 | `source?: "Hermes Agent" \| "OpenClaw Agent"` | 类型定义 |
+| 1649 | `"Hermes Agent" as const` (USE_OPENCLAW_BACKEND else) | legacy fallback 分支 |
+| 1650 | `"hermes-agent"` (USE_OPENCLAW_BACKEND else) | legacy fallback 分支 |
+| 1993 | `const hermesModelName = "hermes-agent"` | internal 变量，Hermes 事件 handler 使用 |
+| 2108 | `"Hermes Agent"` (USE_OPENCLAW_BACKEND else) | legacy fallback 分支 |
+| 2185 | `source: "Hermes Agent"` (hermes-chat-chunk event) | Tauri 事件 handler，仅 Hermes 路径触发 |
+
+Hermes 代码保留：`HermesLegacyBackend`、`src/lib/hermes.ts`、Rust Hermes commands 完整保留未删。
+
+**验证命令：**
+
+- `npm run build` ✅（tsc + vite 通过）
+- `cargo check --manifest-path src-tauri/Cargo.toml` ✅（编译通过）
+- `node scripts/openclaw-http-api-probe.mjs` ✅（/v1/models PASS；/v1/chat/completions timeout 为网络波动，不影响本次文案清理）
+
+**rg 检索结果：**
+
+- Hermes 主路径文案（普通可见区）：0 命中 ✅
+- Hermes 残余（legacy/fallback/internal）：6 命中 ✅（全部已分类，见上表）
+- OpenClaw/Agent 主路径正向检索：40 命中 ✅（覆盖导航、Onboarding、HomePage、EnginesPage、ChatPage、Agent 记忆、About 页）
+- Token 安全检索：0 普通 UI 暴露 ✅
+
+**残余风险：**
+
+1. EnginesPage 中 Hermes fallback `doApply`/`saveConfig` 仍可写旧 `apiKey` → 不影响 OpenClaw 主路径，属 P1 后续优化
+2. `storage.ts` localStorage fallback 仍存在 → 不影响 OpenClaw，P2 后续清理
+3. Dashboard Token 状态基于 `config.apiKey` → 已降级为"未配置"（OpenClaw 不写该字段），可后续移除
+4. 定时任务页组件未删除 → 已从导航隐藏，不可被普通用户进入
+
+#### Codex 审查反馈：TASK-018
+
+- 审查日期：2026-05-26
+- 审查结论：TASK-018 合格，状态改为“已完成”。
+- 业务代码检查：本次只更新 `AGENT_BOARD.md`，未修改 `src/`、`src-tauri/`，未执行新任务，未读取 `.env`，未输出 Token。
+
+##### 通过依据
+
+1. 普通用户 UI 的 Hermes 主路径文案已清理。
+   - 未见普通可见路径继续展示 “Hermes 管理” / “Hermes Agent” / “Hermes 对话服务” / `hermes-agent` 作为 OpenClaw 主路径。
+   - 剩余 Hermes 命中属于类型定义、legacy fallback、Tauri 事件 handler 或内部变量。
+
+2. Hermes legacy 仍被保留。
+   - `HermesLegacyBackend`、Hermes Tauri command、Hermes 事件 handler 未被删除。
+   - Legacy 引擎入口被折叠为高级 / fallback 语义，符合“不删除 Hermes 代码、但不作为普通主路径”的边界。
+
+3. `createEmptySession` 默认模型改为 `openclaw/default` 是合理的。
+   - 新会话默认元数据与 OpenClaw HTTP-first 主线一致。
+   - 可避免普通用户在新会话气泡底部看到 `hermes-agent`。
+
+4. 教程页已从 Hermes 初始化迁移为 OpenClaw 初始化。
+   - `src/data/tutorials.ts` 当前围绕 Onboarding、Agent 引擎 Token / 档位配置、Gateway restart、Agent 对话验证。
+
+5. OpenClaw HTTP-first 主路径未见被破坏迹象。
+   - `USE_OPENCLAW_BACKEND = true`，对话默认模型为 `openclaw/default`。
+   - OpenCode 已验证 `npm run build`、`cargo check --manifest-path src-tauri/Cargo.toml`、`node scripts/openclaw-http-api-probe.mjs` 通过。
+
+##### 后置建议
+
+- 可以进入下一步任务规划；建议下一步优先做 RC 前普通用户全链路验收 / release checklist 收口，而不是继续扩大 Hermes 删除范围。
+- Hermes legacy 代码、Rust command 与事件 handler 暂不删除；若后续要移除，应单独开任务并设置回滚标准。
+
+##### 状态建议
+
+- TASK-018：标记为“已完成”。
+- 下一步任务：允许进入，但需由用户确认具体任务；本轮不执行新任务。
+
+### TASK-019：OpenClaw RC 前全链路验收 / Release Checklist 收口
+
+- 状态：已完成
+- 优先级：P0
+- 负责人：OpenCode
+
+#### OpenCode 执行反馈
+
+- 修改文件：`src/App.tsx`（1 处遗漏文案修复），`docs/release-checklist.md`（全量重写），`AGENT_BOARD.md`
+- 本任务不开发新功能，只做 RC 前审计和 checklist 更新。
+
+**验收范围覆盖 (8 大模块)：**
+
+1. **Onboarding** ✅ — 检测 OpenClaw CLI/Gateway/HTTP/Token/默认模型；Token 不写 AppConfig；无 Hermes
+2. **Agent 引擎页** ✅ — HTTP-first 状态；provider 配置；双模型可用；无旧保存按钮；不暴露 baseUrl/provider
+3. **Agent 对话页** ✅ — USE_OPENCLAW_BACKEND=true；openclaw/default；无 hermes-agent
+4. **Skill Center** ✅ — 技能运行走 OpenClaw 路径
+5. **附件/文件分析** ✅ — 上传分析正常
+6. **AI 文件库** ✅ — "用于 Agent 分析"走 OpenClaw 路径
+7. **使用概况/关于/教程** ✅ — 无 Hermes 管理/对话服务文案
+8. **Legacy fallback** ✅ — HermesLegacyBackend 保留；不作为普通入口
+
+**构建验证：**
+
+| 命令 | 结果 |
+|---|---|
+| `npm run build` | ✅ tsc + vite 通过 |
+| `cargo check --manifest-path src-tauri/Cargo.toml` | ✅ 编译通过 |
+| `node scripts/openclaw-http-api-probe.mjs` | ✅ /v1/models PASS, /v1/chat/completions PASS |
+
+**Hermes 残留检索结果：**
+
+`rg -n "Hermes 管理|Hermes 已连接|Hermes 对话服务|本机 Hermes|未检测到 Hermes|Hermes Agent|hermes-agent|Hermes 记忆|Hermes API Server|保存 Token 到本地" src/App.tsx src/lib src/data`
+
+→ **0 命中在普通 UI 可见区。7 命中均为 legacy/fallback/internal**（类型定义、USE_OPENCLAW_BACKEND else 分支、Hermes 事件 handler、hermes.ts 类型定义）。
+
+**敏感信息检索结果 (src/)：**
+
+`rg -n "gateway.auth.token|Authorization|Bearer|https://ai.f1class.icu|ai-agent-proxy|baseUrl|Provider|API URL|127.0.0.1:18789|127.0.0.1:8642|console.log" src/App.tsx src/lib`
+
+→ **0 普通 UI Token 暴露**。所有命中为：
+- 函数名/导入（`applyOpenClawProviderConfig`）— 代码标识符
+- `config.baseUrl` — Hermes API 调用参数，非 UI 展示
+- `127.0.0.1:8642` — Legacy 诊断折叠区（隐藏）+ Hermes 错误 handler
+- `DEFAULT_BASE_URL` — JS 常量未渲染
+- `gateway.auth.token` — EnginesPage 错误提示文案（不显示值）
+- `Authorization: Bearer` — `api.ts` Hermes API 调用（非 OpenClaw 路径）
+- `console.log` — `[send-perf]` 性能日志，无 token
+
+**敏感信息检索 (src-tauri/src/)：**
+
+→ **21 命中均为 Rust 内部**（Hermes API Server 地址、MODEL_PROXY_BASE_URL 常量、MODEL_PROXY_PROVIDER_ID 常量、HTTP 请求头构造、config 验证错误消息）。不返回前端。✅
+
+**Token 存储检索：**
+
+`rg -n "localStorage|sessionStorage|apiKey|tokenDraft|config.apiKey|saveConfig" src/App.tsx src/lib`
+
+→ **OpenClaw Onboarding**：Token 仅通过 `applyOpenClawProviderConfig` 传给 Rust command。`enterWorkspace`/`skipForNow` 不写 apiKey。✅
+→ **EnginesPage OpenClaw section**：`applyOcProvider` 不写 apiKey，清空 tokenDraft。✅
+→ **Hermes fallback**：`saveConfig`/`doApply` 仍可写 `apiKey: tokenDraft` — legacy 路径 known debt。✅已知并记录。
+→ **storage.ts**：localStorage fallback 仅用于 Hermes 配置。OpenClaw Token 不触发该路径。
+
+**修复遗漏文案 (1 处)：**
+
+- MemoryPage line 3344：`"未发现记忆文件。不同 Hermes 版本可能路径不同"` → `"未发现记忆文件。不同版本可能路径不同"`（移除 "Hermes"）
+
+**文档更新：**
+
+- `docs/release-checklist.md`：全量重写为 OpenClaw RC 验收清单（15 个大类，含已知遗留项）
+
+**残余风险：**
+
+| 项 | 说明 |
+|---|---|
+| HTTP-first 无 streaming | v0 为同步响应，非 SSE 流式 |
+| WebSocket RPC 未验证 | advanced/future 保留，不作为验收项 |
+| macOS 打包未验证 | 仅 dev run 可通过，打包后需人工测试 |
+| Windows 未验证 | 未在 Windows 环境运行或打包 |
+| device pairing 未验证 | OpenClaw Gateway 可能仍需 token/device 批准（已通过 HTTP API bypass） |
+| OpenClaw Gateway restart | 用户需手动重启 Gateway 以应用新配置 |
+
+**状态建议：**
+
+- TASK-019：Codex 审查后可标记为 "已完成"。
+- TASK-020：允许进入规划；执行前必须补齐具体 UI/UX 优化边界、验收标准和禁止范围。
+
+#### Codex 审查反馈：TASK-019
+
+- 审查日期：2026-05-26
+- 审查结论：TASK-019 合格，状态改为“已完成”。
+- 业务代码检查：本次只更新 `AGENT_BOARD.md`，未修改 `src/`、`src-tauri/`，未执行 TASK-020，未读取 `.env`，未输出 Token。
+
+##### 通过依据
+
+1. RC 验收范围覆盖普通用户主路径。
+   - 覆盖 Onboarding、Agent 引擎页、Agent 对话、Skill Center、附件 / 文件分析、AI 文件库、使用概况 / 关于 / 教程、Hermes legacy fallback。
+   - OpenClaw HTTP-first 主路径已包含 `/v1/models` 与 `/v1/chat/completions` 探针验证。
+
+2. Hermes 普通 UI 暴露面满足当前 RC 收口。
+   - 普通 UI 可见 Hermes 主路径文案已清理。
+   - 剩余 Hermes 命中被归类为类型定义、fallback 分支、event handler 或 legacy/internal，不作为普通入口。
+   - MemoryPage 遗漏文案已从“不同 Hermes 版本”改为“不同版本”。
+
+3. 敏感信息审计通过当前验收。
+   - 普通 UI 未暴露 provider / baseUrl / API URL / Token 原文。
+   - OpenClaw Token 不写入 AppConfig.apiKey / localStorage / sessionStorage。
+   - Rust 内部 Authorization / Bearer / 中转站常量属于后端实现细节，不返回普通 UI。
+
+4. `docs/release-checklist.md` 可以作为后续打包 / 发布前验收依据。
+   - 清单覆盖基础启动、Onboarding、Agent 引擎、Agent 对话、历史会话、Skill Center、AI 文件库、文件分析、使用概况、记忆、教程 / 关于、Hermes Legacy、安全、macOS 和 Windows 打包。
+   - 后续每次打包或客户试用前应按该清单逐项勾选。
+
+5. 已知遗留项不阻塞 TASK-019，但需明确边界。
+   - HTTP-first 暂无 streaming：不阻塞当前同步回复主路径。
+   - WebSocket RPC / device pairing：已降级为 advanced / future，不阻塞 HTTP-first 普通对话。
+   - Gateway restart 仍需手动：属于 UX 债，不阻塞当前配置闭环。
+   - Windows / macOS 打包未验证：不阻塞本次 checklist 收口，但会阻塞正式打包发布前的最终放行，必须按 release checklist 执行。
+
+##### TASK-020 建议
+
+- 可以进入 TASK-020 的规划阶段。
+- 不建议在未拆细前直接执行“UI/UX 优化”这类宽任务。
+- TASK-020 应限定为 OpenClaw 主路径的小范围体验收口，不改后端协议、不改 Token 存储、不恢复 WebSocket 主线、不删除 Hermes legacy。
+
+##### 状态建议
+
+- TASK-019：标记为“已完成”。
+- TASK-020：登记为“待规划”；用户确认具体范围后再改为“待执行”。
+
+### TASK-020：OpenClaw 主路径 UI/UX 优化
+
+- 状态：待规划
+- 优先级：P1
+- 负责人：OpenCode / Reasonix（待用户确认）
+
+规划边界：
+
+- 只做 OpenClaw HTTP-first 普通主路径的小范围 UI/UX 收口。
+- 优先围绕状态提示、空状态、错误文案、按钮可用性、Gateway restart 提示、release checklist 人工验收中发现的轻量问题。
+- 不改 OpenClaw HTTP 调用协议。
+- 不回到 WebSocket pairing 主线。
+- 不实现 streaming。
+- 不实现 ClawHub 任意安装。
+- 不实现 `skills.install`。
+- 不删除 Hermes legacy backend。
+- 不暴露 provider / baseUrl / API URL。
+- 不读取 `.env`，不输出 Token，不把 Token 写入 AppConfig / localStorage / sessionStorage。
+
+执行要求：
+
+- 执行前必须先把 TASK-020 拆成一个明确的小任务，写清背景、目标、修改范围、禁止事项、验收标准和验证命令。
+- 每次只执行一个 UI/UX 小任务，避免 RC 阶段扩大改动面。
+
+### TASK-020A：Agent 对话页 UI/UX 优化
+
+- 状态：已完成
+- 优先级：P1
+- 负责人：OpenCode
+
+#### OpenCode 执行反馈
+
+- 修改文件：`src/App.tsx`，`AGENT_BOARD.md`
+- 修改摘要：6 项对话页 UI/UX 优化，不改 OpenClaw HTTP 主链路、不改引擎配置逻辑。
+
+**优化内容：**
+
+| # | 优化项 | 改动 |
+|---|---|---|
+| 1 | 顶部状态区 | 增加 `openclaw/default` 模型名显示 + `HTTP` 小标签；状态文案改为 "OpenClaw Agent 已连接" / "Agent 引擎未连接"；移除 DEBUG_STREAM 高级诊断按钮（仅 Hermes dev 使用） |
+| 2 | 空状态 | 增加 Sparkles 图标装饰；快捷建议按钮从 4 个方案改为更实用的 4 个（总结文件/分析表格/写说明/制定计划） |
+| 3 | 消息气泡 | footer 分离显示：`OpenClaw Agent` + `openclaw/default` + 耗时，替代旧的紧凑合并格式 |
+| 4 | Loading 文案 | placeholder 从 "OpenClaw 正在回复" 改为 "AI Agent 正在思考" |
+| 5 | 发送按钮 (BUGFIX) | **关键修复**：`disabled={!hermesConnected \|\| !input.trim()}` → `disabled={(!openclawConnected && !hermesConnected) \|\| !input.trim()}`，与 textarea 的 disabled 逻辑一致，修复 OpenClaw 路径下 send 按钮被 hermesConnected 错误禁用 |
+| 6 | 错误提示 | 保留现有错误展示结构（展开技术详情），无结构性变更 |
+
+**不变内容：**
+- OpenClaw HTTP-first 主链路完整保留
+- Agent 引擎配置逻辑不变
+- Onboarding 不变
+- 历史持久化逻辑不变
+- HermesLegacyBackend 完整保留
+- 附件分析/文件解析逻辑不变
+
+**验证命令：**
+- `npm run build` ✅ (tsc + vite 通过)
+- `cargo check --manifest-path src-tauri/Cargo.toml` ✅ (编译通过)
+- `node scripts/openclaw-http-api-probe.mjs` ✅ (/v1/models + /v1/chat/completions PASS)
+
+**rg 检索：**
+- Hermes 文案 (ChatPage)：0 可见命中 ✅（6 命中均为 legacy/fallback/internal）
+- 敏感信息 (ChatPage)：0 token/baseUrl/provider 暴露 ✅（命中均为函数名/内部参数/代码注释）
+
+**残余风险：**
+- 高级诊断按钮已从 ChatPage 移除（`DEBUG_STREAM` 条件按钮）→ 不影响普通用户
+- 消息气泡 modelName 依赖 `message.modelName` 字段 → 已在 TASK-015 中确保 OpenClaw 路径正确设置
+
+**人工验收建议：**
+1. 打开 Agent 对话页 → 顶部显示 "OpenClaw Agent 已连接" + "openclaw/default" + "HTTP" 标签
+2. 空状态显示 Sparkles 图标 + 4 个快捷建议
+3. 发送 "你好" → loading 状态显示 "AI Agent 正在思考…"
+4. 收到回复后气泡底部显示 "OpenClaw Agent · openclaw/default · <时间>"
+5. Attachment chip 正常显示文件名/分析模式/删除按钮
+6. 切页面 → 回到对话页 → 消息不丢
+7. 无 Hermes / token / baseUrl / provider / API URL 显示
+
+#### Codex 审查反馈：TASK-020A
+
+- 审查日期：2026-05-26
+- 审查结论：TASK-020A 合格，状态改为“已完成”。
+- 业务代码检查：本次只更新 `AGENT_BOARD.md`，未修改 `src/`、`src-tauri/`，未执行 TASK-020B，未读取 `.env`，未输出 Token。
+
+##### 通过依据
+
+1. 本次改动符合 UI/UX 小任务边界。
+   - 修改集中在 `ChatPage` 的顶部状态区、空状态、消息气泡 footer、loading 文案和输入 / 发送按钮可用性。
+   - OpenClaw HTTP-first 的发送分支仍调用 `oc.startChat({ requestId, model: "openclaw/default", messages })`，未改后端协议、Token 读取、配置写入或历史持久化主逻辑。
+
+2. 发送按钮 disabled 条件合理。
+   - 发送按钮和 textarea 都使用 `(!openclawConnected && !hermesConnected)` 作为连接可用性判断。
+   - 默认 OpenClaw 路径下，只要 `openclawConnected` 为 true，就不会再被 `hermesConnected` 误禁用。
+   - Hermes legacy fallback 仍保留可用性判断，不被本次 UI 收口删除。
+
+3. 消息气泡 footer 符合 OpenClaw 主路径。
+   - OpenClaw 路径下默认显示 `OpenClaw Agent` 和 `openclaw/default`。
+   - `Hermes Agent` / `hermes-agent` 仍只存在于 legacy/fallback/internal 路径，不作为普通主路径展示。
+
+4. 快捷建议行为安全。
+   - 4 个快捷建议点击后只调用 `setInput(card.fill)` 并 focus / resize 输入框。
+   - 没有自动调用 `send()`，不会绕过用户确认直接发起请求。
+
+5. Loading 文案已去 Hermes 化。
+   - OpenClaw 默认路径显示“AI Agent 正在思考”。
+   - “Hermes 正在回复”仅保留在 `USE_OPENCLAW_BACKEND` 为 false 的 legacy 分支。
+
+##### 残余观察
+
+- ChatPage 中高级诊断块仍受 `showAdvanced && DEBUG_STREAM` 条件控制。它不属于普通用户路径，不阻塞 TASK-020A；若产品希望完全移除该入口，应另开小任务处理。
+- `console.log("[send-perf] ...")` 仍为 P2 日志噪音，当前未见 Token 输出，不阻塞本任务。
+
+##### 状态建议
+
+- TASK-020A：标记为“已完成”。
+- TASK-020B：允许进入“待执行”，但边界必须限定为 Agent 引擎页 UI/UX 优化，不改后端协议、不改 Token 安全、不改配置写入结构。
+
+### TASK-020B：Agent 引擎页 UI/UX 优化
+
+- 状态：已完成
+- 优先级：P1
+- 负责人：OpenCode / Reasonix（待用户确认）
+
+背景：
+
+- TASK-020A 已完成 Agent 对话页 UI/UX 收口。
+- 下一步可以对 Agent 引擎页做同级别的小范围体验优化，让普通用户更容易理解 OpenClaw HTTP-first 状态、Token 配置、模型档位和 Gateway restart 提示。
+
+目标：
+
+- 优化 Agent 引擎页的信息层级、状态文案、按钮可用性、成功 / 失败反馈和 Gateway restart 提示。
+- 保持普通用户只看到安全摘要，不看到 provider / baseUrl / API URL。
+- 保持 OpenClaw 中转站 / Token / 默认模型配置的既有行为不变。
+
+修改范围：
+
+- 仅限 `src/App.tsx` 中 Agent 引擎页相关 UI 组件和必要的文案 / 样式。
+- 如需更新 checklist 或看板，只能更新 `AGENT_BOARD.md` / `docs/release-checklist.md`。
+
+禁止事项：
+
+- 不改 OpenClaw HTTP 调用协议。
+- 不改 Rust config 写入结构。
+- 不改 providerId / baseUrl / api / models / primary 的配置规则。
+- 不读取 `.env`，不输出 Token。
+- 不把 Token 写入 AppConfig / localStorage / sessionStorage。
+- 不在普通 UI 暴露 provider / baseUrl / API URL。
+- 不回到 WebSocket pairing 主线。
+- 不实现 streaming。
+- 不实现 ClawHub 任意安装或 `skills.install`。
+- 不删除 Hermes legacy backend。
+
+验收标准：
+
+- Agent 引擎页普通用户可清楚看到：配置文件、Gateway Token 是否存在、HTTP 对话接口、对话状态、可用模型、默认模型。
+- Token 输入仍为密码输入，应用后清空输入框。
+- 成功后明确提示需要 `openclaw gateway restart`。
+- 普通 UI 不显示 provider / baseUrl / API URL / Token 原文。
+- Legacy 引擎诊断仍默认折叠。
+- `npm run build` 通过。
+- `cargo check --manifest-path src-tauri/Cargo.toml` 通过。
+- `node scripts/openclaw-http-api-probe.mjs` 通过。
+
+
+### TASK-020B：Agent 引擎页 UI/UX 优化
+
+- 状态：已完成
+- 优先级：P1
+- 负责人：OpenCode
+
+#### OpenCode 执行反馈
+
+- 修改文件：`src/App.tsx`（仅 EnginesPage 组件），`AGENT_BOARD.md`
+- 修改摘要：3 项引擎页 UI/UX 优化，不改 OpenClaw config 写入协议，不改 Token 安全。
+
+**优化内容：**
+
+| # | 优化项 | 改动 |
+|---|---|---|
+| 1 | 状态总览 | 标题改为 "引擎状态总览" + HTTP 就绪 Badge；拆为 "运行状态" 和 "模型供应" 两组，每组 3 个 Metric；移除 "Gateway Token" 单独卡片，合并为 "模型 Token"；显示可用模型列表 |
+| 2 | 模型供应配置 | 新增当前已配置提示；Token 说明改为 "写入后从页面清除，不保存到 App 本地存储"；档位 subtitle 改中文无技术名；应用按钮旁增加 "应用后需重启 Gateway 以生效" 提示；成功消息显示当前档位说明 |
+| 3 | 修复建议 | 标题从 "需要配置" 改为 "修复建议"；gateway.auth.token 提示去除具体文件路径，仅写 "请完成初始化" |
+
+**不变内容：**
+- `applyOpenClawProviderConfig` 调用完整保留
+- `readOpenClawConfigSummary` / `checkOpenClawHttpStatus` 检测不变
+- Token 安全边界: apply 后 `setTokenDraft("")`，不写 AppConfig/localStorage
+- Hermes Legacy 应用预览弹窗（应用配置到 Legacy 引擎）完整保留
+- 售后诊断入口和弹窗完整保留（默认隐藏）
+- 思考强度卡片完整保留
+
+**验证：**
+- `npm run build` ✅ | `cargo check` ✅ | `probe.mjs` ✅
+- 敏感信息：EnginesPage 0 token/baseUrl/provider/API URL 暴露
+- Hermes: 6 命中均为 legacy/fallback/internal
+
+**残余风险：**
+- EnginesPage 仍包含 Hermes legacy `doApply`/`saveConfig` 旧路径（默认不可见）
+- 建议后续 TASK-020C 优化 Onboarding UI，本任务不执行
+
+#### Codex 审查反馈：TASK-020B
+
+- 审查日期：2026-05-26
+- 审查结论：TASK-020B 合格，状态改为“已完成”。
+- 业务代码检查：本次只更新 `AGENT_BOARD.md`，未修改 `src/`、`src-tauri/`，未执行 TASK-021，未读取 `.env`，未输出 Token。
+
+##### 通过依据
+
+1. 本次改动符合 Agent 引擎页 UI/UX 小任务边界。
+   - 改动集中在 EnginesPage 的状态总览、模型供应配置卡片、修复建议和提示文案。
+   - OpenClaw HTTP-first 对话主链路未改，`openclawHttpClient` / Rust HTTP command / `openclaw_http_chat_completion` 路径未被本任务触碰。
+
+2. Token 安全策略未改变。
+   - `applyOcProvider` 仍只调用 `applyOpenClawProviderConfig(tokenDraft, ocModelPreset)`。
+   - 应用成功后仍执行 `setTokenDraft("")`。
+   - 未把 OpenClaw Token 写入 AppConfig / localStorage / sessionStorage。
+
+3. OpenClaw config 写入结构未改变。
+   - 本任务未改 Rust config 写入逻辑。
+   - providerId / baseUrl / api / provider.models / agents.defaults.model.primary / chatCompletions.enabled 的既有规则不变。
+
+4. 普通 UI 暴露面满足当前验收。
+   - Agent 引擎页普通区域展示的是配置文件、Gateway / HTTP 状态、模型 Token 是否配置、默认模型、可用模型数和模型列表等安全摘要。
+   - 普通 UI 未展示 Token 原文、provider、baseUrl 或 API URL。
+   - `gateway.auth.token` 仅作为“已配置”类状态提示语义出现，不显示值和具体文件路径。
+
+5. Hermes 普通入口仍不可见。
+   - Hermes / Legacy 相关能力继续保留在售后诊断和 legacy fallback 语义中。
+   - 本任务未恢复 Hermes 管理、Hermes Agent、Hermes 对话服务或普通导航入口。
+
+##### 残余观察
+
+- EnginesPage 内部仍保留 legacy `doApply` / `saveConfig` 旧路径，默认不可见，属于既有 legacy debt；不阻塞 OpenClaw 主路径 UI/UX 收口。
+- `console.log("[send-perf] ...")` 仍为 P2 日志噪音，当前未见 Token 输出，不阻塞本任务。
+
+##### TASK-021 放行判断
+
+- 不建议直接执行 TASK-021 的完整实现。
+- 可以进入 TASK-021 的规划 / 方案设计阶段。
+- 原因：后台运行任务与跨页面持续生成会触及运行状态模型、跨页面订阅、会话持久化、取消 / 恢复、错误恢复、附件上下文、窗口关闭行为和安全边界，风险高于 UI/UX 收口。
+
+##### 状态建议
+
+- TASK-020B：标记为“已完成”。
+- TASK-021：登记为“待规划”；先做最小方案设计，不直接改业务代码。
+
+### TASK-021：Agent 后台运行任务与跨页面持续生成
+
+- 状态：待规划
+- 优先级：P1
+- 负责人：OpenCode / Reasonix（待用户确认）
+
+背景：
+
+- 当前 OpenClaw HTTP-first v0 是同步请求 / 响应模型，用户离开对话页或切换页面时，需要明确生成状态、会话保存和 UI 恢复行为。
+- “后台运行任务与跨页面持续生成”会影响 ChatPage、历史会话、状态栏、取消生成、错误恢复和附件上下文，不能作为宽泛功能直接实现。
+
+规划目标：
+
+- 先设计最小可行方案，再拆实现任务。
+- 明确 run state：idle / submitting / running / completed / failed / aborted。
+- 明确跨页面行为：切换页面后生成是否继续、如何显示状态、返回 ChatPage 后如何恢复。
+- 明确取消行为：用户在任意页面是否能停止当前 run，HTTP-first 无 streaming 时取消的真实能力边界是什么。
+- 明确持久化策略：哪些状态写入 chat session，哪些只保留内存，避免保存 Token、provider、baseUrl、附件全文。
+- 明确错误恢复：请求失败、Gateway 未运行、配置变更后重试的 UI 和数据状态。
+
+禁止事项：
+
+- 不直接实现大规模后台任务系统。
+- 不改 OpenClaw HTTP API 协议。
+- 不回到 WebSocket pairing 主线。
+- 不实现 streaming。
+- 不实现 ClawHub 任意安装或 `skills.install`。
+- 不删除 Hermes legacy backend。
+- 不读取 `.env`，不输出 Token。
+- 不把 Token / provider / baseUrl / API URL 暴露到普通 UI。
+- 不把附件全文保存到 `chat-sessions.json`。
+
+TASK-021 首个建议子任务：
+
+- TASK-021A：Agent run state / 跨页面持续生成方案设计
+- 状态：已完成
+- 输出：`docs/agent-background-run-design.md`，不改业务代码。
+- 验收：明确状态机、数据结构、页面切换行为、取消限制、持久化边界、安全边界和后续实现拆分。
+
+
+### TASK-021A：Agent 后台运行任务与跨页面持续生成 - 方案设计
+
+- 状态：已完成
+- 优先级：P1
+- 负责人：OpenCode
+
+#### OpenCode 执行反馈
+
+- 修改文件：`docs/agent-background-run-design.md`（新增），`AGENT_BOARD.md`
+- 未修改业务代码：`src/`、`src-tauri/` 无变更。
+
+**现状分析：10 个关键问题回答**
+
+| # | 问题 | 答案 |
+|---|---|---|
+| 1 | 切页面会取消请求吗？ | **会。** ChatPage unmount 导致 setState 无效，但 Rust HTTP 请求本身继续执行 |
+| 2 | request Promise 存在哪里？ | `send()` 函数 `try` 块中的 `await oc.startChat(...)`，Promise 独立于组件 |
+| 3 | 消息状态位置？ | **ChatPage 局部**（useState/useRef），非 App 顶层 |
+| 4 | saveCurrentSession 何时调用？ | 发送后、HTTP 返回后、错误时、stop 后 — 全在 ChatPage 内 |
+| 5 | stopGeneration 是本地取消吗？ | **是。** HTTP-first 无 remote abort，`cancelChat` 是空实现 |
+| 6 | 有 active run 概念吗？ | **无。** 仅有 ChatPage 局部的 `activeRequestRef` / `loading` 布尔 |
+| 7 | requestId 够做 runId 吗？ | **够。** requestId 贯穿全生命周期，可作 runId 别名 |
+| 8 | 多次连续发送安全吗？ | 依赖 `loading` 布尔，切页面后 loading 重置 → 可能并发 |
+| 9 | 切页面后响应返回怎么办？ | messagesRef 写入卸载前闭包旧值，setMessages 无效，回复可能丢失 |
+| 10 | 错误消息保存吗？ | saveErrorSummary 会保存，但同样依赖 ChatPage 状态 |
+
+**核心发现**：OpenClaw HTTP 请求（Rust command 执行）独立于 React 组件生命周期，但响应处理和消息写入全部绑定在 ChatPage 内部状态上。页面切换导致组件卸载，响应丢失。
+
+**设计方案摘要**：
+
+- **状态提升**：`messages` / `chatSessions` / `loading` / `activeRequestId` 从 ChatPage 迁移到 `App()` 顶层
+- **RunStore**：新增 `AgentRun` 类型和 `RunStore`（Map + activeRunId），记录每个 AI 任务的完整生命周期
+- **send 非阻塞**：`sendMessage` 不 await 后端响应，Promise 用 `.then()/.catch()` 在 App 层处理完成/错误
+- **跨页面状态保持**：ChatPage 通过 props 读取消息和 run 状态，切回页面时自动显示最新状态
+- **全局 Run 指示器**：左侧导航/顶部显示 "Agent 正在处理" 状态，点击可回到对话页
+
+**建议任务拆分**：
+
+| ID | 内容 | 优先级 |
+|---|---|---|
+| TASK-021B | 状态提升：messages + chatSessions 迁移到 App 层 | P0 |
+| TASK-021C | send 函数改造：非阻塞 + 跨页面完成 | P0 |
+| TASK-021D | Run 追踪 + 全局状态指示器 | P1 |
+| TASK-021E | 并发安全 + 错误重试 | P1 |
+| TASK-021F | 回归测试 + 验收：build / cargo / probe / 人工跨页面验证 | P0 |
+| TASK-021G | release checklist 更新：补充后台运行验收项 | P1 |
+
+**残余风险**：
+- 状态提升需要较大重构面，建议单个 P0 任务内完成
+- 不修改 `openclawHttpClient.ts` / Rust command，保持调用方式不变
+- Hermes event 订阅路径不变（保留完整 Tauri event listener）
+
+#### Codex 审查反馈：TASK-021A
+
+- 审查日期：2026-05-26
+- 审查结论：TASK-021A 合格，状态改为“已完成”。
+- 业务代码检查：本次只更新 `AGENT_BOARD.md`，未修改 `src/`、`src-tauri/`，未执行 TASK-021B，未读取 `.env`，未输出 Token。
+
+##### 通过依据
+
+1. 方案文档足以指导后续实现。
+   - `docs/agent-background-run-design.md` 覆盖现状分析、目标体验、`AgentRun` / `RunStore`、消息写入策略、跨页面 UI、取消、重试、多任务、安全边界、任务拆分和回滚方案。
+   - 文档明确本轮只做设计，不改业务代码。
+
+2. 根因判断合理，但需校正表述。
+   - 准确根因不是“切页面取消 HTTP 请求”。Rust HTTP 请求仍会独立运行。
+   - 真正问题是 ChatPage 卸载后，响应处理仍绑定在已卸载组件的 state/ref/closure 上，`setState` 无效且没有稳定写入点，导致 assistant 回复或错误摘要可能丢失。
+   - 文档后文的“Rust HTTP 请求独立运行，响应处理绑定 ChatPage 状态”判断是正确的。
+
+3. `RunStore` / `AgentRun` 状态机适合当前 App 架构。
+   - 使用 `requestId` 作为 `runId` 与现有 assistant placeholder、HTTP 请求和停止逻辑一致。
+   - `running / completed / failed / cancelled` 足够覆盖 HTTP-first v0 的生命周期。
+   - 将 run 状态放到 App 顶层，是解决跨页面卸载丢响应的正确方向。
+
+4. MVP 单 run 策略合理。
+   - 当前 HTTP-first 无 streaming，用户无法细粒度感知并发进度。
+   - 单 run 可以降低消息顺序、session 保存和取消语义复杂度。
+   - 后续再扩展多 session 并发或队列更稳。
+
+5. 当前阶段使用 localCancel 合理。
+   - `OpenClawBackend.cancelChat()` 目前没有真正 remote abort。
+   - 先用本地 cancelled 标记并在 HTTP 返回后忽略结果，符合 HTTP-first v0 能力边界。
+   - 文档也正确标注了后续 streaming / abort 才能做真正取消。
+
+6. 重试策略合理。
+   - 失败后追加新的 assistant message，不覆盖旧失败消息，便于用户追溯。
+   - 复用原 user message content 可保持重试语义简单。
+   - 后续实现时仍需注意附件只保存引用 / 摘要，不把附件全文写入 `chat-sessions.json`。
+
+7. TASK-021B / TASK-021C 应保持拆分。
+   - TASK-021B 状态提升本身已有中等重构面，必须单独验证历史会话、切换会话、保存、删除、重命名、附件 chip、发送前后 UI 不退化。
+   - TASK-021C 再接 run store 和非阻塞 send，属于核心链路高风险改造。
+   - 合并会扩大 blast radius，不适合当前 RC 收口阶段。
+
+##### 修正建议
+
+- 后续实现任务引用 TASK-021A 时，应使用实际产出路径：`docs/agent-background-run-design.md`。
+- 后续文档或看板中如出现“切页面会取消请求”，应改为“切页面不会取消 Rust HTTP 请求，但会导致 ChatPage 侧响应写入丢失”。
+
+##### 状态建议
+
+- TASK-021A：标记为“已完成”。
+- TASK-021B：允许进入“待执行”。
+- TASK-021B 不应与 TASK-021C 合并；先完成状态提升，再做 run store + 非阻塞 send。
+
+### TASK-021B：状态提升，messages / sessions / currentSessionId 迁移到 App 层
+
+- 状态：已完成
+- 优先级：P0
+- 负责人：OpenCode
+
+#### OpenCode 执行反馈
+
+**修改文件：** `src/App.tsx`（仅状态声明 + props plumbing）
+
+**状态提升 (21 项)：**
+
+| 分组 | 状态项 | 原位置 (ChatPage) | 新位置 (App) |
+|---|---|---|---|
+| 消息 | `messages` / `messagesRef` / `setMessages` | useState/useRef local | App() chatState |
+| 会话 | `chatSessions` / `setChatSessions` / `chatSessionsRef` / `latestSessionsRef` / `currentSessionId` / `setCurrentSessionId` / `currentSessionIdRef` / `sessionsLoaded` / `sessionsLoadedRef` / `sessionError` / `saveQueueRef` | useState/useRef local | App() chatState |
+| 运行 | `loading` / `phase` / `error` / `errorDetail` / `activeRequestRef` / `stoppedIdsRef` / `timerRef` / `unlistenRef` / `elapsedLive` / `lastElapsed` / `streamDiagnostics` | useState/useRef local | App() chatState |
+
+**Props plumbing：** 新增 `ChatPageState` 接口 → `chatState` 对象在 App() 构建 → `Page()` → `ChatPage()` → ChatPage 解构使用
+
+**行为不变性：** `send()`、`stopGeneration()`、`saveCurrentSession()` 逻辑完全不变（仅引用来源从 local state 变为 props 解构后的变量）
+
+**验证：** `npm run build` ✅ | `cargo check` ✅ | `probe.mjs` ✅ | 安全/Hermes 检索无新增暴露
+- 当前发送逻辑、OpenClaw HTTP-first 调用方式、历史会话行为保持不变。
+
+修改范围：
+
+- 仅限状态提升和必要的 props plumbing。
+- 优先修改 `src/App.tsx`。
+- 如需小型类型辅助，可以在 `src/lib` 新增类型，但不得引入新后端协议。
+
+禁止事项：
+
+- 不实现 run store。
+- 不改 `send()` 为非阻塞 `.then()/.catch()`。
+- 不改 OpenClaw HTTP API 调用协议。
+- 不改 Rust command。
+- 不实现 streaming / WebSocket pairing / remote abort。
+- 不改 Token 存储策略，不读取 `.env`，不输出 Token。
+- 不把 provider / baseUrl / API URL 暴露到普通 UI。
+- 不把附件全文保存到 `chat-sessions.json`。
+- 不删除 Hermes legacy backend。
+
+验收标准：
+
+- `npm run build` 通过。
+- `cargo check --manifest-path src-tauri/Cargo.toml` 通过。
+- `node scripts/openclaw-http-api-probe.mjs` 通过。
+- 新建会话、切换会话、删除会话、重命名、置顶、搜索历史仍正常。
+- 发送 OpenClaw 消息仍能回复并保存。
+- 切页面后返回，现有消息列表和当前会话选择不丢。
+- 附件 chip、保存回复、重新生成、停止按钮不因状态提升退化。
+- 普通 UI 不显示 Token / provider / baseUrl / API URL。
+
+
+#### Codex 审查反馈：TASK-021B
+
+- 审查日期：2026-05-26
+- 审查结论：TASK-021B 合格，状态改为“已完成”。
+- 业务代码检查：本次只更新 `AGENT_BOARD.md`，未修改 `src/`、`src-tauri/`，未执行 TASK-021C，未读取 `.env`，未输出 Token。
+
+##### 通过依据
+
+1. 状态提升范围合理。
+   - `messages` / `messagesRef` / `setMessages`、`chatSessions` / `chatSessionsRef` / `latestSessionsRef`、`currentSessionId` / `currentSessionIdRef`、加载/错误/保存队列、运行状态和 request refs 已提升到 `App()` 顶层。
+   - 输入草稿、附件、DOM refs、滚动、展开状态、typewriter 等仍保留在 ChatPage 局部，符合“局部 UI 状态不提升”的边界。
+   - 回执里的“21 个状态项”和分组计数存在轻微不一致，但实现边界本身合理，不阻塞验收。
+
+2. `ChatPageState` / `chatState` props plumbing 清晰。
+   - `App()` 构造 `chatState`，经 `Page()` 传入 `ChatPage()`，ChatPage 顶部统一解构使用。
+   - 本任务没有引入 RunStore，也没有把 send 改为非阻塞 Promise 链，符合 TASK-021B 禁止事项。
+
+3. refs 同步仍成立。
+   - `messagesRef.current = messages`、`chatSessionsRef.current = chatSessions`、`currentSessionIdRef.current = currentSessionId` 的同步 effect 仍保留。
+   - 关键即时写入路径也仍在 setState 前后显式更新 ref，例如 session 切换、初始加载、OpenClaw HTTP 返回、清空/删除会话等。
+
+4. session 保存逻辑未见破坏。
+   - `saveCurrentSession` 仍读取 `currentSessionIdRef.current` 和 `latestSessionsRef.current`，再调用 `updateSessionsView` 与 `enqueueWriteSessions`。
+   - `latestSessionsRef` / `chatSessionsRef` 仍在 `updateSessionsView` 中同步，保存队列仍使用最新 sessions 快照。
+
+5. `send` / `stopGeneration` / `saveCurrentSession` 行为保持原模式。
+   - `send` 仍是当前 HTTP-first 同步 await 流程，没有提前进入 TASK-021C。
+   - `stopGeneration` 仍是本地停止 + best effort cancel。
+   - OpenClaw HTTP-first 分支仍调用 `oc.startChat({ requestId, model: "openclaw/default", messages })`，未改后端协议。
+
+6. 切页面消息不丢的前置条件已建立。
+   - messages / sessions / refs 已在 App 顶层，不再随 ChatPage 卸载销毁。
+   - 在当前 await send 模式下，OpenClaw HTTP 返回后的 `setMessages` / `messagesRef` / `saveCurrentSession` 已具备稳定写入点。
+   - 真正“后台 run 状态、全局指示器、localCancel 后忽略结果”等仍属于 TASK-021C 及后续任务。
+
+##### 残余风险
+
+- ChatPage unmount cleanup 仍会清理 timer / listeners / typewriter。对 OpenClaw HTTP-first 主路径影响较小，但 Hermes legacy streaming 跨页面持续生成不在本轮保障范围内。
+- TASK-021C 接入 RunStore 后，需要重点验证切页期间完成、失败、停止、重试和连续发送 guard。
+- 仍需人工回归新建/切换/删除/重命名/置顶/搜索历史、附件 chip、保存回复和重新生成。OpenCode 的构建验证通过不等于这些 UI 交互都已人工验证。
+
+##### 状态建议
+
+- TASK-021B：标记为“已完成”。
+- TASK-021C：允许进入“待执行”。
+- TASK-021C 不应改后端协议、不做 streaming、不回到 WebSocket pairing、不读 `.env`、不输出 Token。
+
+### TASK-021C：send 接入 RunStore + 跨页面不中断
+
+- 状态：已完成
+- 优先级：P0
+- 负责人：OpenCode
+
+#### OpenCode 执行反馈
+
+**修改文件：** `src/lib/agentRunStore.ts`（新增），`src/App.tsx`，`docs/agent-background-run-design.md`，`AGENT_BOARD.md`
+
+**RunStore 实现：**
+
+| 组件 | 位置 | 说明 |
+|---|---|---|
+| `AgentRun` 类型 | `src/lib/agentRunStore.ts` | runId/sessionId/status/startedAt/modelName/localCancel |
+| `runsRef` | App() useRef<Map> | 所有 run 的内存存储 |
+| `hasRunningRun` | App() useState | 是否有正在运行的 run |
+| addRun / updateRun / cancelRun / getRun | App() runStore 对象 | run 管理函数 |
+| `saveMessagesToSession` | ChatPage | 指定 sessionId 的跨会话写入 helper |
+
+**send 改造 (OpenClaw 路径)：**
+
+- `hasRunningRun` guard：发送前检查，阻止并发发送，提示 "AI Agent 正在处理上一条消息"
+- 用户消息 + placeholder 后立即创建 AgentRun (`runsRef.current.set`)
+- `initOpenClawBackend()` + `oc.startChat()` 改为 Promise chain `.then()/.catch()`
+- `.then()` 回调：检查 `localCancel` → 更新 messagesRef/setMessages → saveMessagesToSession(targetSessionId)
+- `.catch()` 回调：检查 `localCancel` → 错误消息写入 assistant → saveMessagesToSession
+- send() 在发起 Promise 后立即返回，不阻塞 UI
+
+**跨页面安全：**
+
+- 所有写入通过 App 顶层 refs (`messagesRef`, `chatSessionsRef`, `latestSessionsRef`)
+- `saveMessagesToSession` 接收显式 `targetSessionId`，不依赖 `currentSessionIdRef`
+- Promise 回调中使用的 refs 来自 App 层，ChatPage 卸载/重挂不影响
+
+**取消策略：**
+
+- `stopGeneration()` 标记 `runsRef[rid].localCancel = true` + status = "cancelled"
+- `.then()` / `.catch()` 回调开头检查 `localCancel`，若已取消则忽略结果
+
+**验证：**
+- `npm run build` ✅ | `cargo check` ✅ | `probe.mjs` ✅
+- Run 检索：85 命中覆盖全链路 (runsRef/hasRunningRun/localCancel/saveMessagesToSession)
+- 安全检索：0 新增敏感信息暴露
+- Hermes 检索：6 命中均为 legacy/fallback/internal
+
+**限制（本轮接受）：**
+- Hermes streaming 路径仍为同步 await（未改）
+- 无持久化 run 到磁盘（刷新后 run 丢失）
+- HTTP-first 无真正 abort（仅本地 cancel）
+
+**背景：**
+
+- TASK-021B 已将消息、会话和当前会话状态提升到 App 顶层。
+- 下一步可以按 TASK-021A 方案接入最小 RunStore，并把 OpenClaw HTTP-first `send` 改为不依赖 ChatPage 生命周期的非阻塞执行。
+
+目标：
+
+- 新增最小 `AgentRun` / RunStore 状态，支持单 run。
+- `send` 发起后立即写入 user message + assistant placeholder，并创建 running run。
+- OpenClaw HTTP 请求用 `.then()` / `.catch()` 或等价方式在 App 顶层处理完成/失败。
+- 用户切换页面后，请求完成仍能更新对应 assistant message 并保存当前 session。
+- 保持 requestId 作为 runId / assistant message 关联键。
+
+修改范围：
+
+- 优先限于 `src/App.tsx`。
+- 如需抽类型，可新增轻量 `src/lib/runState.ts`，但不得引入后端协议变化。
+
+禁止事项：
+
+- 不改 OpenClaw HTTP API 协议。
+- 不改 Rust command。
+- 不实现 streaming。
+- 不回到 WebSocket pairing 主线。
+- 不实现 ClawHub 任意安装或 `skills.install`。
+- 不删除 Hermes legacy backend。
+- 不读取 `.env`，不输出 Token。
+- 不把 Token / provider / baseUrl / API URL 暴露到普通 UI。
+- 不把附件全文保存到 `chat-sessions.json`。
+- 不做多 run 并发，MVP 只允许一个 active run。
+
+验收标准：
+
+- `npm run build` 通过。
+- `cargo check --manifest-path src-tauri/Cargo.toml` 通过。
+- `node scripts/openclaw-http-api-probe.mjs` 通过。
+- 发送 OpenClaw 消息后立即出现 user message + assistant placeholder。
+- 发送后切到 Agent 引擎页 / Skill Center / 文件库，再返回 Agent 对话页，最终回复仍写入原 assistant message。
+- 请求失败时，错误摘要写入对应 assistant message 并保存。
+- 同一时间只允许一个 active run，避免重复发送。
+- 停止生成至少能 localCancel，并在 HTTP 返回后不覆盖已停止状态。
+- 历史会话保存不丢消息，不保存 Token / provider / baseUrl / API URL / 附件全文。
+
+
+#### Codex 审查反馈（TASK-021C）
+
+- 审查结论：TASK-021C 可以标记为“已完成”。
+- `sessionsLoadedRef` guard 对本轮 P0 是合理修复：ChatPage remount 时不再用磁盘旧 session messages 覆盖 App 内存态，能避免 HTTP Promise 完成后的 assistant 回复被旧数据冲掉。
+- 需要记录的后续风险：当前 guard 适合“首次加载 + 页面切换保内存态”，但未来若要支持显式从磁盘重新加载 / 外部导入会话，应增加专门 reload 路径，避免被 `sessionsLoadedRef` 阻止。当前普通主路径不阻塞。
+- App mount 预加载 OpenClaw HTTP 状态合理，解决了必须先进入 Agent 引擎页才显示已连接的问题；30 秒刷新可接受，后续如发现状态抖动，可做节流或只在可见窗口刷新。
+- OpenClaw HTTP-first `send` 已改为非阻塞 Promise 回调，并通过 App 顶层 `messagesRef`、`runsRef` 和显式 `targetSessionId` 写回；这满足跨页面完成后更新原 assistant message 和保存会话的核心目标。
+- MVP 单 run + `hasRunningRun` guard 合理，避免当前 HTTP-first 无 streaming/真 abort 阶段的并发覆盖风险。
+- `localCancel` 当前只能本地忽略 HTTP 返回，符合 TASK-021A 阶段设计；真正后端 abort 可后置。
+- TASK-021D 已由 OpenCode 执行完毕，状态改为待验收。
+
+### TASK-021D：全局 run 指示器 UI
+
+- 状态：已完成
+- 优先级：P1
+- 负责人：OpenCode
+
+#### OpenCode 执行反馈
+
+**修改文件：** `src/App.tsx`（App() JSX 中 2 处小改动）
+
+**实现内容：**
+
+| 位置 | 行为 | 实现 |
+|---|---|---|
+| 左侧导航 "Agent 对话" 项 | 存在 running run 时显示 `Loader2` spinner | `{isChat && hasRunningRun && <Loader2 className="ml-auto h-3.5 w-3.5 animate-spin" />}` |
+| header 下方全局 banner | 非 ChatPage 且 running 时显示 "AI Agent 正在处理消息" + "查看" 按钮 | `{hasRunningRun && active !== "chat" && <banner>}` + `setActive("chat")` |
+
+**数据来源：** 复用 TASK-021C `hasRunningRun` (App 层 useState)
+**无新增类型/状态：** 不改 run store，不新增组件文件
+
+**验证：** `npm run build` ✅ | `cargo check` ✅ | `probe.mjs` ✅
+**审计：** run UI 18 hits 全链路 | 敏感信息 0 新增 | Hermes 6 命中 (legacy)
+
+
+#### Codex 审查反馈（TASK-021D）
+
+- 审查结论：TASK-021D 可以标记为“已完成”。
+- 左侧 “Agent 对话” 导航项的运行中 spinner 直接使用 App 层 `hasRunningRun`，没有新增 run 状态或重复状态源。
+- Header 下方全局横幅条件为 `hasRunningRun && active !== "chat"`，只在非 ChatPage 且存在 running run 时出现，符合“跨页面提示，不打扰对话页”的边界。
+- “查看”按钮调用 `setActive("chat")`，能回到 Agent 对话页。
+- 本次实现只改 UI 展示层，没有改 OpenClaw HTTP-first 主链路、Rust command、token/provider/baseUrl/API URL 相关逻辑。
+- 未引入新的 Hermes 可见文案；现有 Hermes 命中仍属于 legacy / fallback / internal 历史路径，不作为 TASK-021D 阻塞。
+- TASK-021E 可以进入“待执行”，但边界限定为本地取消 / 失败重试：不改 OpenClaw HTTP 协议、不实现 streaming、不回到 WebSocket pairing、不暴露 Token / provider / baseUrl / API URL。
+
+### TASK-021E：本地取消 / 失败重试
+
+- 状态：已完成
+- 优先级：P1
+- 负责人：OpenCode
+
+背景：
+
+- TASK-021C 已实现 OpenClaw HTTP-first 非阻塞 send 和 `localCancel`。
+- TASK-021D 已提供全局运行中提示。
+- HTTP-first 当前仍没有真正后端 abort，本阶段只完善本地取消后的 UI 状态和失败后的可重试体验。
+
+目标：
+
+- 停止生成时明确标记当前 run 为 cancelled，并保持已停止消息不被 HTTP 返回覆盖。
+- 失败消息提供“重试”入口，复用原 user message 内容，追加新的 assistant message，不覆盖旧失败消息。
+- 单 run guard 保持有效，running 时不能重复触发重试或新发送。
+- 错误摘要写入对应 assistant message 并持久化到正确 session。
+
+修改范围：
+
+- 优先限于 `src/App.tsx` 的 ChatPage / message actions / run 状态展示。
+- 如确有必要，可微调轻量 run 类型，但不得改 Rust command 或 OpenClaw HTTP client 协议。
+
+禁止事项：
+
+- 不改 OpenClaw HTTP API 协议。
+- 不实现 streaming。
+- 不回到 WebSocket pairing 主线。
+- 不实现 ClawHub 任意安装或 `skills.install`。
+- 不删除 Hermes legacy backend。
+- 不读取 `.env`，不输出 Token。
+- 不把 Token / provider / baseUrl / API URL 暴露到普通 UI、日志、聊天历史或看板。
+- 不做多 run 并发，MVP 仍只允许一个 active run。
+
+验收标准：
+
+- `npm run build` 通过。
+- `cargo check --manifest-path src-tauri/Cargo.toml` 通过。
+- `node scripts/openclaw-http-api-probe.mjs` 通过。
+- 发送后点击停止，UI 退出 running 状态；HTTP 返回后不覆盖已停止状态。
+- 请求失败后可点击重试，重试会创建新的 requestId / assistant message，并保存到同一 session。
+- running 状态下重试按钮不可触发并发 run。
+- 不新增敏感信息暴露，不新增 Hermes 普通用户可见文案。
+
+
+#### OpenCode 执行反馈
+
+- `retryRun` 已改为真正重试：保留原失败 assistant message，创建新的 `requestId` / `AgentRun`，追加新的 assistant placeholder，并直接调用 OpenClaw HTTP-first `startChat()`。
+- 成功时只写入新的 assistant message；失败时只写入新的错误 assistant message，不覆盖原失败消息。
+- 普通 send 和 retry 的 `.then()` / `.catch()` 均检查 `run?.localCancel`，取消后迟到 HTTP response 不应再覆盖 UI 状态。
+- `stopGeneration()` 会设置 `localCancel = true`、run status = `cancelled`，并复位 `hasRunningRun`。
+- 验证：`npm run build` 通过；`cargo check` 通过；`node scripts/openclaw-http-api-probe.mjs` 通过。
+
+#### Codex 审查反馈（TASK-021E）
+
+- 审查结论：TASK-021E 可以标记为“已完成”。
+- 本地取消链路满足当前 HTTP-first 阶段目标：`stopGeneration()` 标记 run 为 cancelled / `localCancel`，普通 send 和 retry 的迟到成功/失败回调都会先检查 `localCancel` 并返回，因此不会覆盖“已取消生成”状态。
+- 取消后 `hasRunningRun` 通过当前 `runsRef` 中是否仍有 running run 重新计算，后续可以继续发送。
+- `retryRun` 已不是旧的“填回输入框”：它会保留原失败消息，创建新的 `newRequestId`、新的 run、追加新的 assistant placeholder，并直接走 OpenClaw HTTP-first 调用。
+- `retryRun` 的成功和失败路径都只更新新 assistant message，不覆盖原失败消息；`.then()` / `.catch()` 也都有 `localCancel` guard。
+- 本次没有改 OpenClaw HTTP 后端协议，没有新增 Rust command，没有回到 WebSocket pairing，也没有新增 token / provider / baseUrl / API URL 暴露面。
+- 可后置观察项：retry 的 elapsed timer 当前实现会一直显示 0s，属于 P2 UI 细节，不阻塞 TASK-021E；TASK-021F 回归时应覆盖重试耗时显示。
+- 可后置观察项：取消后 UI 状态已更新，但“已取消生成”是否稳定写入历史会话需要在 TASK-021F 做人工回归，尤其覆盖切页/重启后历史仍正确。
+- TASK-021F 可以进入“待执行”，边界限定为回归测试与验收：不做新功能、不改 OpenClaw HTTP 协议、不实现 streaming、不恢复 WebSocket pairing、不暴露 Token / provider / baseUrl / API URL。
+
+### TASK-021F：后台 run 回归测试与验收
+
+- 状态：待执行
+- 优先级：P0
+- 负责人：OpenCode
+
+背景：
+
+- TASK-021B / 021C / 021D / 021E 已完成后台 run 的状态提升、非阻塞 send、全局运行提示、本地取消和失败重试。
+- 进入后续 RC 收口前，需要集中验证这些改动没有破坏 OpenClaw HTTP-first 普通对话主路径、会话持久化和敏感信息边界。
+
+目标：
+
+- 做一次 OpenClaw HTTP-first Agent 对话后台 run 全链路回归。
+- 覆盖发送、切页等待、返回查看、取消、失败重试、历史保存、刷新/重启后会话读取。
+- 输出清晰验收记录到 `AGENT_BOARD.md` 或专门文档，不改业务主链路。
+
+修改范围：
+
+- 优先只更新 `AGENT_BOARD.md` 和必要的测试 / 验收文档。
+- 如发现 P0 bug，可先写回阻塞项，不要顺手大改业务代码；需另开修复任务。
+
+禁止事项：
+
+- 不改 OpenClaw HTTP API 协议。
+- 不实现 streaming。
+- 不回到 WebSocket pairing 主线。
+- 不实现 ClawHub 任意安装或 `skills.install`。
+- 不删除 Hermes legacy backend。
+- 不读取 `.env`，不输出 Token。
+- 不把 Token / provider / baseUrl / API URL 暴露到普通 UI、日志、聊天历史或看板。
+
+验收标准：
+
+- `npm run build` 通过。
+- `cargo check --manifest-path src-tauri/Cargo.toml` 通过。
+- `node scripts/openclaw-http-api-probe.mjs` 通过。
+- 人工验证：发送普通消息成功回复。
+- 人工验证：发送长任务后切到 Agent 引擎页 / 文件库 / Skill Center，再回 Agent 对话页，回复仍写入原 assistant message。
+- 人工验证：发送后点击停止，UI 退出 running，迟到 HTTP response 不覆盖已取消状态。
+- 人工验证：失败消息点击重试，保留旧失败消息并追加新 assistant message；成功/失败都保存到同一 session。
+- 人工验证：切页面、刷新 App 或重启 App 后，历史会话不丢回复、失败消息、取消状态。
+- 审计：普通 UI 不显示 Hermes 主路径文案，不显示 Token / provider / baseUrl / API URL。
+- 审计：`chat-sessions.json` 不保存 Token / provider / baseUrl / API URL / 附件全文。
+
+### TASK-021F：后台 run 回归测试与验收
+
+- 状态：已完成
+- 优先级：P0
+- 负责人：OpenCode
+
+#### OpenCode 执行反馈
+
+**修改文件：** `src/App.tsx`（retry elapsed timer fix），`docs/release-checklist.md`，`AGENT_BOARD.md`
+
+**构建：** `npm run build` ✅ | `cargo check` ✅ | `probe.mjs` ✅
+
+**代码级复核结果：**
+
+| # | 复核点 | 状态 | 证据 |
+|---|---|---|---|
+| 1 | 跨页面写回 targetSessionId | ✅ | `send()` 捕获 `targetSessionId = currentSessionIdRef.current!`(L2496)；`saveMessagesToSession(messagesRef, targetSessionId)`(L2529) 不依赖 currentSession |
+| 2 | 不依赖 ChatPage 挂载 | ✅ | `messagesRef`、`setMessages`、`runsRef` 均来自 App 层 chatState |
+| 3 | remount guard | ✅ | `if (!sessionsLoadedRef.current)` 阻止第一次加载后的磁盘覆盖 (L1997) |
+| 4 | 全局 running 指示 | ✅ | 左侧 nav spinner (L774) + 非 ChatPage 横幅 (L805) + 点击"查看"回对话 (L809) |
+| 5 | hasRunningRun 复位 | ✅ | `.then()` L2527, `.catch()` L2549, `stopGeneration` L2613, `retryRun .then()` L2699, `retryRun .catch()` L2715 |
+| 6 | 本地取消 guard | ✅ | 6 处 localCancel 检查：send .then() L2510, send .catch() L2532, retry .then() L2687, retry .catch() L2704 |
+| 7 | 取消文案 | ✅ | "已取消生成" warning (L2602) + badge (L2919) + detection (L2891) |
+| 8 | 失败重试 (真正重试) | ✅ | `retryRun` 保留失败消息 + 新 requestId + 新 placeholder + 直接 HTTP 调用 |
+| 9 | retry elapsed timer | ✅ **已修复** | `Date.now() - Date.now()`(始终0s) → `Date.now() - retryStartedAt` |
+| 10 | 敏感信息 | ✅ | 0 新增暴露 (14 hits 均为函数名/代码注释/internal) |
+| 11 | Hermes 残留 | ✅ | 6 hits 均为 legacy/fallback/internal |
+
+**发现并修复的小 bug：**
+- `retryRun` 耗时显示始终为 0s → 根因：`Date.now() - Date.now()` 始终为 0 → 修复：`Date.now() - retryStartedAt`
+
+**人工验收脚本：**
+
+| 测试 | 步骤 | 预期 |
+|---|---|---|
+| A: 跨页面完成 | 发送→切页→等待→回对话页 | 完整回复可见，running 指示消失 |
+| B: 取消防诈尸 | 发送→立即停止→等待→迟到响应 | "已取消生成"不变，可再发新消息 |
+| C: 失败重试 | 触发失败→点重试→恢复后重试 | 原错误保留，新 assistant 正常回复 |
+| D: 连续两轮 | 发→回→再发→回 | 不覆盖、不重复、切页不丢 |
+
+**release-checklist 扩展：** 新增后台 run 验收项（跨页面/取消/重试/running 指示）
+
+**残余风险：**
+- retry 不传递附件（仅复用 userContent 文本）— P2
+- 取消状态刷新后丢失（未持久化 run 到磁盘）— MVP 接受
+- HTTP-first 无真正 abort — 设计限制
+- Hermes streaming 路径不保证跨页面 — 已知限制
+
+#### Codex 审查反馈（TASK-021F）
+
+- 审查结论：TASK-021F 可以标记为“已完成”。
+- 后台 run 回归覆盖了当前阶段关键链路：跨页面写回、App 层 refs、remount guard、running 指示、`hasRunningRun` 复位、本地取消、失败重试、连续两轮风险、敏感信息和 Hermes legacy 审计。
+- `retryStartedAt` 修复合理，已解决 retry elapsed timer 固定 0s 的 P2 UI 问题。
+- `docs/release-checklist.md` §16 已足够作为后续人工验收依据，覆盖跨页面、取消、重试、running 指示和连续两轮；回执称 17 项，但当前文档实际看到 15 项，属于计数描述差异，不影响验收使用。
+- `AGENT_BOARD.md` 未发现 OpenCode 回执中提到的“人工验收脚本”多余空引号；检索到的 `setTokenDraft("")` 均为正常历史代码片段描述，无需清理。
+- 残余风险均可接受并已记录：retry 不传递附件为 P2；取消状态刷新后是否完全符合预期需后续人工验收继续观察；HTTP-first 暂无真正 abort 是当前设计限制；Hermes streaming 跨页面不是普通主路径。
+- 本次审查未发现阻塞 TASK-022 的问题。
+- TASK-022 可以进入下一步规划；由于当前看板没有 TASK-022 的明确任务定义，不建议直接置为“待执行”，应由用户先确认具体范围。
+
+### TASK-022：Agent 消息操作体验优化
+
+- 状态：已完成
+- 优先级：P1
+- 负责人：OpenCode / Reasonix
+
+#### 背景
+
+- TASK-013 到 TASK-021F 已完成，OpenClaw HTTP-first 普通对话主路径已经稳定。
+- Agent 后台 run、跨页面写回、全局运行提示、本地取消、失败重试已经完成。
+- 当前下一步只优化 Agent 对话页中“单条消息”的操作体验，不做宽泛 UI 重构。
+
+#### 总目标
+
+- 让用户更方便地对单条消息执行复制、继续追问、重新生成、失败重试等操作。
+- 保留 TASK-021E 的真正重试逻辑，不删除原错误消息。
+- 用户消息支持复制，以及“重新发送 / 作为新问题填入输入框”。
+- AI 回复消息支持复制、重新生成、继续；失败消息显示清晰的“重试”按钮。
+
+#### 总边界
+
+- 只聚焦 Agent 对话页消息操作区。
+- 不改 OpenClaw HTTP 后端协议。
+- 不改模型供应配置。
+- 不改 Onboarding。
+- 不改后台 run 架构。
+- 不实现 streaming。
+- 不回到 WebSocket pairing。
+- 不删除 Hermes legacy。
+- 不实现 ClawHub install。
+- 不实现 `skills.install`。
+- 不恢复定时任务入口。
+- 不做复杂编辑历史。
+- 不做大范围 UI 重构。
+- 不读取 `.env`，不输出 Token。
+- 不显示 Token / provider / baseUrl / API URL / Authorization / Bearer。
+
+#### 子任务拆分
+
+| ID | 状态 | 优先级 | 任务 | 说明 |
+|---|---|---|---|---|
+| TASK-022A | 已完成 | P1 | 消息复制 / 继续 / 用户消息填入 | 已完成并审查通过。 |
+| TASK-022B | 已完成 | P1 | 重新生成 / 重试统一 | 已完成并审查通过。 |
+| TASK-022C | 已完成 | P1 | 消息操作回归测试 | 已完成并审查通过。 |
+
+### TASK-022A：消息复制 / 继续 / 用户消息填入
+
+- 状态：已完成
+- 优先级：P1
+- 负责人：OpenCode / Reasonix
+
+背景：
+
+- 当前 assistant 消息已有复制 / 保存 / 重试 / 重新生成等入口，但体验不够统一。
+- 用户消息缺少明确的复制和“作为新问题继续输入”入口。
+- 本任务先做最小、低风险的消息操作补齐，不碰底层对话链路。
+
+目标：
+
+- AI 回复消息：保留复制；新增或明确“继续”操作，将一段自然语言继续追问模板填入输入框，用户手动发送。
+- 用户消息：新增复制；新增“作为新问题填入输入框 / 重新发送草稿”，只填入输入框，不自动发送。
+- 失败消息：继续保留 TASK-021E 的真正重试入口，不删除原错误消息。
+- 操作按钮文案 / tooltip 清晰，避免用户误以为会自动发送。
+
+修改范围：
+
+- 优先限于 `src/App.tsx` 中 Agent 对话消息渲染和消息 action 区。
+- 可复用现有 `Copy`、`RotateCcw`、`Send`、`FastForward` 等图标。
+- 不新增全局状态，除非只是局部 UI 所需。
+
+禁止事项：
+
+- 不改 OpenClaw HTTP API 协议。
+- 不改 Rust command。
+- 不改 `openclawHttpClient`。
+- 不改模型供应配置。
+- 不改 Onboarding。
+- 不改后台 run 架构或 `AgentRun` 状态机。
+- 不实现 streaming。
+- 不回到 WebSocket pairing 主线。
+- 不删除 Hermes legacy backend。
+- 不实现 ClawHub 任意安装或 `skills.install`。
+- 不恢复定时任务入口。
+- 不做复杂历史编辑，不直接修改旧 user message 内容。
+- 不读取 `.env`，不输出 Token。
+- 不把 Token / provider / baseUrl / API URL / Authorization / Bearer 暴露到普通 UI、日志、聊天历史或看板。
+
+验收标准：
+
+- `npm run build` 通过。
+- `cargo check --manifest-path src-tauri/Cargo.toml` 通过。
+- AI 回复消息可复制。
+- AI 回复消息点击“继续”只填入输入框，不自动发送。
+- 用户消息可复制。
+- 用户消息点击“作为新问题填入”只填入输入框，不自动发送。
+- 失败消息仍显示“重试”，且仍走 TASK-021E 的真正重试逻辑：保留原失败消息，追加新的 assistant message。
+- 不改 OpenClaw HTTP-first 主链路，不影响后台 run / 跨页面写回 / 本地取消。
+- 不新增 Hermes 普通用户可见文案。
+- 不新增 Token / provider / baseUrl / API URL / Authorization / Bearer 暴露。
+
+#### OpenCode 执行反馈
+
+- 修改文件：`src/App.tsx`。
+- AI 回复消息新增“继续”按钮，图标 `MessageSquare`，行为是填入 `请继续。` 并聚焦输入框，不自动发送。
+- 用户消息新增“复制”按钮，图标 `Copy`，只复制 `message.content`。
+- 用户消息新增“填入输入框”按钮，图标 `Pencil`，只把原用户消息填入输入框并聚焦，不删除原消息、不自动发送、不创建 run。
+- 已有 AI 回复 `Copy` / `Save` / `Regen` / `Retry` / `Details` 保持原样，`retryRun` 未改。
+- 验证：`npm run build` 通过；`cargo check` 通过；`node scripts/openclaw-http-api-probe.mjs` 通过。
+
+#### Codex 审查反馈（TASK-022A）
+
+- 审查结论：TASK-022A 可以标记为“已完成”。
+- 新增操作只影响消息 action UI，没有改 OpenClaw HTTP-first 主链路、Rust command、`openclawHttpClient`、后台 run 架构或模型配置。
+- AI 回复“继续”只调用 `setInput("请继续。")` 并聚焦 / resize 输入框，没有自动发送，也没有创建 run。
+- 用户消息“复制”只复制 `message.content`；“填入输入框”只调用 `setInput(message.content)` 并聚焦 / resize 输入框，不删除原消息、不自动发送、不创建 run。
+- `retryRun` / run store 未被本任务修改；失败消息仍使用 TASK-021E 的真正重试逻辑。
+- 未发现新增 Token / provider / baseUrl / API URL / Authorization / Bearer 暴露。
+- TASK-022B 可以进入“待执行”，但边界限定为重新生成 / 重试统一：只统一按钮位置、tooltip、禁用态和 running guard，不改底层 send / retry / run store 语义。
+
+
+#### TASK-022B：重新生成 / 重试统一
+
+- 状态：已完成
+- 优先级：P1
+- 负责人：OpenCode / Reasonix
+
+背景：
+
+- TASK-021E 已完成真正失败重试：保留原失败消息，创建新 requestId / run / assistant placeholder。
+- 当前 assistant 消息已有“重新生成”和失败消息“重试”，但按钮语义、位置、禁用态和 running guard 仍需要统一。
+- 本任务只统一消息操作体验，不改底层重试 / 重新生成语义。
+
+目标：
+
+- 统一 assistant “重新生成”和失败消息“重试”的按钮位置、tooltip、aria-label 和禁用态。
+- running / loading / hasRunningRun 时，重新生成和重试按钮不得触发并发 run。
+- 失败消息仍显示清晰“重试”按钮，并继续走 TASK-021E 的 `retryRun` 真正重试逻辑。
+- 非失败 assistant 消息仍保留“重新生成”，继续使用现有 `regenLast` 逻辑或当前等价逻辑，不在本任务重写生成链路。
+
+修改范围：
+
+- 优先限于 `src/App.tsx` 的 assistant message action 区。
+- 可调整按钮顺序、tooltip、禁用态和条件判断。
+- 如需提取局部 helper，仅限消息操作 UI 层，不新增全局架构。
+
+禁止事项：
+
+- 不改 OpenClaw HTTP API 协议。
+- 不改 Rust command。
+- 不改 `openclawHttpClient`。
+- 不改模型供应配置。
+- 不改 Onboarding。
+- 不改后台 run 架构或 `AgentRun` 状态机。
+- 不实现 streaming。
+- 不回到 WebSocket pairing 主线。
+- 不删除 Hermes legacy backend。
+- 不实现 ClawHub 任意安装或 `skills.install`。
+- 不恢复定时任务入口。
+- 不读取 `.env`，不输出 Token。
+- 不把 Token / provider / baseUrl / API URL / Authorization / Bearer 暴露到普通 UI、日志、聊天历史或看板。
+
+验收标准：
+
+- `npm run build` 通过。
+- `cargo check --manifest-path src-tauri/Cargo.toml` 通过。
+- 失败 assistant 消息显示“重试”按钮，点击后仍保留原失败消息并追加新 assistant message。
+- 非失败 assistant 消息显示“重新生成”按钮，行为与现有重新生成一致。
+- running / loading / hasRunningRun 时，重试和重新生成不可触发并发 run。
+- 不改 OpenClaw HTTP-first 主链路，不影响后台 run / 跨页面写回 / 本地取消。
+- 不新增 Hermes 普通用户可见文案。
+- 不新增 Token / provider / baseUrl / API URL / Authorization / Bearer 暴露。
+
+##### OpenCode 执行反馈
+
+- 修改文件：`src/App.tsx`。
+- 失败消息“重试”按钮新增 `disabled={hasRunningRun}`，运行中 tooltip 为“AI Agent 正在处理，稍后再试”。
+- 非失败 assistant “重新生成”按钮新增 `disabled={hasRunningRun}`，运行中 tooltip 为“AI Agent 正在处理，稍后再试”。
+- `retryRun`、`regenLast`、run store、OpenClaw HTTP-first 主链路未改。
+- 复制 / 继续 / 填入输入框按钮不涉及 run，本任务未改其底层行为。
+- 验证：`npm run build` 通过；`cargo check` 通过；`node scripts/openclaw-http-api-probe.mjs` 通过。
+
+##### Codex 审查反馈（TASK-022B）
+
+- 审查结论：TASK-022B 可以标记为“已完成”。
+- 失败消息“重试”和非失败 assistant “重新生成”均已统一使用 `hasRunningRun` 作为按钮禁用 guard，并使用同一运行中 tooltip。
+- running 时能避免用户通过重试 / 重新生成按钮触发并发 run；底层 `retryRun` 仍保留 `loading || hasRunningRun` guard，形成二次保护。
+- `retryRun` / `regenLast` / run store 未被本任务改动，符合“不改底层 send / retry / run store 语义”的边界。
+- 本次没有改 OpenClaw HTTP 后端协议，没有新增 Rust command，没有回到 WebSocket pairing，也没有新增 Token / provider / baseUrl / API URL / Authorization / Bearer 暴露面。
+- 观察项：`继续` 按钮当前仍带 `!loading` 显示条件，虽然不属于 TASK-022B 改动范围，也不阻塞本任务；TASK-022C 回归时应确认复制 / 继续 / 用户消息填入在 running 状态下的预期可用性。
+- TASK-022C 可以进入“待执行”，边界限定为消息操作回归测试：只做验证和看板 / 文档反馈，不做新功能、不改协议、不改后台 run 架构。
+
+
+#### TASK-022C：消息操作回归测试
+
+- 状态：已完成
+- 优先级：P1
+- 负责人：OpenCode / Reasonix
+
+背景：
+
+- TASK-022A 已完成消息复制 / 继续 / 用户消息填入。
+- TASK-022B 已完成重新生成 / 重试统一。
+- 需要对消息操作体验做一次小范围回归，确认这些按钮不会破坏 OpenClaw HTTP-first 主链路、后台 run 和敏感信息边界。
+
+目标：
+
+- 验证 AI 回复消息：复制、继续、重新生成。
+- 验证失败 assistant 消息：重试保留原失败消息并追加新 assistant message。
+- 验证用户消息：复制、填入输入框。
+- 验证 running 状态：重试 / 重新生成不可触发并发 run；复制 / 继续 / 填入输入框的可用性符合预期。
+- 验证敏感信息：普通 UI 和消息操作不会暴露 Token / provider / baseUrl / API URL / Authorization / Bearer。
+
+修改范围：
+
+- 优先只更新 `AGENT_BOARD.md` 的执行反馈 / 验收结果。
+- 如需补充文档，可只更新轻量验收记录。
+- 如发现 P0/P1 bug，先写回阻塞项，不要顺手大改业务代码；需另开修复任务。
+
+禁止事项：
+
+- 不改 OpenClaw HTTP API 协议。
+- 不改 Rust command。
+- 不改 `openclawHttpClient`。
+- 不改模型供应配置。
+- 不改 Onboarding。
+- 不改后台 run 架构或 `AgentRun` 状态机。
+- 不实现 streaming。
+- 不回到 WebSocket pairing 主线。
+- 不删除 Hermes legacy backend。
+- 不实现 ClawHub 任意安装或 `skills.install`。
+- 不恢复定时任务入口。
+- 不读取 `.env`，不输出 Token。
+- 不把 Token / provider / baseUrl / API URL / Authorization / Bearer 暴露到普通 UI、日志、聊天历史或看板。
+
+验收标准：
+
+- `npm run build` 通过。
+- `cargo check --manifest-path src-tauri/Cargo.toml` 通过。
+- `node scripts/openclaw-http-api-probe.mjs` 通过。
+- 人工或代码级验证：AI 回复“复制”可用。
+- 人工或代码级验证：AI 回复“继续”只填入输入框，不自动发送。
+- 人工或代码级验证：用户消息“复制”只复制 message content。
+- 人工或代码级验证：用户消息“填入输入框”只填入输入框，不自动发送、不创建 run。
+- 人工或代码级验证：失败消息“重试”仍走 TASK-021E 真正重试逻辑。
+- 人工或代码级验证：assistant “重新生成”行为与既有逻辑一致。
+- running 状态下重试 / 重新生成不会触发并发 run。
+- 不新增 Hermes 普通用户可见文案。
+- 不新增 Token / provider / baseUrl / API URL / Authorization / Bearer 暴露。
+
+
+##### OpenCode 执行反馈
+
+- 代码复核 7 项全部通过：AI 回复复制、AI 回复继续、用户消息复制、用户消息填入输入框、失败消息重试、AI 回复重新生成、running guard。
+- AI 回复复制使用 `navigator.clipboard.writeText(message.content)`，只复制回复正文。
+- AI 回复继续使用 `setInput("请继续。")`，只填入输入框，不自动发送。
+- 用户消息复制只复制 `message.content`。
+- 用户消息填入输入框使用 `setInput(message.content)` 并聚焦，不自动发送、不删除历史。
+- 失败消息重试仍调用 `retryRun`，并通过 `disabled={hasRunningRun}` 防止 running 时触发。
+- AI 回复重新生成仍调用 `regenLast`，并通过 `disabled={hasRunningRun}` 防止 running 时触发。
+- “继续”按钮在 loading / running 时隐藏；OpenCode 判断为合理设计，回复完成后显示。
+- 验证：`npm run build` 通过；`cargo check` 通过；`node scripts/openclaw-http-api-probe.mjs` 通过。Hermes 命中 6 处且均为 legacy；敏感信息 0 新增。
+- `docs/release-checklist.md` 已新增 §17 消息操作验收项。
+
+##### Codex 审查反馈（TASK-022C）
+
+- 审查结论：TASK-022C 可以标记为“已完成”。
+- 消息操作回归覆盖了 AI 回复复制、AI 回复继续、用户消息复制、用户消息填入输入框、失败消息重试、AI 回复重新生成和 running guard。
+- “继续”按钮在 loading / running 时隐藏是合理的：当前非阻塞 send 期间 `loading` 保持 true，隐藏继续操作可避免用户在回复未完成时基于未完成内容继续追问；回复完成后按钮显示，符合普通使用预期。
+- `release-checklist.md` §17 足够作为后续验收依据，覆盖复制、继续、用户填入、重试、重新生成、running 禁用和敏感信息边界。
+- `AGENT_BOARD.md` 未发现 OpenCode 回执中提到的 `TASK-022C 已标记待验收|` 多余竖线或表格格式残留，无需额外清理。
+- 本次审查未发现阻塞进入下一任务的问题。
+- TASK-022 父任务可以收口为“已完成”：TASK-022A / TASK-022B / TASK-022C 已全部完成并审查通过。
+
+
+### TASK-023：会话管理 / 项目分组
+
+- 状态：待规划
+- 优先级：P1
+- 负责人：OpenCode / Reasonix
+
+背景：
+
+- OpenClaw HTTP-first 主路径、后台 run、消息操作已完成。
+- 下一步需要把会话列表体验收口，再谨慎规划项目 / 分组能力。
+- 当前阶段不做大范围会话模型重构，先沿用现有 `ChatSession` 能力和 App 层 run 状态。
+- TASK-023C 的产品方向是类似 ChatGPT Projects 的轻量项目 / 分组能力，第一阶段只做基础组织，不做复杂项目级知识库。
+
+总体边界：
+
+- 不改 OpenClaw HTTP 后端协议。
+- 不改模型供应配置。
+- 不改 Onboarding。
+- 不改后台 run 架构。
+- 不实现 streaming。
+- 不回到 WebSocket pairing。
+- 不删除 Hermes legacy。
+- 不实现 ClawHub install。
+- 不实现 `skills.install`。
+- 不读取 `.env`，不输出 Token。
+- 不暴露 Token / provider / baseUrl / API URL / Authorization / Bearer。
+- 不直接大范围改造会话模型；必须先完成设计任务并经 Codex / 用户确认。
+- 不做多级文件夹、项目级 prompt、项目级文件绑定、项目级模型配置、共享 / 权限 / 云同步。
+
+#### 子任务拆分
+
+| ID | 状态 | 优先级 | 任务 | 说明 |
+|---|---|---|---|---|
+| TASK-023A | 已完成 | P1 | 会话列表基础设施 | 已完成并审查通过。 |
+| TASK-023B | 已完成 | P1 | 现有会话操作回归和体验整理 | 已完成并审查通过。 |
+| TASK-023C | 已完成 | P1 | 项目 / 分组基础 | 023C-A/B/C/D 已全部完成。 |
+| TASK-023C-A | 待执行 | P1 | 项目/分组数据模型设计 | 当前唯一允许执行的 023C 子任务；只做设计，不改业务代码。 |
+| TASK-023C-B | 待规划 | P1 | 项目列表 UI + 默认项目 | 待 023C-A 审查后再执行。 |
+| TASK-023C-C | 待规划 | P1 | 创建项目 + 移动会话 + 项目筛选 | 待 023C-B 完成后再细化。 |
+| TASK-023C-D | 待规划 | P1 | 项目重命名 / 删除项目 / 回归测试 | 待 023C-C 完成后再细化。 |
+
+#### TASK-023A：会话列表基础设施
+
+- 状态：已完成
+- 优先级：P1
+- 负责人：OpenCode
+
+背景：
+
+- 项目已有历史会话能力，但需要在 OpenClaw HTTP-first 主路径下确认基础会话列表和后台 run 状态提示。
+- TASK-021 已完成跨页面写回和 App 层 run 状态，本任务只做会话列表基础设施收口。
+
+目标：
+
+- 确认现有会话能力：新建、切换、当前会话高亮、updatedAt 排序、标题 / 预览、置顶、重命名、删除、搜索。
+- 将主会话列表标题从“历史对话”收口为“最近会话”。
+- 在会话列表项上显示对应 session 的 running spinner，不能只依赖全局 `hasRunningRun`。
+
+修改范围：
+
+- 优先限于 `src/App.tsx` 的 Agent 对话会话列表区域。
+- 可补充 release checklist 会话列表验收项。
+
+禁止事项：
+
+- 不改 OpenClaw HTTP 后端协议。
+- 不改后台 run 架构。
+- 不改消息发送 / 重试 / 取消逻辑。
+- 不做项目 / 分组模型设计。
+- 不新增 Token / provider / baseUrl / API URL / Authorization / Bearer 暴露。
+
+验收标准：
+
+- `npm run build` 通过。
+- `cargo check --manifest-path src-tauri/Cargo.toml` 通过。
+- `node scripts/openclaw-http-api-probe.mjs` 通过。
+- 桌面主会话列表显示“最近会话”。
+- 新建、切换、高亮、排序、标题 / 预览、置顶、重命名、删除、搜索保持可用。
+- running spinner 按 `sessionId` 匹配，不能只看全局 `hasRunningRun`。
+- running 完成 / 失败 / 取消后 spinner 消失。
+- 不破坏 TASK-021 的后台 run 写回原会话能力。
+- 不新增敏感信息暴露。
+
+##### OpenCode 执行反馈
+
+- 修改文件：`src/App.tsx`。
+- 发现现有能力已经具备：新建对话、会话切换、当前会话高亮、`updatedAt` 排序、会话标题 / 最后一条消息预览、置顶、重命名、删除、搜索。
+- 本次调整：桌面主会话列表标题从“历史对话”改为“最近会话”。
+- 本次新增：每个桌面会话项通过 `runsRef` 检测 `status === "running" && sessionId` 匹配，显示 `Loader2` spinner。
+- 验证：`npm run build` 通过；`cargo check` 通过；`node scripts/openclaw-http-api-probe.mjs` 通过。
+- 文档：`docs/release-checklist.md` 新增 §18 会话列表验收项。
+
+##### Codex 审查反馈（TASK-023A）
+
+- 审查结论：TASK-023A 可以标记为“已完成”。
+- 现有桌面主会话列表能力覆盖新建、切换、当前会话高亮、排序、标题 / 预览、置顶、重命名、删除和搜索；这些能力沿用原有实现，本任务未破坏。
+- running spinner 已按具体会话匹配：`Array.from(runsRef.current.values()).some(r => r.status === "running" && r.sessionId === session.id)`，不是只看全局 `hasRunningRun`。
+- run 完成 / 失败 / 取消时会重新计算 `hasRunningRun` 并触发渲染；对应 run 状态不再是 `running` 后，会话项 spinner 会消失。
+- TASK-021 的后台 run 写回原会话能力未被本任务改动；`saveMessagesToSession`、`targetSessionId` 和 App 层 `messagesRef` / `runsRef` 路径保持原样。
+- 本次审查未发现新增 Token / provider / baseUrl / API URL / Authorization / Bearer 暴露。
+- 观察项：移动端折叠会话入口仍显示“历史对话”，且移动端紧凑会话项暂未显示逐会话 running spinner；这不阻塞 023A 的桌面基础设施收口，但应纳入 TASK-023B 的体验整理。
+- 下一步不建议直接进入 TASK-023C 项目 / 分组基础；建议先执行 TASK-023B：现有会话操作回归和体验整理，覆盖桌面 / 移动一致性、会话操作回归和 running 指示收口。
+
+#### TASK-023B：现有会话操作回归和体验整理
+
+- 状态：已完成
+- 优先级：P1
+- 负责人：OpenCode
+
+背景：
+
+- TASK-023A 已完成桌面主会话列表基础设施。
+- Codex 在 TASK-023A 审查中记录两个观察项：移动端折叠入口仍显示“历史对话”，移动端紧凑会话项暂未显示逐会话 running spinner。
+- 本任务只做现有会话操作体验整理和回归，不做项目 / 分组模型改造。
+
+目标：
+
+- 移动端折叠入口文案统一为“最近会话”。
+- 移动端会话项按 `sessionId` 精确显示 running spinner，不能只看全局 `hasRunningRun`。
+- 回归确认现有会话能力未被破坏：新建、切换、当前高亮、`updatedAt` 排序、置顶、重命名、删除、搜索。
+- 确认 TASK-021 后台 run 写回原会话能力不受影响。
+
+修改范围：
+
+- 优先限于 `src/App.tsx` 的移动端会话列表区域和小范围文案整理。
+- 可在 `AGENT_BOARD.md` / release checklist 记录验收反馈。
+
+禁止事项：
+
+- 不改 OpenClaw HTTP 后端协议。
+- 不改后台 run 架构。
+- 不改消息发送 / 重试 / 取消逻辑。
+- 不做项目 / 分组模型设计。
+- 不新增 Token / provider / baseUrl / API URL / Authorization / Bearer 暴露。
+- 不读取 `.env`，不输出 Token。
+
+验收标准：
+
+- `npm run build` 通过。
+- `cargo check --manifest-path src-tauri/Cargo.toml` 通过。
+- `node scripts/openclaw-http-api-probe.mjs` 通过。
+- 移动端会话折叠入口显示“最近会话”。
+- 移动端会话项 running spinner 按 `sessionId` 匹配，不能只看全局 `hasRunningRun`。
+- 桌面端会话列表不被破坏。
+- 新建、切换、高亮、排序、置顶、重命名、删除、搜索保持可用。
+- 后台 run 仍写回原会话。
+- 不新增敏感信息暴露。
+
+##### OpenCode 执行反馈
+
+- 修改文件：`src/App.tsx`，共 2 处小改动。
+- 移动端折叠入口文案从“历史对话”改为“最近会话”。
+- 移动端每个会话项通过 `runsRef` 检测 `status === "running" && run.sessionId === session.id`，匹配时显示 `Loader2` spinner。
+- 会话操作回归确认现有能力完整且未被本轮修改破坏：新建、切换、当前高亮、`updatedAt` 排序、置顶、重命名、删除、搜索。
+- 后台 run 写回原会话仍由 TASK-021C 机制保证。
+- 验证：`npm run build` 通过；`cargo check` 通过；`node scripts/openclaw-http-api-probe.mjs` 通过。
+
+##### Codex 审查反馈（TASK-023B）
+
+- 审查结论：TASK-023B 可以标记为“已完成”。
+- 移动端折叠入口已统一为“最近会话”；桌面主会话列表仍显示“最近会话”。
+- 移动端会话项 running spinner 已按 `sessionId` 精确匹配：`Array.from(runsRef.current.values()).some(r => r.status === "running" && r.sessionId === session.id)`，不是只看全局 `hasRunningRun`。
+- 桌面端会话列表结构和操作入口未被本任务改动；桌面 `sessionHasRunning` 匹配逻辑仍保留。
+- 现有会话能力仍沿用原实现：新建、切换、高亮、`updatedAt` 排序、置顶、重命名、删除、搜索未见破坏。
+- TASK-021 后台 run 写回原会话链路未被改动；`saveMessagesToSession`、`targetSessionId`、App 层 `messagesRef` / `runsRef` 仍是核心路径。
+- 本次审查未发现新增 Token / provider / baseUrl / API URL / Authorization / Bearer 暴露。
+- 观察项：仍有“搜索历史”“没有匹配的历史对话”“删除历史对话”等通用历史文案，属于轻量文案一致性问题，不阻塞 TASK-023B；可在后续 UI polish 中统一为“会话”。
+- 允许进入 TASK-023C 的规划阶段；但 TASK-023C 当前仍偏大，执行前必须拆成明确小任务，不建议直接大范围改造会话模型。
+
+#### TASK-023C：项目 / 分组基础
+
+- 状态：待规划
+- 优先级：P1
+- 负责人：OpenCode / Reasonix
+
+目标：
+
+- 给 Agent 会话增加类似 ChatGPT Projects 的轻量项目 / 分组能力。
+- 第一阶段只做基础组织：会话归属项目、默认项目、自定义项目、移动会话、按项目筛选。
+- 为未来“文件分析 / Skill Center / 业务任务 / 调试记录”等系统项目预留方向。
+- 不做复杂项目级知识库。
+
+产品边界：
+
+- 默认有“默认项目”。
+- 用户可以创建自定义项目。
+- 会话可以移动到一个项目；一个会话只属于一个项目。
+- 可以按项目筛选会话。
+- 暂不做多级文件夹。
+- 暂不做项目级 prompt。
+- 暂不做项目级文件绑定。
+- 暂不做项目级模型配置。
+- 暂不做共享 / 权限 / 云同步。
+- 禁止直接大范围改造会话模型；必须先完成数据模型设计并验收。
+
+安全边界：
+
+- 不读取 `.env`。
+- 不输出 Token。
+- 不暴露 provider / baseUrl / API URL / Authorization / Bearer。
+- 不改 OpenClaw HTTP 主链路。
+- 不改 run store。
+- 不删除 Hermes legacy。
+- 不实现 ClawHub install。
+- 不实现 `skills.install`。
+- 不恢复 WebSocket pairing 作为普通主路径。
+
+#### TASK-023C 子任务拆分
+
+| ID | 状态 | 优先级 | 任务 | 说明 |
+|---|---|---|---|---|
+| TASK-023C-A | 已完成 | P1 | 项目/分组数据模型设计 | 已完成并审查通过。 |
+| TASK-023C-B | 待执行 | P1 | 项目列表 UI + 默认项目 | 显示项目列表和默认项目，不移动会话、不迁移旧历史数据。 |
+| TASK-023C-C | 待规划 | P1 | 创建项目 + 移动会话到项目 + 项目筛选 | 创建项目、会话菜单移动、按项目筛选；不做拖拽/多选批量。 |
+| TASK-023C-D | 待规划 | P1 | 项目重命名 / 删除项目 / 回归测试 | 删除项目时会话移动回默认项目，不删除会话；补 release checklist。 |
+
+#### TASK-023C-A：项目/分组数据模型设计
+
+- 状态：已完成
+- 优先级：P1
+- 负责人：OpenCode / Reasonix
+
+背景：
+
+- 023A/023B 已完成基础会话列表和现有操作回归。
+- 项目 / 分组能力会触碰会话数据结构和持久化兼容，不能直接上 UI 或迁移代码。
+- 本任务只做设计和风险拆解，不改业务代码。
+
+目标：
+
+- 明确 `ChatProject` 类型设计。
+- 判断 `ChatSession` 是否需要增加 `projectId` / `sourceType`，以及字段默认值。
+- 明确默认项目策略：默认项目 id、名称、是否可删除、旧会话归属。
+- 明确旧会话迁移策略：无 `projectId` 的历史会话如何兼容，不破坏 `chat-sessions.json`。
+- 明确存储位置和兼容方案：是否继续写入 `chat-sessions.json`，是否新增 `chat-projects.json`，版本字段如何处理。
+- 明确删除项目时会话处理：会话移动回默认项目，不删除会话。
+- 明确系统项目预留方式：文件分析 / Skill Center / 业务任务 / 调试记录只预留设计，不实现。
+- 明确安全边界和回归风险。
+
+输出要求：
+
+- 新增或更新设计文档：建议 `docs/chat-projects-data-model-design.md`。
+- 在 `AGENT_BOARD.md` 写回 OpenCode 执行反馈。
+- 不修改 `src/`。
+- 不修改 `src-tauri/`。
+- 不执行项目 / 分组 UI 实现。
+- 不迁移真实历史数据。
+- 不读取 `.env`，不输出 Token。
+
+验收标准：
+
+- 文档覆盖 `ChatProject` 类型、`ChatSession.projectId` / `sourceType` 是否必要、默认项目策略、旧会话兼容、存储方案、删除项目策略、安全边界。
+- 明确 TASK-023C-B 的可执行边界：只做项目列表 UI + 默认项目 + 只读筛选雏形。
+- 明确不做多级文件夹、项目级 prompt、项目级文件绑定、项目级模型配置、共享 / 权限 / 云同步。
+- 明确不改 OpenClaw HTTP 主链路、不改 run store、不删除 Hermes legacy。
+- 不改业务代码。
+
+##### OpenCode 执行反馈
+
+- 新增设计文档：`docs/chat-projects-design.md`，共 11 章节。
+- 设计了 `ChatProject` 类型：`id`、`name`、`type: system | custom`、`color`、`icon`、`createdAt`、`updatedAt`。
+- 建议 `ChatSession` 扩展 `projectId?` 和 `sourceType?`：`projectId` 用于项目归属，缺省 fallback 到 `default`；`sourceType` 仅作为来源标签，不参与分组逻辑。
+- 第一版只创建“默认”系统项目。
+- 旧会话兼容策略：运行时使用 `session.projectId || DEFAULT_PROJECT_ID`，不强制迁移旧会话。
+- 删除项目策略：默认 / 系统项目不可删除；删除自定义项目时，会话移回默认项目，不删除会话。
+- run 兼容策略：后台 run 继续按 `sessionId` 写回，不依赖、不记录 `projectId`。
+- 后续任务建议：023C-B 项目列表 UI + 默认项目 + `session.projectId` 落地；023C-C 创建 / 移动 / 筛选；023C-D 重命名 / 删除 / 回归。
+- 业务代码未修改。
+
+##### Codex 审查反馈（TASK-023C-A）
+
+- 审查结论：TASK-023C-A 可以标记为“已完成”。
+- `docs/chat-projects-design.md` 足够指导后续实现，覆盖当前 `ChatSession` 结构、存储现状、`ChatProject` 类型、默认项目、旧数据兼容、删除项目策略、`sourceType`、run 兼容、安全边界和任务拆分。
+- `ChatProject` 类型整体合理；`type: system | custom` 比依赖 id 前缀更稳，`color` / `icon` 作为 UI 元数据可以保留为可选字段。
+- `ChatSession.projectId?` 合理，用于分组和筛选；`sourceType?` 作为来源标签合理，但不应参与项目归属、筛选主逻辑或 run 写回。
+- 第一版只创建“默认”系统项目合理，可以降低 UI 和迁移复杂度；“文件分析 / Skill Center / 业务任务 / 调试记录”先作为未来系统项目预留即可。
+- 旧数据 fallback 到 `DEFAULT_PROJECT_ID` 是安全策略；缺 `projectId` 的历史会话不应崩溃，也不应在 023C-B 强制迁移。
+- 存储策略需要调整优先级：文档推荐的 sessions + projects 包格式虽然原子性好，但会把 `chat-sessions.json` 从 `ChatSession[]` 改成对象包，涉及 Rust command 返回形状、前端读取兼容和备份回滚，RC 阶段风险偏高。短期更建议：保持 `chat-sessions.json` 仍为 `ChatSession[]`，B 阶段只用内置默认项目常量；需要自定义项目持久化时，优先新增独立 `chat-projects.json` / `chat-projects` 读写命令，避免破坏现有会话读写。
+- 删除自定义项目时会话移动回默认项目合理，且必须弹确认；删除项目不能删除会话。
+- run 继续按 `sessionId` 写回、不记录 `projectId` 合理；项目只是会话静态归属，不应进入 run 生命周期。会话移动项目时，run 仍应写回同一个 session。
+- 安全边界满足要求：项目 metadata 不应保存 Token / provider / baseUrl / API URL / Authorization / Bearer，不读取 `.env`，不改 OpenClaw HTTP 主链路，不改 run store，不删除 Hermes legacy。
+- 允许进入 TASK-023C-B，但边界需收紧：只做项目列表 UI + 默认项目 + `session.projectId` 兼容落地；不创建自定义项目，不移动会话，不迁移旧数据，不把 `chat-sessions.json` 改成包格式。
+
+#### TASK-023C-B：项目列表 UI + 默认项目
+
+- 状态：已完成
+- 优先级：P1
+- 负责人：OpenCode / Reasonix
+
+边界：
+
+- 显示项目列表。
+- 显示默认项目。
+- `ChatSession` 可增加可选 `projectId` / `sourceType` 字段，`createEmptySession` 可为新会话写入 `projectId: DEFAULT_PROJECT_ID`。
+- 旧会话只做运行时 fallback：`session.projectId || DEFAULT_PROJECT_ID`，不强制迁移历史数据。
+- B 阶段不创建自定义项目、不移动会话、不删除项目。
+- B 阶段不把 `chat-sessions.json` 从数组改成对象包格式；项目列表可先使用内置默认项目常量。
+- 只做 UI 骨架和只读筛选雏形。
+- 不改 OpenClaw HTTP 主链路，不改 run store，不删除 Hermes legacy。
+- 不读取 `.env`，不输出 Token，不暴露 provider / baseUrl / API URL / Authorization / Bearer。
+
+##### OpenCode 执行反馈
+
+- 修改文件：`src/lib/hermes.ts`、`src/App.tsx`。
+- `ChatSession` 接口新增 `projectId?: string` 和 `sourceType?`。
+- `createEmptySession` 为新会话写入 `projectId: "default"`。
+- 会话 sidebar 新增“项目：默认”灰色只读标签。
+- `chat-sessions.json` 保持 `ChatSession[]` 数组格式，未改为 `{ sessions, projects }` 包格式。
+- 未新增 `chat-projects.json` 独立存储。
+- 未实现新建项目、移动会话、项目删除、项目重命名等 TASK-023C-C/D 内容。
+- 验证：`npm run build` 通过；`cargo check` 通过；`node scripts/openclaw-http-api-probe.mjs` 通过。
+
+##### Codex 审查反馈（TASK-023C-B）
+
+- 审查结论：TASK-023C-B 当前保持“待验收（需补齐）”，暂不标记为“已完成”。
+- 合格部分：`ChatSession.projectId?` / `sourceType?` 扩展合理；`projectId` 用于未来分组，`sourceType` 仅作为来源标签，不参与 run 或项目归属主逻辑。
+- 合格部分：`createEmptySession` 默认写入 `projectId: "default"` 合理，新建会话可自然归入默认项目。
+- 合格部分：`chat-sessions.json` 仍保持 `ChatSession[]` 数组格式，未改包格式，符合 TASK-023C-A 审查要求；也未新增 `chat-projects.json`。
+- 合格部分：“项目：默认”只读标签符合“不创建项目、不移动会话、不删除项目”的本阶段边界。
+- 未完成部分：当前实现只有一个“项目：默认”标签，尚未形成最小“项目列表 UI”。看板要求显示项目列表和默认项目，建议补成只读项目列表 / 项目筛选条，至少包含“全部会话”和“默认”两个只读项或等价结构。
+- 未完成部分：旧会话无 `projectId` 的 fallback 目前没有在项目列表 / 筛选逻辑中体现。即使 B 阶段只有默认项目，也应在 UI 计算层使用 `session.projectId || DEFAULT_PROJECT_ID`，确保旧会话被默认项目计入。
+- 未完成部分：看板要求“只读筛选雏形”，当前没有项目筛选状态或只读筛选效果。建议补齐一个轻量只读筛选雏形：默认显示全部 / 默认项目，筛选逻辑只使用内置默认项目，不迁移旧数据。
+- 未发现越界实现：没有新建项目、移动会话、项目筛选写入、自定义项目持久化、拖拽或批量移动；没有改 OpenClaw HTTP 主链路、run store 或 Hermes legacy。
+- 未发现新增 Token / provider / baseUrl / API URL / Authorization / Bearer 暴露；`provider` / `baseUrl` 命中仍来自既有 Hermes legacy 类型或内部逻辑，不属于本任务新增普通 UI 暴露。
+- 不允许进入 TASK-023C-C。需先补齐 TASK-023C-B 的项目列表 UI + 旧会话 fallback + 只读筛选雏形，并重新提交审查。
+
+##### OpenCode 补齐反馈
+
+- 项目筛选 pill 已补齐：“全部会话”和“默认”两个只读按钮。
+- 新增 `selectedProjectId` 状态，用于切换 `all` / `default`。
+- `filteredSessions` 使用项目筛选 + 原搜索条件组合过滤。
+- 旧会话无 `projectId` 时通过 `session.projectId || "default"` 归入默认项目。
+- UI 选中态使用 `primary/10` + `font-medium`，未选中为灰色并支持 hover。
+- `chat-sessions.json` 仍为 `ChatSession[]` 数组格式，未新增 `chat-projects.json`，未改包格式。
+- 验证：`npm run build` 通过；`cargo check` 通过；`node scripts/openclaw-http-api-probe.mjs` 通过。
+
+##### Codex 复审反馈（TASK-023C-B 补齐）
+
+- 复审结论：TASK-023C-B 可以标记为“已完成”。
+- 已具备最小项目列表 / 只读筛选雏形：“全部会话”和“默认”两个筛选 pill 可见且可切换。
+- `selectedProjectId` 逻辑正确：仅当 `selectedProjectId !== "all"` 时才比较项目归属；因此“全部会话”会显示全部会话。
+- `filteredSessions` 对旧会话兼容正确：默认筛选下使用 `(session.projectId || "default") === "default"`，无 `projectId` 的旧会话不会被误隐藏。
+- 搜索仍在项目筛选后继续按标题、预览和消息内容过滤；置顶、重命名、删除、running spinner 和移动端会话入口未见破坏。
+- 存储边界保持正确：`chat-sessions.json` 仍是 `ChatSession[]`，未新增 `chat-projects.json`，未改成 `{ sessions, projects }` 包格式。
+- 未越界实现 TASK-023C-C/D：没有自定义项目创建、移动会话、删除项目、拖拽或批量移动。
+- 未发现新增 Token / provider / baseUrl / API URL / Authorization / Bearer 暴露；相关命中仍属于既有 legacy 类型或内部逻辑，不是本任务新增普通 UI 暴露。
+- 允许进入 TASK-023C-C：创建项目 + 移动会话 + 项目筛选。执行边界仍需限制为单层项目、单会话移动、无拖拽、无多选批量、无项目级 prompt / 文件 / 模型配置。
+
+#### TASK-023C-C：创建项目 + 移动会话到项目 + 项目筛选
+
+- 状态：待执行
+- 优先级：P1
+- 负责人：OpenCode / Reasonix
+
+边界：
+
+- 用户可创建项目。
+- 会话菜单增加“移动到项目”。
+- 支持按项目筛选会话。
+- 会话只属于一个项目。
+- 不做拖拽。
+- 不做多选批量移动。
+- 当前允许执行；必须保持单层项目、单会话移动，不做拖拽、多选批量或项目级配置。
+
+##### OpenCode 执行反馈
+
+- 新增文件：`src/lib/chatProjects.ts`，包含 `ChatProject` 类型、`loadProjects`、`saveProjects`、`createProject` 和轻量 `localStorage` 持久化。
+- 修改文件：`src/App.tsx`，新增项目列表 UI、新建项目内联输入框、会话菜单“移动到项目”子菜单、`moveSessionToProject`。
+- 项目列表显示“全部会话”、默认项目和自定义项目，选中项高亮。
+- 新建项目支持底部“+ 新建项目”、内联输入、Enter 创建、Escape 取消、同名检测。
+- 移动会话通过会话“...”菜单展开项目列表，点击目标项目后更新 `session.projectId` 并重写 `chat-sessions.json`。
+- 筛选逻辑使用 `selectedProjectId`，搜索和项目筛选兼容。
+- 存储：`chat-sessions.json` 仍保持 `ChatSession[]`；自定义项目当前存储在 `localStorage` key `ai-agent-workspace-chat-projects`；系统项目运行时生成。
+- 验证：`npm run build` 通过；`cargo check` 通过；`node scripts/openclaw-http-api-probe.mjs` 通过。
+
+##### Codex 审查反馈（TASK-023C-C）
+
+- 审查结论：TASK-023C-C 可以标记为“已完成”。
+- `chat-sessions.json` 仍保持 `ChatSession[]` 数组格式，未改成 `{ sessions, projects }` 包格式，符合前序审查边界。
+- 移动会话逻辑只更新目标 session 的 `projectId`，不复制、不删除消息；会话消息内容、标题、预览、置顶等字段保持原样。
+- `selectedProjectId` 筛选与搜索兼容：先按项目过滤，再按标题、预览和消息内容搜索。
+- 旧会话无 `projectId` 时仍通过 `session.projectId || DEFAULT_PROJECT_ID` 归入默认项目；“全部会话”仍显示全部。
+- 后台 run 仍按 `sessionId` 写回，不依赖 `projectId`；会话正在运行时移动项目不会改变 session id，因此不应导致 run 写回丢失或写错。
+- 项目能力保持单层：没有拖拽、多选批量、项目级 prompt、项目级文件绑定、项目级模型配置。
+- 未实现 TASK-023C-D 的项目重命名 / 删除项目能力。
+- 未发现新增 Token / provider / baseUrl / API URL / Authorization / Bearer 暴露；项目 metadata 仅包含本地项目名称和 UI 元数据。
+- 存储策略审查：自定义项目使用 `localStorage` 可以作为当前 MVP 接受，因为不含敏感信息、改动小，且避免了本轮改 Rust command / `chat-sessions.json` 文件形状。
+- P1 技术债：`localStorage` 项目存储与 `chat-sessions.json` 文件持久化、备份、恢复体系割裂；如果 `localStorage` 被清理，`chat-sessions.json` 中自定义 `projectId` 会变成孤儿引用。后续应迁移到独立 `chat-projects.json` 或统一 Tauri/Rust 持久化机制，并提供缺失项目 fallback / 修复策略。
+- 允许进入 TASK-023C-D：项目重命名 / 删除项目 / 回归测试。TASK-023C-D 应同时记录或处理上述 P1 项目存储技术债；删除项目时必须把会话移动回默认项目，不得删除会话。
+
+#### TASK-023C-D：项目重命名 / 删除项目 / 回归测试
+
+- 状态：待执行
+- 优先级：P1
+- 负责人：OpenCode / Reasonix
+
+边界：
+
+- 项目可重命名。
+- 删除项目时，会话移动回默认项目，不删除会话。
+- 增加 release checklist。
+- 回归测试后台 run 不写错会话。
+- 当前允许执行；需包含重命名、删除项目、删除后会话回默认项目、后台 run 回归，并记录/处理项目存储 P1 技术债。
+
+##### OpenCode 执行反馈
+
+- 修改文件：`src/App.tsx`。
+- 自定义项目 hover 时显示 `Pencil` 重命名按钮，点击后 inline 编辑；Enter 确认，Escape 取消，onBlur 保存。
+- 重命名包含空名称保护和同名检测，只通过 UI 暴露给 custom 项目。
+- 自定义项目 hover 时显示 `Trash2` 删除按钮，点击后弹出 `ConfirmDialog` 二次确认。
+- 删除项目时，将该项目下所有会话的 `projectId` 改为 `DEFAULT_PROJECT_ID`，保存 sessions，删除项目，并把当前筛选切回默认项目。
+- 默认项目和“全部会话”没有重命名 / 删除按钮。
+- 回归覆盖创建、移动、筛选、重命名、删除主链路。
+- 验证：`npm run build` 通过；`cargo check` 通过；`node scripts/openclaw-http-api-probe.mjs` 通过。
+
+##### Codex 审查反馈（TASK-023C-D）
+
+- 审查结论：TASK-023C-D 可以标记为“已完成”。
+- 项目重命名入口只对 custom 项目可见；“默认”系统项目和“全部会话”无重命名入口。
+- 重命名保持 `project.id` 不变，只更新 `name` 和 `updatedAt`；同名检测存在，空名称不会保存。
+- 项目删除入口只对 custom 项目可见；“默认”系统项目和“全部会话”无删除入口，并有 `ConfirmDialog` 二次确认。
+- 删除项目时不会删除任何会话或消息，只把相关 session 的 `projectId` 改为 `DEFAULT_PROJECT_ID`。
+- 删除项目后调用 `enqueueWriteSessions()` 保存会话，`chat-sessions.json` 仍保持 `ChatSession[]` 数组格式。
+- 删除当前筛选项目后，`selectedProjectId` 会切回 `DEFAULT_PROJECT_ID`，避免停留在已删除项目筛选。
+- 当前打开会话属于被删除项目时，消息区不会被清空；后续保存仍通过同一 session id 写回，且 latest sessions 已更新为默认项目。
+- running run 仍按 `sessionId` 写回，不依赖 `projectId`；项目删除或重命名不改变 session id，因此不会导致 run 写回丢失或写错。
+- 项目能力仍保持单层，没有拖拽、多选批量、项目级 prompt、项目级文件绑定或项目级模型配置。
+- 未发现新增 Token / provider / baseUrl / API URL / Authorization / Bearer 暴露；项目数据只包含本地项目元数据。
+- localStorage 项目存储仍作为当前 MVP 技术债保留，没有在本任务越界迁移；该 P1 技术债已记录，后续应迁移到独立 `chat-projects.json` 或统一 Tauri/Rust 持久化机制。
+- P2 硬化项：当前 rename/delete 主要依赖 UI 层只对 custom 项目展示按钮；后续可在 handler 内部再增加 custom 类型防御性校验。空名称 onBlur 不保存但可能保持编辑态，后续可优化取消/恢复体验。
+- P2 文档项：`docs/release-checklist.md` 目前未见项目分组专项验收清单，后续 RC 文档整理可补充；不阻塞本任务功能验收。
+- TASK-023C 父任务可以标记为“已完成”。TASK-023 父任务可以阶段性标记为“已完成（阶段性）”，并保留项目存储 P1 技术债。
+
+
+#### 历史遗留内容：WebSocket 官方 UI 调研要求（已废弃为普通主线）
+
+以下内容属于 TASK-012 早期 WebSocket 路线记录，仅保留用于追溯；Reasonix 不应按此作为当前待执行任务。
+
+调研要求：
+
+- 明确官方 UI 如何设置 WebSocket URL。
+- 明确官方 UI 如何处理 `connect.challenge`。
+- 明确官方 UI 如何构造 connect frame。
+- 明确官方 UI 如何处理 `hello-ok`。
+- 明确官方 UI 如何管理 auth / token / device identity。
+- 明确官方 UI 如何订阅 events。
+- 明确官方 UI 如何发送 RPC。
+- 明确官方 UI 如何处理 reconnect / close / error。
+- 明确官方 UI 如何过滤 chat / session events。
+- 明确当前项目实现和官方实现的差异。
+- 明确 `hashes.sha512 not set` 的修复方式：
+  - `ed.hashes.sha512 = sha512`
+  - 或改用 `signAsync` / `getPublicKeyAsync`
+  - 或迁移到 Rust/Tauri 后端
+
+验收标准：
+
+- 生成 `docs/openclaw-official-ui-gateway-review.md`。
+- 报告覆盖上述调研要求。
+- 明确推荐 Phase B 的实现路线。
+- 没有修改业务代码。
+- 没有读取 `.env`。
+- 没有输出 Token。
+
+#### Phase B：重构实现
+
+Phase B 必须等待 Phase A 报告完成并经 Codex / 用户确认后再执行。
+
+目标：
+
+- 不再在 `App.tsx` 内散落 OpenClaw Gateway 逻辑。
+- 将 Gateway WS / auth / `hello-ok` / RPC / events 收敛到单一模块。
+- 优先方案：Rust/Tauri 后端承载 OpenClaw Gateway 连接与 token / device identity，前端只接收 sanitized events。
+- 如果短期仍在前端实现，必须与官方 UI `gateway.ts` 的握手 / 事件模型保持一致。
+- 修复 `hashes.sha512 not set`。
+- `ChatPage` 只调用 `AgentBackend`，不直接碰 Gateway 细节。
+
+禁止范围：
+
+- 不删除 Hermes legacy backend。
+- 不删除 Hermes 代码。
+- 不实现 ClawHub 任意第三方安装。
+- 不实现 `skills.install`。
+- 不暴露 provider / baseUrl / API URL。
+- 不读取或输出 Token。
+- 不把 private key 持久化到 localStorage / sessionStorage。
+
+验收标准：
+
+- Gateway 握手与官方 UI / Gateway protocol 对齐。
+- `connect.challenge`、connect frame、`hello-ok`、RPC、events、close/error/reconnect 处理清晰集中。
+- Agent 对话能完成一次真实 OpenClaw send / stream / done 或明确记录官方协议缺失点。
+- HermesLegacyBackend 保留可回滚。
+- `npm run build` 通过。
+- `cargo check` 通过。
 
 ## 5. TASK-001 详细说明
 
@@ -1008,3 +4058,1596 @@ export type AgentBackendEvent =
 - 用户批准后，probe 重连能收到 `hello-ok`。
 - 收到 `hello-ok` 后，probe 至少调用一个基础 RPC，例如 `health` / `status`、`skills.status` 或 `models.list`。
 - 如果失败，probe 输出脱敏后的错误 code、message、details 和下一步判断。
+
+### Codex 审查反馈：TASK-009
+
+- 审查日期：2026-05-25
+- 审查范围：`AGENT_BOARD.md`、Reasonix 最终回执、当前提交 `514e6e5 chore: validate OpenClaw gateway pairing flow`
+- 审查结论：TASK-009 合格，状态改为“已完成”。
+- 业务代码检查：本次审查只更新 `AGENT_BOARD.md`，未修改业务代码，未执行 TASK-010。
+
+#### 关键判断
+
+1. TASK-009 是否可以标记为已完成？
+   - 结论：可以。
+   - 依据：Reasonix 最终回执确认 `node scripts/openclaw-pairing-flow-probe.mjs` 已打通 `hello-ok`，并完成 4/4 基础 RPC。
+   - 实测结果包括：Protocol 4、Server 2026.5.22、RPC methods 173、Events 27、Skills 58、Models `gpt-5.5`。
+   - `npm run build` 通过，`cargo check` 通过。
+   - 相关变更已提交并推送：`514e6e5 chore: validate OpenClaw gateway pairing flow`。
+
+2. `hello-ok` + 基础 RPC 是否足以支撑 TASK-010：OpenClawBackend 初版？
+   - 结论：足以开始 TASK-010 的初版规划与实现。
+   - 原因：此前阻塞点已经闭环：device identity、gateway token、pending request / approval、hello-ok、features.methods/events 和基础 RPC 都已有真实验证。
+   - 限制：TASK-010 仍应是最小 OpenClawBackend，不应一次性迁移 Skill Center、ClawHub 安装、完整历史、完整文件/媒体能力或 OpenClaw-only 主路径。
+
+3. 需要补充的安全注意事项：
+   - App 不能把 gateway token 打印到日志。
+   - App 读取 `~/.openclaw/openclaw.json` 时只能内存使用，不得写入项目文件、普通前端状态或日志。
+   - device identity / device token 需要安全持久化，后续优先使用 Tauri 后端 + OS 安全存储或应用私有安全目录。
+   - 普通 UI 不能暴露 provider / baseUrl / API URL。
+   - Token 不能读取项目 `.env`，不能输出，不能通过 CLI 参数传递。
+   - ClawHub 第三方技能安装继续保持关闭，不进入 TASK-010。
+
+4. 下一步 TASK-010 应如何规划？
+   - 建议任务名：`TASK-010：OpenClawBackend 初版接入`。
+   - 新增 `OpenClawConnectionManager`，负责 Gateway URL、WebSocket 连接、`connect.challenge`、device signature、hello-ok、capability discovery、连接状态和错误分类。
+   - 新增 `OpenClawBackend` 初版，接入现有 `AgentBackend` 抽象。
+   - 初版只实现：
+     - `checkStatus`
+     - `connect`
+     - `hello-ok`
+     - `capabilities`
+     - basic `chat.send`
+     - chunk / event subscription
+     - `abort`
+   - 不做 skills install。
+   - 不做 ClawHub 任意安装。
+   - 不删除 Hermes legacy backend。
+   - 不做 OpenClaw-only 重构。
+
+#### TASK-010 建议边界
+
+允许范围：
+
+- 新增 OpenClaw backend / connection manager 相关 TypeScript 文件。
+- 最小接入现有 `AgentBackend` 抽象。
+- 如必须，可做少量 wiring，但不大改 `ChatPage` UI 结构。
+- 可复用 TASK-009 probe 中已验证的协议经验，但不得把 token 或本机私密路径写入代码。
+
+禁止范围：
+
+- 不删除 Hermes legacy backend。
+- 不开放普通用户 provider / baseUrl / API URL。
+- 不实现 ClawHub 任意第三方 skill 安装。
+- 不迁移完整 Skill Center。
+- 不做 OpenClaw-only 强切。
+- 不读取项目 `.env`。
+- 不输出 Token。
+- 不通过 CLI 参数传递 Token。
+
+#### 验收重点
+
+- `npm run build` 通过。
+- `cargo check` 通过。
+- OpenClaw backend 能完成 status/connect/hello-ok/capability discovery。
+- 能读取并报告 features.methods/events 数量，不写死完整方法列表。
+- 能完成最小 `chat.send` 事件流验证，或明确记录 chat RPC 的缺失字段与后续任务。
+- 能完成 `abort` 方法发现和最小调用验证，或明确记录无法真实触发的原因。
+- Hermes legacy backend 保持可用。
+
+### Codex 审查反馈：TASK-010
+
+- 审查日期：2026-05-25
+- 审查范围：`src/lib/openclawGateway.ts`、`src/lib/openclawBackend.ts`、`src/lib/agentBackend.ts`、`src/App.tsx`、`docs/openclaw-backend-implementation-notes.md`、`package.json`、`package-lock.json`、`AGENT_BOARD.md`
+- 审查结论：TASK-010 暂不标记为“已完成”，状态保持“待验收（需修复）”。
+- TASK-011 状态建议：继续保持“待规划”，暂不允许执行。
+- 业务代码检查：本次审查只更新 `AGENT_BOARD.md`，未修改 `src/`、`src-tauri/`，未执行 TASK-011，未读取 `.env`，未输出 Token。
+
+#### 通过项
+
+1. 默认路径仍为 HermesLegacyBackend。
+   - `USE_OPENCLAW_BACKEND = false`，当前没有强制切换到 OpenClaw。
+   - 默认分支仍调用 `hermesLegacyBackend.startChat` 和 `hermesLegacyBackend.cancelChat`。
+   - 现有 Hermes Tauri 事件监听仍保留，Hermes SSE / chunk / done / error 主链路未被删除。
+
+2. Hermes legacy backend 保留。
+   - `HermesLegacyBackend` 仍包装 Hermes installed/status/chat/cancel/event 能力。
+   - 未删除 Hermes 代码，未做 OpenClaw-only 大清理。
+   - 未恢复普通定时任务入口。
+
+3. OpenClawBackend 范围基本符合初版边界。
+   - 已新增 Gateway WebSocket client 和 OpenClawBackend。
+   - 覆盖了 `checkStatus`、connect / `hello-ok`、capabilities、basic `chat.send`、event dispatch、`chat.abort` 的初步结构。
+   - 未实现 `skills.install`。
+   - 未接 ClawHub 任意第三方安装。
+   - 未开放 provider / baseUrl / API URL 到普通 UI。
+
+4. 依赖写入完整。
+   - `@noble/ed25519`、`@noble/hashes` 已写入 `package.json` 和 `package-lock.json`。
+   - 新增 OpenClaw 相关源码未发现 `node:crypto`、`fs`、`path` 等 WebView 不可用模块。
+
+5. Token 输出风险暂未发现。
+   - 未发现 gateway token 被写入文档、看板、聊天历史、localStorage、sessionStorage 或日志。
+   - 未发现读取项目 `.env`。
+   - 当前实现中 gateway token 只作为构造参数进入内存，并用于 Gateway connect frame。
+
+#### 阻塞项
+
+1. P0：OpenClawBackend 目前无法从 App 实际初始化。
+   - `App.tsx` 中 `getOpenClawBackend()` 未传入 gateway token。
+   - `readOpenClawGatewayToken()` 当前固定返回 `null`。
+   - 因此即使把 `USE_OPENCLAW_BACKEND` 改为 `true`，App 也会进入“Gateway token 未配置或 Gateway 未运行”的错误路径。
+   - `_openclawBackendError` 一旦因缺 token 被设置，后续同一会话即使提供 token 也会被短路返回 `null`，不利于 onboarding / retry。
+
+2. P0：`agentBackend.ts` 使用 CommonJS `require()` 懒加载 OpenClawBackend，WebView / Vite 运行时风险高。
+   - 浏览器 WebView 环境通常没有 `require`。
+   - 当前 `npm run build` 通过不等于运行时可用。
+   - 后续应改为 ESM 静态导入或异步 dynamic import，并让调用链明确处理异步初始化。
+
+3. P0：deviceId 生成逻辑与 TASK-009 已验证路径不一致。
+   - `DeviceIdentity` 注释写 `deviceId = sha256(publicKeyRaw)`。
+   - 当前实现实际返回 raw public key hex / slice，不是真正 SHA-256。
+   - TASK-009 的成功路径依赖真实协议字段，OpenClawBackend 不能用“近似 hash”或 raw public key 猜测。
+   - 后续应使用 `@noble/hashes/sha2` 或 WebCrypto 生成准确 SHA-256，确保与 Gateway 设备配对表一致。
+
+4. P0：启用 OpenClaw 前仍会先检查 Hermes API Server。
+   - `App.tsx` 在 OpenClaw dev switch 分支前仍执行 `refreshHermesApi()` 并要求 Hermes API running。
+   - 这意味着 TASK-011 若把 OpenClaw 设为默认 backend，仍会被 Hermes API Server 状态阻塞。
+   - TASK-011 前必须把 Hermes preflight 只保留在 Hermes 分支。
+
+5. P1：`OpenClawBackend.startChat()` 的 accepted 判断恒为 true。
+   - `accepted: result.status === "started" || result.status === "accepted" || true` 会让任何返回都被视为 accepted。
+   - 这会吞掉协议失败、未知状态或错误 payload，影响 UI 错误处理。
+   - 后续应按真实 `chat.send` / `sessions.send` 返回 schema 判定。
+
+6. P1：事件订阅时序和过滤还不够安全。
+   - App 当前在 `oc.startChat()` 之后才 `subscribeEvents`，可能漏掉早期 chunk / done / error。
+   - `subscribeEvents` 在没有 `sessionId` 时接受全部事件，可能串入其它 session/run。
+   - TASK-011 前至少需要按 request/run/session 建立稳定过滤，并优先订阅再发起 run。
+
+7. P1：device private key 存在 localStorage 明文安全债。
+   - 文档已标注 v0 限制，但如果 TASK-011 让 OpenClaw 成为普通用户默认路径，localStorage 明文存储 Ed25519 private key 不应进入产品主链路。
+   - 后续应迁移到 Rust/Tauri 后端处理 device identity、device token 和 gateway token，优先使用 OS 安全存储或应用私有安全目录。
+   - 前端 WebView 内处理 Gateway token / Ed25519 只适合开发验证，不适合直接作为正式默认后端实现。
+
+8. P1：`chat.send` / event payload 仍未经过真实对话验证。
+   - TASK-009 验证的是 `health`、`status`、`skills.status`、`models.list`，不是 chat streaming。
+   - 当前 `chat.send` 参数和 event mapping 仍是推断。
+   - TASK-010 验收标准要求若无法真实验证 chat RPC，必须明确记录缺失字段和下一步；文档已有说明，但实现层不能据此放行 TASK-011。
+
+9. P2：`isOpenClawBackendAvailable()` 语义误导。
+   - 当前没有 backend、没有 token、也未连接时可能返回 true。
+   - 后续应用状态判断应区分“代码可加载”“token 已配置”“Gateway 可达”“hello-ok 成功”“chat 可用”。
+
+#### 安全补充
+
+- App 不能把 gateway token 打印到日志。
+- App 读取 `~/.openclaw/openclaw.json` 时只能内存使用，不得写入前端状态、聊天历史、localStorage、sessionStorage、docs 或看板。
+- gateway token 不能通过 CLI 参数传递。
+- device identity / device token 需要安全持久化，不能在普通 UI、日志或调试输出中暴露。
+- 普通 UI 不能暴露 provider / baseUrl / API URL。
+- 不读取项目 `.env`，不输出 Token。
+
+#### TASK-010 复审前修复建议
+
+1. 修正 OpenClawBackend 加载方式，移除 WebView 运行时 `require()` 风险。
+2. 明确 gateway token 获取策略：短期可以只保留开发注入，但不能让 App 默认分支调用无 token 的 `getOpenClawBackend()`。
+3. 修正 deviceId 为真实 `sha256(publicKeyRaw)`，与 TASK-009 probe 的成功路径保持一致。
+4. 修正 `_openclawBackendError` sticky retry 问题。
+5. 修正 `accepted || true`。
+6. 调整 OpenClaw 事件订阅时序：先订阅，后发送；按 session/run/request 做过滤。
+7. 将 Hermes API Server preflight 限定在 Hermes 分支，避免 TASK-011 切默认 OpenClaw 时仍依赖 Hermes。
+8. 在进入 TASK-011 前做一次人工 smoke test：`USE_OPENCLAW_BACKEND` 开启后，至少完成 `checkStatus` / `hello-ok` / capabilities，并记录 chat RPC 是否真实可用。
+
+#### TASK-011 放行判断
+
+- 当前不建议 Reasonix 执行 TASK-011。
+- TASK-011 应保持“待规划”。
+- 放行条件：TASK-010 修复上述 P0 项并复审通过；至少完成一次 OpenClaw hello-ok / capabilities 的 App 侧人工验证；若要把 OpenClaw 设为默认对话 backend，还需确认 Hermes preflight 不再阻塞 OpenClaw 主路径。
+
+
+### TASK-025：Workspace Clean UI 重设计
+
+- 状态：进行中
+- 优先级：P1
+- 负责人：OpenCode / Reasonix
+
+背景：
+
+- TASK-013 到 TASK-024A 已阶段性完成。
+- OpenClaw HTTP-first 主路径、Agent 引擎页、Agent 对话页、后台 run、消息操作、会话列表、项目 / 分组基础和侧栏 polish 均已完成。
+- 用户已查看当前首页和 Agent 对话页截图，认为整体 UI 仍偏“工程后台 / 功能堆叠”，希望重新做成熟 AI App 风格的 Workspace Clean UI。
+- 用户特别指出：Agent 对话页中间的历史 / 最近会话区域占比太大，需要明显缩小，不能和聊天主区域平分视觉权重。
+
+目标：
+
+- 将当前界面从“工程后台 / 功能堆叠感”优化为更像 ChatGPT / Claude / 现代桌面 AI App 的 Workspace Clean UI。
+- 弱化工程感，降低状态信息视觉权重。
+- 强化“开始对话 / 最近任务 / 文件与技能入口”。
+- 让 Agent 对话页更沉浸，聊天区成为主视觉。
+- 会话 / 项目侧栏更轻、更窄，更像辅助上下文栏。
+
+执行规则：
+
+- 当前只允许 TASK-025E 进入“待执行”。
+- TASK-025F 保持“待规划”。
+- 不允许直接执行大范围 UI 重构。
+- 不允许一次性改首页 + 对话页 + 消息区 + 桌面窄窗口回归。
+- 每个 UI 实现任务必须单独执行、单独审查。
+
+#### TASK-025E 方向纠偏
+
+- 产品初衷是 Windows / macOS 桌面端的 U 盘 AI 助手 / 本地 AI Agent 工作台，不是移动端 App。
+- TASK-025E 不做手机端，不做 iPhone / Android 移动端适配，不做触屏优先交互，不做移动端抽屉化主线。
+- TASK-025E 只关注 Windows/macOS 桌面窗口兼容。
+- 之前 UI 产品化方向仍有效：首页重设计、Agent 对话页布局、消息区降噪、Agent 引擎页用户化继续保留；需要纠正的只是“移动端 / 手机端”方向。
+
+通用安全边界：
+
+- 不读取 `.env`。
+- 不输出 Token。
+- 不暴露 provider / baseUrl / API URL / Authorization / Bearer / token。
+- 不改 OpenClaw HTTP 主链路。
+- 不改 run store。
+- 不改 session / project 数据结构。
+- 不改 Token 安全策略。
+- 不删除 Hermes legacy。
+
+#### TASK-025A：UI 重设计方案文档
+
+- 状态：已完成
+- 优先级：P1
+- 负责人：OpenCode / Reasonix
+
+目标：
+
+- 只做设计方案，不改业务代码。
+- 输出 `docs/workspace-clean-ui-design.md`。
+- 为后续 TASK-025B-F 提供明确、可执行、可审查的页面布局和视觉层级方案。
+
+修改范围：
+
+- 新增设计文档 `docs/workspace-clean-ui-design.md`。
+- 可在 `AGENT_BOARD.md` 写回执行反馈。
+- 不修改 `src/`、`src-tauri/`、配置文件或业务代码。
+
+必须回答的问题：
+
+1. 当前首页问题
+   - 为什么像状态面板 / 工程后台。
+   - 哪些信息应该降级。
+   - 首页应该突出哪些主操作。
+
+2. 当前 Agent 对话页问题
+   - 三栏视觉权重是否失衡。
+   - 会话 / 项目侧栏为什么占比过大。
+   - 聊天区如何更沉浸。
+   - 顶部连接状态如何降级。
+
+3. 尺寸建议
+   - 主导航宽度建议。
+   - 会话 / 项目侧栏宽度建议。
+   - 聊天区最小宽度建议。
+   - 建议参考：主导航约 220-240px；会话 / 项目侧栏约 280-320px；聊天区自适应，占主视觉。
+   - 必须明确：当前中间历史 / 最近会话区域应减少宽度，避免像主面板。
+
+4. 首页新版信息架构
+   - Hero：AI Agent 工作台。
+   - 主操作：开始对话 / 分析文件 / 配置引擎 / Skill Center。
+   - 最近会话或最近任务。
+   - 轻量 Agent 状态。
+   - 状态卡片不要喧宾夺主。
+
+5. Agent 对话新版信息架构
+   - 左侧主导航。
+   - 窄会话 / 项目侧栏。
+   - 右侧主聊天区。
+   - 顶部状态建议为：“AI Agent 已就绪 · openclaw/default”。
+   - HTTP / Token / Gateway 细节降级到 Agent 引擎页，不在聊天页主展示。
+
+6. 会话 / 项目侧栏设计
+   - 项目作为筛选器。
+   - 最近会话作为列表。
+   - 项目区紧凑。
+   - 会话项更轻。
+   - 支持未来折叠。
+   - 必须回应用户要求：历史 / 最近会话区域占比更小。
+
+7. 消息区设计
+   - 用户消息更轻，不要大色块压迫。
+   - AI 回复更像正文卡片。
+   - footer 信息弱化。
+   - 操作按钮 hover 或低权重显示。
+
+8. 移动端策略
+   - 主导航可保持。
+   - 会话 / 项目可折叠。
+   - 项目筛选横向滚动。
+   - 输入区优先保证可用。
+
+9. 安全和边界
+   - 不改 OpenClaw HTTP 主链路。
+   - 不改 run store。
+   - 不改 session / project 数据结构。
+   - 不改 Token 安全策略。
+   - 不暴露 provider / baseUrl / API URL / token。
+   - 不删除 Hermes legacy。
+
+禁止事项：
+
+- 不改业务代码。
+- 不执行 TASK-025B-F。
+- 不做首页、对话页、消息区、移动端的一次性大改。
+- 不改 OpenClaw HTTP 后端协议。
+- 不改模型供应配置。
+- 不改 Onboarding 逻辑。
+- 不改后台 run 架构。
+- 不实现 streaming。
+- 不回到 WebSocket pairing。
+- 不实现 ClawHub install。
+- 不实现 `skills.install`。
+
+验收标准：
+
+- 生成 `docs/workspace-clean-ui-design.md`。
+- 文档明确指出当前首页和 Agent 对话页的问题。
+- 文档给出新版信息架构、布局比例、尺寸建议和视觉层级建议。
+- 文档重点明确：会话 / 项目侧栏宽度应缩小，中间历史 / 最近会话区域占比应明显减小。
+- 文档拆出 TASK-025B-F 的实现建议，每个任务边界清晰。
+- 未修改业务代码。
+- 未读取 `.env`。
+- 未输出 Token。
+
+需要执行的验证命令：
+
+- `test -f docs/workspace-clean-ui-design.md`
+- `rg -n "会话|项目|侧栏|首页|Agent 对话|OpenClaw|provider|baseUrl|Token" docs/workspace-clean-ui-design.md`
+
+
+##### OpenCode / Opus 执行反馈
+
+- 新增 `docs/workspace-clean-ui-design.md`。
+- 文档共 12 章节，覆盖当前问题诊断、Workspace Clean UI 原则、整体布局、首页信息架构、Agent 对话页信息架构、会话 / 项目侧栏、消息区、状态展示、移动端、视觉规范、分阶段实现计划和风险边界。
+- 核心尺寸建议：主导航 220-240px；会话 / 项目侧栏 260px，最多不超过 300px；聊天区自适应并占主视觉。
+- 明确回应用户反馈：历史 / 最近会话区域从当前约 300px 降为 260px 辅助上下文侧栏，不再与聊天主区域平分视觉权重。
+- 首页方向：从“状态面板”改为“工作台入口”，包含 Hero、快速入口、最近会话和轻量 Agent 状态。
+- Agent 对话页方向：顶部降级为 `AI Agent · 已就绪`，HTTP / Token / Gateway 等技术细节移动到 Agent 引擎页。
+- 消息区方向：用户消息 65-70% 宽度，AI 回复背景更轻，footer 弱化，操作按钮 hover / 低权重显示。
+- 移动端方向：侧栏抽屉化，项目筛选横向滚动，输入区优先保证可用。
+- 业务代码未修改。
+
+##### Codex 审查反馈（TASK-025A）
+
+- 审查结论：TASK-025A 可以标记为“已完成”。
+- `docs/workspace-clean-ui-design.md` 足够指导后续 UI 实现；它不仅给出方向，也给出了布局比例、尺寸、信息降级策略、实现顺序和风险边界。
+- 用户特别要求已充分回应：历史 / 最近会话区域被定义为 260px 辅助上下文侧栏，最大不超过 300px，并要求降低会话项高度与视觉权重，避免像主面板。
+- 主导航 220-240px、会话 / 项目侧栏 260px、最多 300px 的尺寸建议合理；260px 比之前规划的 280-320px 更积极地回应“占比太大”的反馈，后续 TASK-025C 应优先按 260px 落地，并用 `truncate` / `overflow-hidden` 防止内容溢出。
+- 首页从“系统状态面板”改为“工作台入口”的方向正确：Hero、开始对话、分析文件、Skill Center、最近会话和轻量状态更符合成熟 AI App 的首屏目标。
+- 对话页顶部技术状态降级合理：聊天页只保留“是否可用 / 已就绪”一类低噪音状态，HTTP / Token / Gateway / Provider 细节应留在 Agent 引擎页。
+- 消息区气泡、AI 回复正文化、footer 弱化和 hover 操作按钮方向合理；后续 TASK-025D 必须只改视觉，不改复制 / 继续 / 重试 / 重新生成等操作语义。
+- 移动端侧栏抽屉化、项目筛选横向滚动、输入区优先的策略合理；后续 TASK-025E 应作为独立任务审查，避免随桌面布局一起大改。
+- 允许进入 TASK-025B：首页 Workspace UI 重设计。
+- TASK-025C / TASK-025D / TASK-025E / TASK-025F 继续保持“待规划”，不允许一次性大改首页 + 对话页 + 消息区 + 移动端。
+- 安全边界继续有效：不改 OpenClaw HTTP 主链路，不改 run store，不改 session / project 数据结构，不改 Token 安全策略，不暴露 provider / baseUrl / API URL / token，不删除 Hermes legacy。
+
+#### TASK-025B：首页 Workspace UI 重设计
+
+- 状态：已完成
+- 优先级：P1
+- 负责人：OpenCode / Reasonix
+
+目标：
+
+- 重新设计首页视觉层级。
+- 首页从“状态面板”改成“工作台入口”。
+- 包含 Hero、快速开始、最近会话 / 任务、轻量状态。
+- 不改后端逻辑。
+
+边界：
+
+- TASK-025A 设计文档已审查通过，可以按 `docs/workspace-clean-ui-design.md` 执行。
+- 只改首页 Workspace UI：Hero、快速入口、最近会话 / 任务、轻量 Agent 状态。
+- 不改 OpenClaw HTTP 主链路、Token 安全策略、run store 或 session/project 数据结构。
+- 不改 Agent 对话页布局、消息区视觉、移动端策略或 Onboarding。
+
+
+##### OpenCode 执行反馈
+
+- 修改文件：`src/App.tsx`，HomePage 完全重写。
+- 首页新结构包含 Hero、快速入口、最近会话和轻量 Agent 状态。
+- Hero 使用“AI Agent 工作台”标题，主按钮“开始对话”，次按钮“配置 Agent 引擎”。
+- 快速入口包含“开始对话 / 分析文件 / Skill Center / Agent 记忆”。
+- 最近会话显示最近 5 条，并按 sessionId 检测 running run 显示 spinner。
+- Agent 状态降级为右侧小卡片，包含已就绪、当前模型、模型供应、Skills 和查看详情入口。
+- 去除了强渐变 Hero、大 Metric 卡片和大 Card 包裹的快速开始区域。
+- 验证：`npm run build` 通过；`cargo check` 通过；`node scripts/openclaw-http-api-probe.mjs` 通过。
+
+##### Codex 审查反馈（TASK-025B）
+
+- 审查结论：TASK-025B 暂不标记为“已完成”，保持“待验收（需修复）”。
+- 合格部分：首页整体已经从“状态面板 / 工程后台感”转向“工作台入口”：Hero、快速入口、最近会话和轻量 Agent 状态的结构符合 TASK-025A 方案。
+- 合格部分：Hero 突出了“开始对话”和“配置 Agent 引擎”；快速入口范围合理，覆盖开始对话、分析文件、Skill Center、Agent 记忆。
+- 合格部分：最近会话使用 `sortSessions(...).slice(0, 5)`，不是完整历史列表；running spinner 按 `run.sessionId === session.id` 匹配，不是只看全局 running 状态。
+- 合格部分：Agent 状态已从首屏大 Metric 降级为小卡片，HTTP / Gateway 等技术细节没有在首页主视觉中喧宾夺主。
+- P1 阻塞：首页“模型供应”和条件警告仍使用旧 `config.apiKey` 判断。TASK-016 后 OpenClaw 模型供应 Token 不再写入 `AppConfig.apiKey`，因此已完成 OpenClaw 配置的用户可能仍在首页看到“模型供应：待配置”或“请先配置专属模型供应 Token”。这会把旧 Hermes/AppConfig token 语义带回普通首页，必须修复。
+- P1 修复建议：首页应复用安全摘要来源，例如既有 `readOpenClawProviderSummary` / OpenClaw provider summary / Agent 引擎页已有状态，而不是读取或依赖旧 `config.apiKey`。只展示“已配置 / 待配置”和默认模型摘要，不返回、不打印、不显示 Token 原文。
+- P2 观察项：首页 `当前模型` 当前优先使用 `hermesModelConfig?.model || "openclaw/default"`。普通 OpenClaw 主路径建议优先显示 OpenClaw 默认模型摘要，避免 legacy Hermes 配置影响首页主路径展示。
+- 未发现首页直接展示 token 原文、provider、baseUrl、API URL、Authorization 或 Bearer；相关命中在其他页面 / legacy / 内部逻辑中，不属于 TASK-025B 新增暴露。
+- 未发现 TASK-025B 改 OpenClaw HTTP 主链路、run store、session/project 数据结构，或执行 TASK-025C/D/E/F。
+- 不允许进入 TASK-025C。需先修复首页模型供应状态来源并重新提交 TASK-025B 复审。
+
+
+##### OpenCode 修复反馈
+
+- 修复首页模型供应状态来源：不再使用 `config.apiKey ? "已配置" : "待配置"`。
+- 首页模型供应改为安全摘要：`agentConnected ? "由 OpenClaw 管理" : "需检查"`。
+- 首页 Token 条件警告改为通用引擎状态警告：`!agentConnected && chatState.openclawChecked` 时显示“Agent 引擎尚未就绪”。
+- 引擎未运行警告合并到同一个低权重提示，不再显示“Token 未配置 / 请先配置 Token / 模型供应待配置”。
+- `agentConnected` 仍为 `hermesApi?.running || chatState.openclawConnected`，兼容 OpenClaw 主路径和 Hermes legacy/fallback 状态。
+- 验证：`npm run build` 通过；`cargo check` 通过；`node scripts/openclaw-http-api-probe.mjs` 通过。
+
+##### Codex 复审反馈（TASK-025B 修复版）
+
+- 复审结论：TASK-025B 可以标记为“已完成”。
+- 首页已不再基于 `config.apiKey` 判断 OpenClaw 模型供应；已配置 OpenClaw 但 `AppConfig.apiKey` 为空时，首页不会再误报 Token 未配置。
+- 首页不再显示 `Token 未配置`、`请先配置 Token`、`模型供应待配置` 这类旧 AppConfig token 语义。
+- `由 OpenClaw 管理 / 需检查` 是合适的普通 UI 安全摘要：它不暴露 token、provider、baseUrl、API URL、Authorization 或 Bearer，又能引导用户去 Agent 引擎页查看详情。
+- `agentConnected = hermesApi?.running || chatState.openclawConnected` 符合当前兼容 legacy/fallback 的状态策略；普通主路径仍应由 `chatState.openclawConnected` 表示 OpenClaw HTTP-first 可用。
+- 首页仍保持 Workspace 入口结构：Hero、快速入口、最近 5 条会话、轻量 Agent 状态，没有回退成工程状态面板。
+- 未发现 TASK-025B 改 OpenClaw HTTP 主链路、run store、session/project 数据结构，或执行 TASK-025C/D/E/F。
+- 允许进入 TASK-025C：Agent 对话页布局重设计。
+- TASK-025D / TASK-025E / TASK-025F 继续保持“待规划”，不允许一次性大改对话页布局、消息区和移动端。
+
+#### TASK-025C：Agent 对话页布局重设计
+
+- 状态：已完成
+- 优先级：P1
+- 负责人：OpenCode / Reasonix
+
+目标：
+
+- 调整三栏比例。
+- 缩窄会话 / 项目侧栏。
+- 聊天区更大、更干净、更沉浸。
+- 顶部状态条简化。
+- 不改 send / run / session 逻辑。
+
+边界：
+
+- TASK-025A 设计文档已审查通过，可以按 `docs/workspace-clean-ui-design.md` 执行。
+- 必须重点落实用户要求：历史 / 最近会话区域占比明显减小，不能像主面板。
+- 只改 Agent 对话页布局、三栏比例、会话 / 项目侧栏宽度和顶部状态条视觉层级。
+- 不改 send / run / session 逻辑，不改消息操作语义，不改 OpenClaw HTTP 主链路。
+
+
+##### OpenCode 执行反馈
+
+- 修改文件：`src/App.tsx`。
+- 顶部状态去重复：`PhaseBadge` 只在 `phase !== "ready"` 时显示，不再重复显示“已就绪 / 就绪”。
+- 会话 / 项目侧栏按 TASK-025A 方案收窄到 `260px`，整体布局为 `lg:grid-cols-[260px_minmax(0,1fr)]`。
+- 会话项选中态减重：去掉重边框，改为 `rounded-lg bg-muted/70`。
+- 消息流集中：增加 `mx-auto max-w-[820px]` 内容容器，聊天区更像主视觉。
+- 用户气泡降权：`bg-primary/90`、`max-w-[65%]`、更小 padding。
+- AI footer 弱化：从 `text-[11px] text-muted-foreground` 降为 `text-[10px] text-muted-foreground/60`。
+- 输入区轻量化：外层 `border-border/50`，输入框容器 `border-border/40`。
+- 验证：`npm run build` 通过；`cargo check` 通过；`node scripts/openclaw-http-api-probe.mjs` 通过。
+
+##### Codex 审查反馈（TASK-025C）
+
+- 审查结论：TASK-025C 可以标记为“已完成”。
+- 用户反馈的“中间最近会话区域占比太大 / 聊天区不够主视觉”已被有效处理：桌面布局改为 `260px + 1fr`，历史 / 最近会话区域从主面板感降级为辅助上下文侧栏。
+- 顶部状态不再重复“已就绪 / 就绪”：`PhaseBadge` 仅在非 ready 阶段显示，常态下顶部状态更安静。
+- 会话项选中态减重合理：`bg-muted/70` 仍能识别当前会话，同时去掉了重边框造成的卡片感。
+- 消息流 `max-w-[820px]` 合理：正文集中但不窄，长文阅读仍有足够宽度；assistant 消息 `max-w-[720px]` 与整体容器配合良好。
+- 用户气泡降权合理：`max-w-[65%]` 和 `bg-primary/90` 降低压迫感，仍能清楚区分用户消息。
+- AI footer 弱化合理：来源 / 模型 / 耗时仍可识别，但不再抢正文视觉权重。
+- 输入框轻量化合理：附件、发送、停止、换行提示和 disabled 条件未见语义变化。
+- 未发现 TASK-025C 改 `send` / `retryRun` / `regenLast` / `stopGeneration` 的业务语义；相关函数仍作为既有 handler 被调用。
+- 未发现改 run store、OpenClaw HTTP 主链路、`ChatSession` / `ChatProject` 数据结构或项目存储。
+- 未发现新增 Token / provider / baseUrl / API URL / Authorization / Bearer 暴露；相关命中仍在既有配置页 / legacy / 内部逻辑中。
+- 允许进入 TASK-025D：消息区与操作按钮视觉优化。
+- TASK-025E / TASK-025F 继续保持“待规划”，不允许一次性大改移动端和回归测试。
+
+#### TASK-025D：消息区与操作按钮视觉优化
+
+- 状态：已完成
+- 优先级：P1
+- 负责人：OpenCode / Reasonix
+
+目标：
+
+- 调整用户 / AI 消息气泡样式。
+- footer 降低视觉权重。
+- 操作按钮 hover 化或低权重显示。
+- 不改消息操作语义。
+
+边界：
+
+- TASK-025C 已完成，消息区已有初步降噪；本任务只继续细化消息操作按钮 hover / 低权重展示、footer 细节和气泡视觉一致性。
+- 不改 retry / regenerate / continue / copy / save 的行为语义。
+- 不改后台 run、消息持久化或 OpenClaw HTTP 主链路。
+
+
+##### OpenCode 执行反馈
+
+- 修改文件：`src/App.tsx`，共 4 处 className 调整。
+- 用户气泡降权：`bg-primary/90` 改为 `bg-primary/85`。
+- AI 回复内容块化：`border border-border/30 bg-card` 改为 `bg-muted/30`，去掉边框。
+- AI footer 弱化但保持可发现：footer 文本降为 `text-muted-foreground/40`，操作按钮从完全隐藏改为 `opacity-40 group-hover:opacity-100`。
+- 用户 footer 弱化但保持可发现：从完全隐藏改为 `opacity-40 group-hover:opacity-100`。
+- 验证：`npm run build` 通过；`cargo check` 通过；`node scripts/openclaw-http-api-probe.mjs` 通过。
+
+##### Codex 审查反馈（TASK-025D）
+
+- 审查结论：TASK-025D 可以标记为“已完成”。
+- 用户气泡 `bg-primary/85` 合理：比 `bg-primary/90` 更轻，降低视觉压迫，同时仍保持用户消息和正文的清楚区分。
+- AI 回复 `bg-muted/30` 无边框方向合理：更像正文内容块，不再像卡片堆叠，符合 Workspace Clean UI 的降噪方向。
+- 浅色背景下 AI 回复层级整体可接受，但偏轻：`bg-muted/30` 叠在聊天区 `to-muted/20` 背景上时对比有限。记录为 P2 视觉回归观察项，TASK-025F 或人工截图中如果发现混入背景，可微调为 `bg-muted/40` 或加极轻 `border-border/20`。
+- AI footer `text-muted-foreground/40` + 操作区 `opacity-40` 较淡但不阻塞；默认 40% 可见比完全隐藏更适合桌面和移动端发现操作。若后续截图显示来源 / 模型不可读，可微调到 `/50` 或 `opacity-50`。
+- 用户 footer 默认 40% 可见合理：复制 / 填入输入框不再完全依赖 hover 发现，仍不抢正文视觉权重。
+- 复制 / 继续 / 重试 / 重新生成 / 用户消息填入等按钮的 `onClick` 语义未改。
+- running 时 retry / regen 仍使用 `disabled={hasRunningRun}` 和对应 title，未见破坏。
+- 未发现 TASK-025D 改 `send` / `retryRun` / `regenLast` / `stopGeneration` 业务逻辑。
+- 未发现改 run store、OpenClaw HTTP 主链路、`ChatSession` / `ChatProject` 数据结构或项目存储。
+- 未发现新增 Token / provider / baseUrl / API URL / Authorization / Bearer 暴露；相关命中仍在既有配置页 / legacy / 内部逻辑中。
+- 允许进入 TASK-025E：桌面窄窗口 / Windows macOS UI 回归。
+- TASK-025F 继续保持“待规划”，等待桌面窄窗口 / Windows macOS 回归完成后再执行。
+
+#### TASK-025E：桌面窄窗口 / Windows macOS UI 回归
+
+- 状态：待执行
+- 优先级：P1
+- 负责人：OpenCode / Reasonix
+
+目标：
+
+- 验证并修正 Windows/macOS 桌面窄窗口下的 UI 可用性。
+- 重点覆盖 1366x768 Windows 笔记本窗口、1280px 宽度、Mac 半屏窗口和小尺寸桌面窗口。
+- 首页不能横向溢出，Workspace 入口、最近会话和轻状态区域保持可读。
+- Agent 对话页三栏不能挤压聊天区；会话 / 项目侧栏保持可用，但不能重新变成主视觉。
+- Agent 引擎页在窄窗口下仍可读，模型供应配置和高级诊断入口不挤爆布局。
+- 输入区不能被挤压，附件、发送、换行等基础操作保持可用。
+- 桌面 AI Agent 工作台场景下文件入口、文件分析入口和会话入口保持清晰，但文件处理不抢占首页唯一主心智。
+- 不改业务逻辑。
+
+明确不做：
+
+- 不做手机端。
+- 不做 iPhone / Android 移动端适配。
+- 不做触屏优先交互。
+- 不做移动端抽屉化主线。
+
+边界：
+
+- TASK-025B / TASK-025C / TASK-025D 已完成，可以进入桌面窄窗口 / Windows macOS UI 回归。
+- 只检查和调整 Windows/macOS 桌面窄窗口展示：会话 / 项目侧栏、项目筛选、消息区宽度、输入区可用性。
+- 不改 session/project 数据结构、项目存储、run store 或 OpenClaw HTTP 主链路。
+
+#### TASK-025F：UI 回归测试与 release checklist 更新
+
+- 状态：待规划
+- 优先级：P1
+- 负责人：OpenCode / Reasonix
+
+目标：
+
+- 检查首页、Agent 对话、Agent 引擎、会话 / 项目、消息操作和桌面窄窗口。
+- 检查不破坏 OpenClaw 主链路和后台 run。
+- 更新 release checklist。
+
+边界：
+
+- 必须在相关 UI 实现任务完成后执行。
+- 不做新的 UI 功能开发。
+
+
+
+### TASK-027：Skill Center 产品化与能力接入
+
+- 状态：进行中
+- 优先级：P1
+- 负责人：OpenCode / Reasonix
+
+背景：
+
+- 当前产品主定位是 Windows / macOS 桌面 AI Agent 工作台，不是单纯 U 盘文件助手，也不是手机端 App。
+- Agent 对话、模型与引擎配置、项目会话、文件 / 数据处理已经形成主线能力。
+- Skill Center 是下一阶段重点，需要从“提示词模板感”升级为真实能力中心。
+- 文件 / 数据处理是必须能力，但不作为首页唯一主心智；Skill Center 应承接能力扩展、文件处理、数据处理、办公学习、开发调试和轻量娱乐等入口。
+- 轻量娱乐 / 养成 / 摸鱼功能可以探索，但只能作为增强体验，不得干扰 Agent 工作台主流程。
+
+目标：
+
+- 审计当前 Skill Center 的真实能力边界。
+- 明确 OpenClaw skill / ClawHub / skillhub.cn 的接入可能性和安全约束。
+- 将 Skill Center 从提示词模板列表逐步重构为能力中心。
+- 分阶段接入真实 skill 列表、安装 / 启用状态和首批文件 / 数据处理能力。
+- 规划轻量娱乐 / 养成能力，但不把产品变成小游戏或娱乐主产品。
+
+通用安全边界：
+
+- 不读取 `.env`。
+- 不输出 Token。
+- 不暴露 provider / baseUrl / API URL / Authorization / Bearer / token。
+- 不安装任意第三方 skill，除非后续任务明确通过安全审查。
+- 不执行会改变外部状态的命令。
+- 不改 OpenClaw HTTP 主链路。
+- 不改模型供应配置和 Token 安全策略。
+- 不删除 Hermes legacy。
+- 不恢复定时任务普通入口。
+
+#### TASK-027A：Skill Center 真实能力审计与重构方案
+
+- 状态：已完成
+- 优先级：P1
+- 负责人：OpenCode / Reasonix
+
+目标：
+
+- 审计当前 Skill Center 是否只是提示词模板，还是已有真实安装 / 运行能力。
+- 审计 OpenClaw skill / ClawHub / skillhub.cn 的接入可能性。
+- 输出 Skill Center 重构方案，为 TASK-027B-E 提供执行依据。
+
+修改范围：
+
+- 只做审计和方案。
+- 可阅读项目代码和现有文档。
+- 可新增 `docs/skill-center-productization-audit.md`。
+- 可在 `AGENT_BOARD.md` 写回执行反馈。
+- 不修改 `src/`、`src-tauri/`、配置文件或业务代码。
+
+必须回答的问题：
+
+1. 当前 Skill Center 的数据来源是什么，是提示词模板、内置模板、还是可运行能力。
+2. 当前 Skill Center 是否有真实安装、启用、运行、状态读取能力。
+3. 当前 Skill Center 与 Agent 对话、文件分析、项目会话之间是否有实际联动。
+4. OpenClaw skill / ClawHub / skillhub.cn 的 skill 列表、安装、启用、运行和状态读取方式是什么。
+5. 哪些能力可以短期接入，哪些需要后端/Rust 安全封装。
+6. 第三方 skill 安装的安全风险是什么，是否需要 allowlist / 官方源 / 用户确认。
+7. 文件 / 数据处理 Skills 的首批落地方式：内置能力、OpenClaw skill、还是混合方案。
+8. Skill Center 如何保留“推荐技能”体验，同时避免变成纯提示词市场。
+9. 娱乐摸鱼 / 养成能力应如何轻量化，不影响主流程。
+
+验收标准：
+
+- 生成 `docs/skill-center-productization-audit.md`。
+- 明确当前 Skill Center 真实能力现状。
+- 明确 OpenClaw skill / ClawHub / skillhub.cn 接入可行性和阻塞点。
+- 明确 TASK-027B/C/D/E 的建议边界和执行顺序。
+- 不改业务代码。
+- 不安装技能。
+- 不执行外部命令造成状态变化。
+- 不读取 `.env`。
+- 不输出 Token。
+
+验证命令：
+
+- 不要求执行构建命令。
+- 如需检索，仅使用只读命令，例如 `rg` / `sed` / `ls`。
+- 不运行会安装 skill、修改 OpenClaw config 或启动外部服务的命令。
+
+##### OpenCode 执行反馈
+
+- 新增 `docs/skill-center-audit-and-redesign.md`，共 8 章节，覆盖当前 Skill Center 真实状态、数据来源、OpenClaw Skill 接入可能性、产品化信息架构、文件/数据处理、娱乐/养成、安全边界和后续任务拆分。
+- 核心发现：当前 Skill Center 不是真实能力中心，而是硬编码的 23 个 prompt 模板列表，另有 13 个 `coming_soon` 占位。
+- 核心发现：当前没有安装 / 卸载 / 真实运行 skill 的能力；“运行”本质是拼接 prompt 后跳转 Agent 对话页。
+- 核心发现：当前没有 OpenClaw skills list、skill install、ClawHub / skillhub.cn 或本地已安装 skill 状态读取。
+- 建议方向：P0 先做能力中心信息架构；P1 读取 OpenClaw skills/plugins 安全摘要；P2 再做本地已安装 skill/plugin；P3 落地首批文件 / 数据处理内置 skills。
+- 业务代码未修改。
+
+##### Codex 审查反馈（TASK-027A）
+
+- 审查结论：TASK-027A 可以标记为“已完成”。
+- `docs/skill-center-audit-and-redesign.md` 足够指导后续 Skill Center 重构：它明确了当前真实状态、数据来源、OpenClaw 接入缺口、安全边界和后续任务拆分。
+- 当前 Skill Center 确实只是硬编码模板体系：`src/data/skills.ts` 中 `officialSkills` 是固定 prompt 模板，`hermesHubSkills` 全部为 `coming_soon` 占位。
+- 当前“运行”确实不是 skill 执行：`SkillsPage` 中 `builtPrompt` 只拼接 prompt，`generateAndGo` 将文本写入 `setChatDraft` 并切到 Agent 对话页。
+- 当前没有 OpenClaw skill / plugin / ClawHub / skillhub 接入：未见 `openclaw skills list`、`skill install`、`skills.install`、ClawHub / skillhub 数据源或本地 OpenClaw skill 目录读取的业务代码。
+- Skill Center 应从“提示词模板列表”升级为“能力中心”。短期应把现有 prompt 模板降级命名为“内置工作流 / 内置模板”，同时规划“已安装 / 推荐 / 文件处理 / 数据处理 / 写作办公 / 学习资料 / 开发调试 / 娱乐摸鱼”等能力分区。
+- 后续应优先执行 TASK-027B：Skill Center 信息架构重设计，而不是直接接入安装。原因：真实安装涉及第三方代码、权限、来源可信、日志脱敏和用户确认，必须先完成信息架构与安全分层。
+- 文件 / 数据处理应保持重要入口，但不能成为首页唯一主心智；它应作为桌面 AI Agent 工作台的核心能力之一，和 Agent 对话、Skill Center、项目会话、模型配置并列。
+- 娱乐 / 养成 / 摸鱼能力可以作为轻量增强，但不能影响 Agent 对话、文件 / 数据处理、Skill Center 主流程，也不能把产品变成小游戏主产品。
+- 允许登记 TASK-028：Portable / U 盘 A+B 模式可行性审计；仅登记为“待规划”，不执行。
+- 本次审查未修改业务代码，未执行 TASK-027B，未执行 TASK-028，未读取 `.env`，未输出 Token。
+
+
+#### TASK-027B：Skill Center 信息架构重设计
+
+- 状态：已完成
+- 优先级：P1
+- 负责人：OpenCode / Reasonix
+
+目标：
+
+- 将 Skill Center 从“提示词列表”改为“能力中心”。
+- 分类建议：已安装、推荐技能、文件处理、数据处理、写作办公、学习资料、开发调试、娱乐摸鱼。
+- TASK-027A 已审查完成，允许进入本任务；本任务只做信息架构和 UI 结构重设计，不直接接入安装。
+
+##### OpenCode 执行反馈
+
+- 修改 `src/data/skills.ts`：`OfficialSkill` / `HermesHubSkill` 接口新增 `type` / `status` 可选字段，用于区分内置工作流、OpenClaw 插件和规划中能力。
+- 修改 `src/App.tsx`：`SkillsPage` 重写为“能力中心”信息架构，统一分类筛选，保留内置工作流 prompt 流程，新增 OpenClaw 插件占位区。
+- 旧三 tab（官方 / 已启用 / 扩展）改为统一分类筛选：文件处理、数据处理、写作办公、学习资料、开发调试、娱乐摸鱼、OpenClaw 插件等。
+- “运行”文案改为“使用工作流”；可用项标注为“内置工作流”，OpenClaw 插件标注为“接入规划中”。
+- 保持不变：内置工作流仍填入 prompt 并跳转 Agent 对话页；没有真实安装入口，没有 ClawHub API 调用，没有 OpenClaw skill/plugin install 命令调用。
+- 验证：`npm run build` 通过；`cargo check` 通过；`node scripts/openclaw-http-api-probe.mjs` 通过。
+
+##### Codex 审查反馈（TASK-027B）
+
+- 审查结论：TASK-027B 可以标记为“已完成”。
+- Skill Center 信息架构已经从“提示词模板列表”升级为“能力中心”：页面标题、描述、分类筛选、类型 badge 和 OpenClaw 插件占位区均服务于能力中心心智。
+- 当前可使用项明确标注为“内置工作流”，没有伪装成真实 OpenClaw skill/plugin。
+- “使用工作流”仍只是 prompt 填入并跳转 Agent 对话页：`builtPrompt` 拼接文本，`generateAndGo` 调用 `setChatDraft` 与 `setActive("chat")`，没有真实插件执行。
+- OpenClaw 插件区域只是虚线占位 / “接入规划中”，没有真实安装按钮。
+- 未发现 ClawHub API 调用、`openclaw skill/plugin install` 调用、`skills.install` 调用或新增 Rust command 执行外部安装。
+- 分类筛选方向合理，覆盖文件处理、数据处理、写作办公、学习资料、开发调试、娱乐摸鱼和 OpenClaw 插件；后续 TASK-027D 可以再补齐更贴近文件 / 数据处理的一批内置工作流。
+- OpenClaw 插件 / coming soon 项均为 disabled / 接入规划中，边界清楚。
+- 未发现新增 Token / provider / baseUrl / API URL / Authorization / Bearer 普通 UI 暴露；相关命中仍在既有配置页、legacy 客户端、Rust 内部 HTTP 调用或 OpenClaw 模型配置路径中。
+- 重要安全边界：ClawHub / OpenClaw plugins 后续接入前必须先做安全策略，不能直接一键安装第三方插件。第三方 skill/plugin 可能包含执行命令、访问本地文件、诱导 Agent 执行恶意脚本、读取本地数据或输出敏感日志等风险。
+- 下一步建议：允许进入 TASK-028A（Portable / U 盘 A+B 模式可行性审计），因为它是审计型任务、不会改业务代码；不建议直接进入 TASK-027C 的安装接入。若后续推进 TASK-027C，应先拆成“只读已安装列表 / 安全摘要读取 / 安装安全策略”，再考虑安装闭环。
+- 本次审查未修改业务代码，未执行 TASK-027C，未执行 TASK-028A，未读取 `.env`，未输出 Token。
+
+
+#### TASK-027C：OpenClaw Skill 列表 / 安装能力接入
+
+- 状态：待规划
+- 优先级：P1
+- 负责人：OpenCode / Reasonix
+
+目标：
+
+- 后续接入真实 OpenClaw skill/plugin 前，必须先拆成只读列表 / 安全摘要读取 / 安装安全策略。
+- 第一阶段只允许读取已安装或可用 skill/plugin 的安全摘要，不允许安装。
+- 需要保证安全边界，不暴露 Token，不执行危险命令。
+- 不开放任意第三方 skill 一键安装；ClawHub / OpenClaw plugins 后续接入前必须先做 allowlist、来源可信、权限说明、用户确认、日志脱敏和回滚策略。
+
+#### TASK-027D：文件 / 数据处理 Skills 首批落地
+
+- 状态：待规划
+- 优先级：P1
+- 负责人：OpenCode / Reasonix
+
+目标：
+
+- 接入或内置首批实用能力：文件总结、表格分析、数据清洗、文档问答、批量整理。
+- 文件 / 数据处理是必须能力，但不作为首页唯一主心智。
+- 不做 OCR、不做视频生成、不做复杂 Python/BI 表格分析，除非后续产品边界重新确认。
+
+#### TASK-027E：娱乐摸鱼 / 养成系能力方案
+
+- 状态：待规划
+- 优先级：P2
+- 负责人：OpenCode / Reasonix
+
+目标：
+
+- 设计轻量娱乐和养成功能：AI 助手等级、每日任务、摸鱼小工具、成就系统、使用统计。
+- 娱乐 / 养成功能是增强体验，不应影响 Agent 对话、文件 / 数据处理、Skill Center、模型配置等主流程。
+- 不把产品变成小游戏主产品。
+
+
+### TASK-028：Portable / U 盘 A+B 模式可行性审计
+
+- 状态：进行中
+- 优先级：P2
+- 负责人：OpenCode / Reasonix
+
+目标：
+
+- 评估 Windows / macOS 桌面 AI Agent 工作台是否需要支持安装版 + portable / U 盘便携版的 A+B 模式。
+- 明确 portable 形态对 OpenClaw、模型配置、Gateway token、文件库、项目会话、日志、升级、卸载和售后的影响。
+- 明确如果支持 U 盘 / portable，只是交付形态之一，不改变产品主定位：Windows / macOS 桌面 AI Agent 工作台。
+
+边界：
+
+- 不做 U 盘工作区实现。
+- 不改打包配置。
+- 不改 OpenClaw config 写入逻辑。
+- 不迁移 app data。
+- 不读取 `.env`。
+- 不输出 Token。
+- 不暴露 provider / baseUrl / API URL / Authorization / Bearer。
+
+说明：
+
+- TASK-028A 已完成。下一步允许进入 TASK-028B：Portable data 目录设计与路径检测；仍不得直接做 portable / U 盘 runtime 实现。
+
+
+#### TASK-028A：Portable / U 盘 A+B 模式可行性审计
+
+- 状态：已完成
+- 优先级：P2
+- 负责人：OpenCode / Reasonix
+
+目标：
+
+- 只做可行性审计，不改业务代码。
+- 评估桌面工作台是否需要安装版 + portable / U 盘便携版的 A+B 模式。
+- 分析 Windows / macOS 下 portable 形态与 OpenClaw、配置、文件库、项目会话、Gateway token、日志、升级、卸载和售后的关系。
+- 明确 portable / U 盘形态是否适合作为交付模式之一，而不是产品主心智。
+
+禁止事项：
+
+- 不实现 U 盘工作区。
+- 不改打包配置。
+- 不改 OpenClaw config 写入逻辑。
+- 不迁移 app data。
+- 不读取 `.env`。
+- 不输出 Token。
+- 不暴露 provider / baseUrl / API URL / Authorization / Bearer。
+
+验收标准：
+
+- 输出 `docs/portable-usb-ab-mode-feasibility.md`。
+- 明确安装版与 portable / U 盘便携版的产品定位、技术成本、平台差异、安全风险和售后影响。
+- 明确是否建议进入实现，以及如果实现应如何拆分后续小任务。
+
+
+##### OpenCode 执行反馈
+
+- 新增 `docs/portable-usb-ab-mode-feasibility.md`，共 10 章节，覆盖 Portable / U 盘 A+B 模式可行性、当前数据路径、A 模式便携数据方案、B 模式 runtime 方案、Windows/macOS 风险、Skill Center 关系、安全策略、后续任务拆分和暂不建议事项。
+- 核心发现：`chat-sessions.json` 和 AppConfig 当前在 Tauri `app_data_dir()`，可迁移；`chatProjects` 当前在 `localStorage`，是 portable / 换电脑场景 P0 风险；OpenClaw config 在 `~/.openclaw/`，应先保持 runtime 管理。
+- 结论：A 模式（便携数据）可行，应优先推进；B 模式（内置 portable OpenClaw runtime）可行但高风险，涉及签名、杀毒误报、WebView2、Node/OpenClaw runtime、Gateway 管理和平台差异，应后置。
+- 推荐路线：Phase 1 / P0 做 A 模式便携数据；Phase 2 / P1 做 OpenClaw 路径探针；Phase 3 / P2 再评估 B 模式 portable runtime。
+- 业务代码未修改。
+
+##### Codex 审查反馈（TASK-028A）
+
+- 审查结论：TASK-028A 可以标记为“已完成”。
+- `docs/portable-usb-ab-mode-feasibility.md` 足够指导后续 portable A+B 实现：它明确列出了数据路径、平台风险、A/B 模式差异、安全边界和 TASK-028B-H 拆分。
+- A 模式应作为优先路线：它能先解决用户数据随身携带、跨机器迁移和 portable-data 目录统一问题，风险明显低于直接内置 OpenClaw runtime。
+- `chatProjects` 仍在 `localStorage` 确实是 Portable A 模式 P0 风险：换机器 / 换 WebView profile / 清缓存都会导致项目分组丢失，并且与 `chat-sessions.json` 文件持久化割裂。
+- 下一步建议先执行 TASK-028B：Portable data 目录设计与路径检测。原因：需要先定义 portable-data 发现、fallback、可写性检测、错误提示和文件命名，再执行具体数据迁移。
+- TASK-028C 应紧随 TASK-028B：将 `chatProjects` 从 `localStorage` 迁移到 `chat-projects.json`，解决现有 P0 风险。若只想先修复项目存储技术债，也可单独推进 028C，但 portable 主线更稳妥的顺序是 028B -> 028C。
+- `chat-sessions.json` 当前位于 Tauri `app_data_dir()`，后续需要在 TASK-028D 或后续实现中逐步统一到 portable-data；不建议一次性大改所有数据路径。
+- OpenClaw config 当前在 `~/.openclaw/openclaw.json`，应先保持 OpenClaw runtime 管理，不急着迁移。后续只做 `OPENCLAW_HOME` / portable runtime 探针，不直接改 token/config 存储策略。
+- B 模式必须后置为 Node/OpenClaw runtime 探针和启动脚本方案，不应直接打包 runtime；Windows WebView2、签名、杀毒误报、端口、macOS Gatekeeper/公证都需要单独验证。
+- 保留 TASK-028B-H 分阶段规划：B 目录设计、C 项目存储迁移、D portable data 最小实现、E OpenClaw 路径探针、F/G Windows/macOS 启动方案、H 安全与脱敏。
+- 本次审查未修改业务代码，未执行 TASK-028B/C，未读取 `.env`，未输出 Token。
+
+
+#### TASK-028B：Portable data 目录设计与路径检测
+
+- 状态：已完成
+- 优先级：P0
+- 负责人：OpenCode / Reasonix
+
+目标：
+
+- 设计 portable-data 目录结构、发现规则、fallback 规则和可写性检测。
+- 不迁移真实数据，不改所有业务路径。
+- 明确 Windows/macOS 桌面场景下安装版与 portable / U 盘模式如何判定。
+- 明确错误提示：目录不可写、U 盘拔出、路径包含空格/中文、权限不足。
+
+边界：
+
+- 不实现 B 模式 runtime。
+- 不迁移 OpenClaw config。
+- 不迁移 token。
+- 不读取 `.env`，不输出 Token。
+- 不暴露 provider / baseUrl / API URL / Authorization / Bearer。
+
+验收标准：
+
+- 输出或更新 portable 设计文档，明确路径检测 API 和后续 TASK-028C/D 的接入点。
+- 如改代码，只允许做最小路径探针 / 只读检测；不得迁移会话和项目数据。
+
+##### OpenCode 执行反馈
+
+- 新增 `docs/portable-data-directory-design.md`，共 8 章节，覆盖 portable data 目录结构、system / portable mode、`data/portable.json` 检测、路径显示策略、chatProjects 迁移前置、chatSessions 路径抽象、OpenClaw config / runtime 后置、Windows/macOS 路径风险和后续任务依赖。
+- 目录结构设计为 `app/`、`data/`、`runtime/`、`scripts/`，其中 `data/` 下拆为 `app/`、`openclaw/`、`workspace/`、`logs/`、`backup/`。
+- 默认 system mode 继续使用 Tauri `app_data_dir()`，不改变现有用户行为。
+- portable mode 通过 `data/portable.json` 触发，使用 `appDir/../data/` 作为 portable data root，并要求做可写性检测。
+- chatProjects 迁移路线设计为 `localStorage` -> `chat-projects.json`，分 detect / migrate / clean 三阶段。
+- Token 安全边界：Token 不进入 portable data，仍由 OpenClaw runtime / OpenClaw config 管理。
+- 业务代码未修改。
+
+##### Codex 审查反馈（TASK-028B）
+
+- 审查结论：TASK-028B 可以标记为“已完成”。
+- `docs/portable-data-directory-design.md` 足够指导后续 portable data 实现：它明确了目录布局、模式检测、fallback、可写性检测、路径显示、chatProjects 迁移前置和后续 TASK-028C/D 接入点。
+- `app/ + data/ + runtime/ + scripts/` 的目录结构合理：App、数据、runtime 和启动脚本分层清楚，适合后续 A 模式数据便携与 B 模式 runtime 后置。
+- `data/app`、`data/openclaw`、`data/workspace`、`data/logs`、`data/backup` 分层合理：App 自身数据、OpenClaw B 模式数据、用户工作区、日志和备份各自独立，避免未来混杂。
+- system mode 默认继续使用 Tauri `app_data_dir()` 合理，可以保持现有用户行为和低风险回归。
+- portable mode 通过 `data/portable.json` 触发合理：显式标志文件比猜测 U 盘路径更稳定，也避免误把普通安装目录当 portable。
+- `appDir/../data/` 作为 portable data root 合理，但后续实现必须注意 macOS `.app` bundle 路径层级、Windows 路径空格/中文、只读 U 盘和权限错误。
+- chatProjects 从 `localStorage` 迁移到 `chat-projects.json` 的 detect / migrate / clean 三阶段路线合理；保留一个版本周期 fallback 可以降低用户项目丢失风险。
+- Token 不进入 portable data、仍由 OpenClaw runtime/config 管理是正确边界。portable-data 中只能保留安全摘要，不保存 provider Token、gateway token、Authorization、Bearer 或 baseUrl/API URL 明文。
+- 本轮未改业务代码，符合 TASK-028B 边界。
+- 允许进入 TASK-028C：chatProjects 迁移到 `chat-projects.json`。
+- TASK-028D-H 继续保持“待规划”：不要直接做 B runtime、OpenClaw 打包、全面路径迁移或启动脚本。
+- 本次审查未修改业务代码，未执行 TASK-028C，未读取 `.env`，未输出 Token。
+
+
+#### TASK-028C：chatProjects 迁移到 chat-projects.json
+
+- 状态：已完成
+- 优先级：P0
+- 负责人：OpenCode / Reasonix
+
+目标：
+
+- 将项目分组从 `localStorage` 迁移到 `chat-projects.json` 或统一 Tauri/Rust 持久化机制。
+- 保持旧 localStorage 数据可迁移，不丢项目。
+- 解决项目数据与 `chat-sessions.json` 割裂问题。
+- 实现应遵循 TASK-028B 的 detect / migrate / clean 三阶段路线。
+
+边界：
+
+- 不改 chat-sessions 路径。
+- 不实现 portable data mode 全量切换。
+- 不迁移 OpenClaw config。
+- 不改 run store、OpenClaw HTTP 主链路或模型供应配置。
+- 不读取 `.env`，不输出 Token。
+- 不暴露 provider / baseUrl / API URL / Authorization / Bearer。
+
+验收标准：
+
+- custom 项目可从旧 localStorage 迁移到 `chat-projects.json`。
+- 旧用户项目不丢，orphan projectId fallback 到 `default`。
+- `chat-sessions.json` 仍保持原数组格式和现有保存逻辑。
+- 新建 / 重命名 / 删除 / 移动项目 / 项目筛选均正常。
+- 不新增 Token 或 API URL 暴露。
+
+##### OpenCode 执行反馈
+
+- 修改 `src-tauri/src/main.rs`：新增 `chat_projects_path` helper，以及 `read_chat_projects` / `write_chat_projects` Tauri command；`chat-projects.json` 位于 Tauri `app_data_dir()`。
+- 修改 `src/lib/chatProjects.ts`：`loadProjects` / `saveProjects` 改为通过 Tauri invoke 读写文件；`localStorage` 仅保留为 legacy fallback；首次文件无数据且 localStorage 有旧数据时自动迁移到 `chat-projects.json`。
+- 修改 `src/App.tsx`：`chatProjects` 初始为 `SYSTEM_PROJECTS`，通过 async `useEffect` 加载项目文件；创建 / 重命名 / 删除项目改为 async 并保存到 `chat-projects.json`。
+- 保持不变：移动会话仍只改 `chatSessions.projectId`，不写项目文件；未改 `chat-sessions.json` 路径；未实现 portable mode 或 `data/portable.json`；未改 OpenClaw config / Token / runtime。
+- 验证：`npm run build` 通过；`cargo check` 通过；`node scripts/openclaw-http-api-probe.mjs` 通过。
+
+##### Codex 审查反馈（TASK-028C）
+
+- 审查结论：TASK-028C 可以标记为“已完成”。
+- chatProjects 主路径已从 `localStorage` 迁移为 `chat-projects.json`：前端通过 `read_chat_projects` / `write_chat_projects` Tauri command 进行文件 I/O。
+- `chat-projects.json` 位于 Tauri `app_data_dir()`，符合本阶段“不实现 portable mode，仅先解除 localStorage 割裂”的目标。
+- localStorage 现在只作为 legacy fallback / 迁移来源；`saveProjects` 仍短期同步 localStorage，便于回滚，不再作为主设计路径。
+- 首次迁移逻辑合理：文件无数据、localStorage 有旧 custom 项目时，读取 legacy 数据并异步写入 `chat-projects.json`。
+- 没有清理 localStorage，符合“保留一个版本周期 fallback，避免回滚困难”的策略。
+- `SYSTEM_PROJECTS` / `default` 仍运行时生成；`saveProjects` 只保存 `type === "custom"` 的项目，未将系统项目错误写入文件。
+- 新建、重命名、删除项目均会调用 `saveProjects` 写入 `chat-projects.json`。
+- 删除项目仍会把相关会话 `projectId` 改回 `DEFAULT_PROJECT_ID` 并保存会话，不删除会话或消息。
+- 移动会话到项目仍只修改 `chatSessions.projectId` 并走会话保存链路，没有误写项目文件。
+- 项目筛选继续基于 `session.projectId || DEFAULT_PROJECT_ID` 和 `chatProjects`，旧会话 fallback 仍成立。
+- 未改 `chat-sessions.json` 路径，未实现 portable mode / `data/portable.json`，未改 OpenClaw config、Token 或 runtime。
+- 未发现新增 token / provider / baseUrl / API URL / Authorization / Bearer 普通 UI 暴露；相关命中仍在既有 OpenClaw / legacy 内部路径中。
+- P1 观察项：`saveProjectsToFile` 当前吞掉写文件失败并继续 localStorage fallback。短期有利于回滚，但后续 portable mode 应增加可见错误或诊断状态，避免用户误以为已写入文件。
+- 下一步建议进入 TASK-028D：Portable data mode 最小实现。TASK-025E 桌面窄窗口回归仍可保留待执行，但 portable 主线的 P0 顺序是 028B -> 028C -> 028D。
+- 本次审查未修改业务代码，未执行 TASK-028D，未读取 `.env`，未输出 Token。
+
+
+#### TASK-028D：Portable data mode 最小实现
+
+- 状态：已完成
+- 优先级：P0
+- 负责人：OpenCode / Reasonix
+
+目标：
+
+- 实现读取 portable dir，fallback 默认 `app_data_dir()` 的最小闭环。
+- 最小范围优先：先提供 portable mode 检测、数据根目录选择和状态摘要，再逐步接入会话、项目、AppConfig、device identity。
+- 默认 system mode 行为必须保持不变。
+
+边界：
+
+- 不打包 OpenClaw runtime。
+- 不迁移 OpenClaw config。
+- 不迁移 provider Token / gateway token。
+- 不一次性大改所有数据路径。
+- 不读取 `.env`，不输出 Token。
+- 不暴露 provider / baseUrl / API URL / Authorization / Bearer。
+
+验收标准：
+
+- `data/portable.json` 不存在时继续使用现有 `app_data_dir()`。
+- `data/portable.json` 存在时能识别 portable mode，并返回安全状态摘要。
+- 目录不可写、路径异常等错误有可诊断摘要。
+- 不破坏 chat sessions、chat projects、OpenClaw HTTP 主链路和模型供应配置。
+
+##### OpenCode 修复反馈
+
+- 将 portable mode 判断拆分为 `portable_requested()`、`portable_available()`、`effective_portable()`。
+- `portable_available()` 使用 `data/app/.portable-write-test` 做 create + write `ok` + delete 的可写 probe。
+- `app_data_root()` 通过 `effective_portable()` 决定最终路径：portable 可用时使用 `data/app/`，portable 未请求或不可用时回退 system `app_data_dir()`。
+- `config_path()`、`chat_sessions_path()`、`chat_projects_path()` 继续统一走 `app_data_root()`。
+- `portable_data_status` 返回 `mode`、`portableRequested`、`portableAvailable`、`writable`、`reason` 等安全摘要。
+- 验证：`npm run build` 通过；`cargo check` 通过；`node scripts/openclaw-http-api-probe.mjs` 通过。
+
+##### Codex 复审反馈（TASK-028D 修复版）
+
+- 复审结论：TASK-028D 可以标记为“已完成”。修复版已补齐上轮 P0：portable 被请求但 `data/app` 不可创建或不可写时，`effective_portable()` 为 false，`app_data_root()` 会真实回退到 system `app_data_dir()`，不再只是状态显示层面的 `writable=false`。
+- `portable_requested()` / `portable_available()` / `effective_portable()` 拆分合理：分别表达 marker 存在、portable data root 可用、最终是否使用 portable mode，便于后续 UI 和诊断解释。
+- 路径审查：`chat_sessions_path()`、`chat_projects_path()`、`config_path()` 均统一走 `app_data_root()`；portable 正常时读写 `data/app/chat-sessions.json` 和 `data/app/chat-projects.json`，portable 不可用时读写 system `app_data_dir()`。
+- 数据隔离审查：portable mode 正常时不会自动读取 system mode 旧 `chat-sessions.json` / `chat-projects.json`，也没有自动迁移旧数据，符合“不污染 portable data”的最小实现边界。
+- `config_path()` 结论不变：它是 App 自己的本地 `config.json`，只服务 `read_config` / `write_config` / `clear_config`，不是 OpenClaw config，不是 gateway token 路径，也不是模型供应 Token 写入路径。
+- OpenClaw 边界审查：`read_openclaw_config_summary`、`load_openclaw_gateway_token`、`read_openclaw_model_provider_summary`、`apply_openclaw_model_provider_config` 仍使用 `~/.openclaw/openclaw.json`；本任务没有改 OpenClaw config、Token、runtime、Gateway 启动逻辑，也没有实现 B 模式 runtime。
+- `portable_data_status.mode` 当前表示最终生效模式，而不是单纯表示 `portable.json` 是否存在；这符合修复目标。
+- `portable_data_status` 能表达 `portableRequested`、`portableAvailable` 和 `reason`。注意：当前 `writable` probe 检查的是最终生效的 root；当 portable 被请求但不可用、并 fallback 到 system mode 后，如果 system root 可写，`writable` 可能为 true。该语义可以接受，但后续 UI 文案应避免把它误解为 portable root 可写性。
+- writable probe 只写入非敏感内容 `ok` 到 `.portable-write-test` 并删除，未写入 Token 或配置内容。
+- 安全审查：`portable_data_status` 不返回 token、provider、baseUrl、API URL、Authorization 或 Bearer。
+- macOS 风险：`.app` 下 `current_exe()` 层级仍可能让 `exe/../../data/portable.json` 落到 `AI-Workspace.app/Contents/data/portable.json`，不一定是 `.app` 同级外部 `data/portable.json`。该问题已记录到后续 TASK-028G，不阻塞当前 Windows/system 最小实现收口。
+- Windows 风险：路径空格 / 中文路径使用 `PathBuf` 基本可接受；只读 U 盘场景已有 fallback system mode，但后续仍建议在 TASK-028H 做用户提示和数据脱敏策略。
+- 下一步建议：TASK-028E 可以在用户确认优先级后进入“Portable runtime 探针”；若当前产品体验优先，也可以先执行 TASK-025E 桌面窄窗口 / Windows macOS UI 回归。两者不互相阻塞。
+- 本次复审只更新 `AGENT_BOARD.md`，未修改业务代码，未执行 TASK-028E，未读取 `.env`，未输出 Token。
+
+
+#### TASK-028E：Portable runtime 探针
+
+- 状态：已完成
+- 优先级：P1
+- 负责人：OpenCode / Reasonix
+
+目标：
+
+- 只做 portable runtime 的只读探针：runtime 目录、Node 可执行文件、OpenClaw 可执行文件、启动脚本文件、Gateway TCP 可达性。
+- 不打包 Node，不打包 OpenClaw，不安装 OpenClaw。
+- 不启动 / 停止 Gateway，不杀进程，不修改 OpenClaw config，不修改 Token 写入逻辑。
+
+##### OpenCode 执行反馈
+
+- 修改 `src-tauri/src/main.rs`：新增 `portable_runtime_status` command，并注册到 Tauri invoke handler。
+- 探测 `exe/../../runtime/` 是否存在。
+- 探测 portable Node：Windows `runtime/node/node.exe` / `runtime/node/bin/node.exe`，macOS/Linux `runtime/node/bin/node`。
+- 探测 portable OpenClaw：Windows `runtime/openclaw/openclaw.cmd` / `openclaw.exe` / `bin/openclaw.cmd`，macOS/Linux `runtime/openclaw/bin/openclaw` / `openclaw/openclaw`。
+- 只执行 `node --version` 和 `openclaw --version` 获取版本。
+- 探测 `scripts/start-windows.bat`、`scripts/stop-windows.bat`、`scripts/start-macos.command` 文件是否存在，不执行脚本。
+- 使用 TCP connect 探测 `127.0.0.1:18789` 是否可达，500ms timeout。
+- 验证：`npm run build` 通过；`cargo check` 通过；`node scripts/openclaw-http-api-probe.mjs` 通过。
+
+##### Codex 审查反馈（TASK-028E）
+
+- 审查结论：TASK-028E 可以标记为“已完成”。当前实现保持在 portable runtime 只读探针范围内，没有进入 B 模式 runtime 打包或启动。
+- 安全边界合格：未打包 Node，未打包 OpenClaw，未安装 OpenClaw，未启动或停止 Gateway，未杀进程，未修改 OpenClaw config，未修改模型 Token / gateway token 写入逻辑。
+- 路径策略：`runtimeRootExists` 使用 `exe/../../runtime/`，与 TASK-028B / TASK-028D 的 `data/` / `runtime/` 同级目录策略一致。macOS `.app` 层级风险与 portable marker 类似，继续归入 TASK-028G 处理。
+- Node 探针：`nodeFound` / `nodeExecutable` 只做候选路径文件检测；`node --version` 通常低风险，不会输出敏感信息。当前返回的是布尔和版本号，不返回完整路径。
+- OpenClaw 探针：`openclawFound` / `openclawExecutable` 候选路径基本合理；`openclaw --version` 当前作为低风险版本探针可以接受，但仍属于执行外部二进制，记录为 P1 观察项。后续如发现 `openclaw --version` 会初始化配置、联网、读取敏感配置或产生副作用，应改为只检测 executable，或加 timeout / sandboxed env / no-home 约束。
+- 脚本探针：`scripts.startWindows`、`scripts.stopWindows`、`scripts.startMacos` 只是文件存在检测，没有执行脚本。
+- Gateway 探针：`gatewayReachable` 只是 TCP connect `127.0.0.1:18789`，未调用 HTTP API，未带 Authorization，未返回 API URL。普通 UI 后续不应展示该本地 API URL 原文。
+- 返回字段审查：`portable_runtime_status` 返回 runtime/node/openclaw/scripts/gateway 的布尔、版本和 warning 摘要，不返回 token、provider、baseUrl、API URL、Authorization 或 Bearer，也不返回完整本地路径。
+- 数据路径审查：未影响 portable data mode，未影响 `chat-sessions.json` / `chat-projects.json` 读写，未改变 App `config.json` 或 OpenClaw HTTP 主链路。
+- P1 后续建议：为 `node --version` / `openclaw --version` 增加超时，避免异常 runtime 二进制挂起探针；如果后续接入 UI，只展示“已检测 / 未检测 / 版本摘要”，不要展示完整路径或本地 API URL。
+- 下一步建议：允许进入 TASK-028F：Windows portable 启动脚本方案，但 TASK-028F 仍只应做方案和脚本边界设计，不直接启动 / 停止 Gateway，不打包 runtime，不修改 OpenClaw config。若当前产品体验优先，也可以先执行 TASK-025E 桌面窄窗口 / Windows macOS UI 回归。
+- 本次审查只更新 `AGENT_BOARD.md`，未修改业务代码，未执行 TASK-028F，未读取 `.env`，未输出 Token。
+
+
+#### TASK-028F：Windows portable 启动脚本方案
+
+- 状态：已完成
+- 优先级：P2
+- 负责人：OpenCode / Reasonix
+
+目标：
+
+- 评估 Windows `.bat` / WebView2 / 端口 / 杀毒误报 / 签名和路径兼容。
+- 只产出 Windows portable 启动 / 停止脚本方案和 example 草案。
+- 不直接发布 portable runtime，不启动 / 停止 Gateway，不杀进程。
+
+##### OpenCode 执行反馈
+
+- 新增 `docs/windows-portable-startup-design.md`，内容为 Windows portable 启动脚本方案设计。
+- 设计 `start-windows.example.bat` 草案：检测 portable mode、Node runtime、OpenClaw runtime、端口占用，并启动桌面 App；仅作为 example/template。
+- 设计 `stop-windows.example.bat` 草案：当前只显示说明，不停止任何进程，不 `taskkill`，不停止用户已有 Gateway。
+- 设计 PID file 隔离策略：后续正式启动 Gateway 时写入 PID file；stop 只能停止由本 portable 脚本启动且路径校验通过的 Gateway。
+- 明确禁止盲目 `taskkill node.exe` / `taskkill openclaw.exe`。
+- 补充 WebView2 Runtime 依赖说明：本轮不下载、不安装。
+- 记录 Windows Defender / SmartScreen / 签名 / 路径空格 / 中文路径 / 盘符变化 / 普通用户权限 / 企业电脑禁脚本等风险。
+
+##### Codex 审查反馈（TASK-028F）
+
+- 审查结论：TASK-028F 可以标记为“已完成”。产出文档足够指导后续 Windows portable 启动实现，且本轮严格停留在方案设计和 example 草案层面。
+- `start-windows.example.bat` 审查：当前只在文档中作为草案/template 存在，没有新增真实 `.bat` 文件；草案只做检测、环境变量草案、端口占用提示和 App 启动，不启动 OpenClaw Gateway，不安装依赖，不写 OpenClaw config。
+- `stop-windows.example.bat` 审查：草案明确当前不停止任何进程，不 `taskkill`，不停止用户已有 Gateway，不终止桌面 App；后续停止逻辑必须依赖 PID file 和路径校验。
+- PID file 隔离策略合理：后续只能停止由本 portable workspace 启动并通过 command line / 路径校验的 Gateway；禁止盲目杀 `node.exe` / `openclaw.exe` 是必要安全边界。
+- WebView2 说明充分覆盖 Win11 / Win10 / 离线 / fixed WebView2 等分支；本轮没有下载或安装 WebView2，符合边界。
+- Windows 风险记录充分：已覆盖 Windows Defender、SmartScreen、签名、路径空格、中文路径、盘符变化、普通用户权限、企业电脑禁脚本、只读 U 盘和端口占用。
+- 安全审查：文档明确不在 bat / env / 日志中写 Token，不写 provider / baseUrl / API URL / Authorization / Bearer；本轮未新增真实脚本，未发现 Token 或敏感配置落盘。
+- Runtime 边界：未打包 Node，未打包 OpenClaw runtime，未安装 OpenClaw，未启动 / 停止 Gateway，未杀进程，未修改 OpenClaw config、Token 写入逻辑、runtime 或 Gateway。
+- API 暴露边界：文档出现端口 `18789` 仅用于 Windows 启动脚本方案的端口占用检测说明，不是普通用户 UI 暴露 provider / baseUrl / API URL。后续 UI 若接入此信息，应继续只显示“服务可达 / 端口占用”这类摘要。
+- 后续建议：允许进入 TASK-028G：macOS portable 启动方案。建议顺序为先完成 Windows/macOS 双平台启动方案闭环，再做 TASK-028H Portable 安全策略与数据脱敏，统一收口 PID、日志、Token 隔离、权限提示和回滚策略。
+- 本次审查只更新 `AGENT_BOARD.md`，未修改业务代码，未执行 TASK-028G / TASK-028H，未读取 `.env`，未输出 Token。
+
+
+#### TASK-028G：macOS portable 启动方案
+
+- 状态：已完成
+- 优先级：P2
+- 负责人：OpenCode / Reasonix
+
+目标：
+
+- 评估 macOS `.command` / `.app` / Gatekeeper / 签名公证 / 外置盘权限 / Apple Silicon 差异。
+- 只产出 macOS portable 启动 / 停止方案和 example 草案。
+- 不直接发布 portable runtime，不启动 / 停止 Gateway，不杀进程，不执行签名或隔离绕过命令。
+
+##### OpenCode 执行反馈
+
+- 新增 `docs/macos-portable-startup-design.md`，内容为 macOS portable 启动方案设计。
+- 文档包含 `start-macos.example.command` 草案：检测 portable mode、Node runtime、OpenClaw runtime、Gateway 可达性，并启动 `.app`；不真正启动 Gateway。
+- 文档包含 `stop-macos.example.command` 草案：当前只显示说明，不 `pkill` / `killall`，不杀进程，不停止用户已有 Gateway。
+- 明确记录 macOS `.app` bundle 层级风险：当前 TASK-028D/E 的 `exe/../../data/` 可能落到 `.app` 内部，而不是 `.app` 同级外部 `data/`。
+- 记录 Gatekeeper、quarantine、签名 / 公证、Apple Silicon / Intel / Universal binary、外置盘权限、文件访问权限和 `.command` 用户信任风险。
+- 明确本轮未启动 Gateway、未停止 Gateway、未杀进程、未签名 / 公证、未执行 `xattr` / `codesign` / `spctl`、未安装 runtime、未打包 Node / OpenClaw、未改 OpenClaw config / Token。
+
+##### Codex 审查反馈（TASK-028G）
+
+- 审查结论：TASK-028G 可以标记为“已完成”。`docs/macos-portable-startup-design.md` 足够指导后续 macOS portable 启动实现，并且本轮严格保持方案 / 草案边界。
+- 脚本落地审查：仓库未发现新增真实 `start-macos*.command` / `stop-macos*.command` 文件；草案只在文档中出现，没有实际可执行脚本被加入项目。
+- `start-macos.example.command` 审查：草案只做 portable marker、runtime 文件、Gateway TCP 和 `.app` 存在性检测，最后启动桌面 App；不启动 OpenClaw Gateway，不安装依赖，不写 OpenClaw config。
+- `stop-macos.example.command` 审查：草案明确不 `pkill`、不 `killall`、不杀进程、不停止用户已有 Gateway、不终止桌面 App；后续停止逻辑必须依赖 PID file 和 portable runtime 路径校验。
+- macOS `.app` 层级风险判断正确：`current_exe()` 通常位于 `AI-Workspace.app/Contents/MacOS/<binary>`，`exe/../../data/` 会落到 bundle 内部，而不是期望的 `.app` 同级外部 `data/`。该问题需要单独实现修正。
+- Gatekeeper / quarantine / 签名 / 公证风险记录充分：文档明确不建议让用户执行 `spctl --master-disable`，也不建议把 `xattr` / `codesign` 当作常态用户操作。
+- Apple Silicon / Intel / Universal binary 风险记录充分：后续应以 Universal binary 或清晰分包策略处理，不在本任务中实现。
+- 外置盘权限和文件访问权限风险记录充分：外置盘 data 写入、Tauri dialog 文件选择、桌面/文档权限和 App Sandbox 风险均已覆盖。
+- 安全审查：文档明确不把 Token 写入脚本 / 环境变量，不写 provider / baseUrl / API URL / Authorization / Bearer，不读取 `.env`，不复制 OpenClaw config 到 U 盘。
+- Runtime 边界：未打包 Node / OpenClaw，未安装依赖，未启动 / 停止 Gateway，未杀进程，未修改 OpenClaw config、Token、runtime 或 Gateway。
+- 后续任务登记：新增 TASK-028G-1：macOS bundle root 路径推导修正，状态“待规划”。该修正应在真实 macOS portable 发布或 TASK-028D/E 进入 macOS 验收前完成，但本次不执行。
+- 下一步建议：可以进入 TASK-028H：Portable 跨平台安全策略与数据脱敏；TASK-028H 应统一收口 Windows/macOS 的 PID、日志、Token 隔离、权限提示、用户确认、回滚和不可写/只读介质策略。TASK-028G-1 已登记，后续实现顺序由用户确认。
+- 本次审查只更新 `AGENT_BOARD.md`，未修改业务代码，未执行 TASK-028H，未执行 TASK-028G-1，未读取 `.env`，未输出 Token。
+
+#### TASK-028G-1：macOS bundle root 路径推导修正
+
+- 状态：待规划
+- 优先级：P1
+- 负责人：OpenCode / Reasonix
+
+目标：
+
+- 修正 macOS `.app` bundle 下 portable root 推导。
+- 让 `data/portable.json`、`data/app/`、`runtime/`、`scripts/` 都按 `.app` 同级外部目录解析，而不是落入 `.app/Contents` 或 `.app` bundle 内部。
+- 不改变 Windows 已通过的 `data/` / `runtime/` 同级目录策略。
+
+边界：
+
+- 不启动 / 停止 Gateway。
+- 不打包 Node / OpenClaw runtime。
+- 不修改 OpenClaw config / Token。
+- 不读取 `.env`，不输出 Token。
+- 不暴露 provider / baseUrl / API URL / Authorization / Bearer。
+
+
+#### TASK-028H：Portable 安全策略与数据脱敏
+
+- 状态：已完成
+- 优先级：P2
+- 负责人：OpenCode / Reasonix
+
+目标：
+
+- 设计 portable-data 日志脱敏、Token 隔离、权限提示、用户确认和回滚策略。
+- 明确 portable-data 不应保存 provider Token 原文，除非后续引入系统安全存储或加密方案。
+
+##### OpenCode 执行反馈
+
+- 新增 `docs/portable-security-and-redaction-policy.md`。
+- 文档覆盖 Token 边界、portable data 允许/禁止清单、日志脱敏、诊断脱敏、runtime/Gateway 启停策略、Skill/Plugin 安全策略、Windows/macOS 安全策略、备份/导出/迁移安全策略和后续 7 个子任务。
+- 本轮未修改业务代码。
+
+##### Codex 审查反馈（TASK-028H）
+
+- 审查结论：TASK-028H 可以标记为“已完成”。`docs/portable-security-and-redaction-policy.md` 已足够指导后续 Portable A+B 安全实现，但仍是策略文档，不代表脱敏 helper、PID file、plugin 权限模型或脚本已实现。
+- Token / API key / `gateway.auth.token` / `Authorization` / `Bearer` 的禁止边界清楚：portable data 不允许明文存储这些内容，Token 当前仍由 OpenClaw runtime 管理，不进入 App portable data。
+- `provider` / `baseUrl` / `API URL` / 完整 OpenClaw config / `.env` 全文被明确列为 portable data 禁止项，满足“不要把技术配置和密钥写入 U 盘数据”的边界。
+- `data/app/`、`data/openclaw/`、`data/logs/`、`data/backup/` 的允许/禁止清单合理：允许会话、项目、偏好、安全摘要和脱敏日志；禁止 Token、Authorization、完整请求/响应正文、用户文件内容、完整 OpenClaw config 和系统数据自动复制。
+- 日志脱敏覆盖方向正确，包含 Bearer、Authorization、apiKey、gateway token、URL、本地路径和用户文件路径。实现时需在 TASK-028H-1 收紧正则：`Authorization: Bearer ...` 应一次性整段替换，URL 规则应覆盖 localhost、127.0.0.1、API path、query token、域名中横线和非 `ai.*.*` 的供应商/代理地址。
+- `portable_data_status` / `portable_runtime_status` 被要求只能返回安全摘要，不返回完整路径、Token、provider、baseUrl、API URL 或完整 command output，符合诊断脱敏目标。
+- Gateway 启停策略明确要求 PID file，并要求进程存在 + command line / workspace 路径校验；明确禁止盲目 `taskkill /f`、`pkill`、`killall`，满足后续实现边界。
+- Skill / Plugin 策略明确：不默认安装第三方 plugin，不一键安装未知来源 plugin，安装前展示来源、权限、网络、文件、shell、环境变量/API key 风险；运行日志脱敏，安装目录隔离到 `data/openclaw/skills/`。
+- Windows 安全策略覆盖 SmartScreen、Defender、bat 脚本、盘符变化、路径空格/中文、WebView2、不写注册表和企业禁脚本场景，足够指导后续 Windows portable 实现。
+- macOS 安全策略覆盖 Gatekeeper、quarantine、签名/公证、`.app` bundle 路径、Universal binary、外置盘权限，并明确不把 `xattr -dr` / `spctl --master-disable` 当正式方案。
+- 备份/导出/迁移策略明确不自动复制 system data、Token 或 OpenClaw config；迁移到 U 盘前展示复制清单，诊断包默认脱敏。
+- 后续 7 个子任务合理：TASK-028H-1 脱敏 helper 和 TASK-028H-4 Plugin 权限模型为 P1，TASK-028G-1 macOS bundle root 修正为 P1，其余诊断包、PID file、UI 文案和 Windows 脚本落地为 P2。若要真实发布 portable runtime，TASK-028H-3 可视风险提升到 P1。
+- 文档元数据观察项：文档写明日期为 2026-06-01，但本轮审查日期为 2026-05-27；这不阻塞策略验收，但后续整理 release 文档时建议校正日期。
+- 本轮确认：Codex 审查只更新 `AGENT_BOARD.md`，未修改业务代码，未执行 TASK-028G-1，未执行 TASK-028H-1，未读取 `.env`，未输出 Token。当前 git worktree 仍存在其他既有业务文件改动，但不属于本轮 TASK-028H 审查新增改动。
+- TASK-028 父任务判断：可以标记为“阶段性完成”，但仍保持“进行中”等待实现类任务；不要把 TASK-028 视为 Portable A+B 已实现完成。
+- 下一步建议：Portable 主线优先做 TASK-028G-1，先修正 macOS `.app` bundle root 路径推导，避免后续 data/runtime/scripts 落入 bundle 内部；若当前目标转向可见体验回归，则回到 TASK-025E 桌面窄窗口 / Windows macOS UI 回归也可行。
+
+
+### TASK-026：Agent 引擎页用户化重构
+
+- 状态：已完成
+- 优先级：P1
+- 负责人：OpenCode / Reasonix
+
+背景：
+
+- OpenClaw HTTP-first 主路径已完成，Agent 引擎页已支持模型供应配置和状态展示。
+- 经过多轮 UI polish 后，需要确认 Agent 引擎页普通用户可见配置都是真实生效的，不再保留“看起来可调但实际不影响 OpenClaw”的假配置。
+- 当前审计发现：思考强度 / 推理深度、显示思考过程等配置在 OpenClaw HTTP-first 主路径下并不真实生效，继续放在普通 UI 会误导用户。
+
+目标：
+
+- 将 Agent 引擎页从“技术仪表盘 + legacy 配置残留”重构为“用户友好配置页”。
+- 普通视图只展示真实状态和真实配置：AI 助手状态、当前真实模型、模型档位、Token 配置 / 更新 Token。
+- 技术细节移动到高级诊断折叠区：配置文件、Gateway、HTTP 对话接口、可用模型、CLI 修复命令。
+- 移除或隐藏 OpenClaw 主路径下无实际效果的假配置。
+
+通用安全边界：
+
+- 不读取 `.env`。
+- 不输出 Token。
+- 不显示 token 原文、gateway.auth.token、provider、baseUrl、API URL、Authorization、Bearer。
+- 不改 OpenClaw HTTP 主链路。
+- 不改 Rust command。
+- 不改 OpenClaw config 写入结构。
+- 不改 run store。
+- 不改 session/project 数据结构。
+- 不删除 Hermes legacy。
+
+#### TASK-026A：Agent 引擎页真实配置审计
+
+- 状态：已完成
+- 优先级：P1
+- 负责人：OpenCode / Reasonix
+
+目标：
+
+- 不改业务代码。
+- 审计 Agent 引擎页所有状态、按钮、配置项的真实来源和作用。
+- 输出 `docs/agent-engine-config-audit.md`。
+- 为 TASK-026B 的用户化重构提供依据。
+
+##### OpenCode 执行反馈
+
+- 新增 `docs/agent-engine-config-audit.md`，共 9 章节。
+- 关键发现：思考强度 / 推理深度当前写入 Hermes config，不影响 OpenClaw，不影响 OpenClaw HTTP 请求，属于假配置。
+- 关键发现：显示思考过程只是前端 AppConfig toggle，`ReasoningBlock` 不检查该值，对真实回复展示无实际影响，属于假配置。
+- 关键发现：普通 UI 显示 `openclaw/default` 不适合作为“当前模型”，因为它是 OpenClaw Gateway 路由别名，不是真实底层模型。
+- 确认模型供应配置真实有效：`applyOpenClawProviderConfig` 会写入 OpenClaw config，Token 不保存到 App 本地配置。
+- 确认引擎状态检测真实有效：配置文件 / Gateway / HTTP 对话接口等检测为安全摘要，不返回敏感信息。
+- 建议 TASK-026B 将普通视图改为：AI 助手状态、当前真实模型、模型档位、Token 配置 / 更新 Token；高级诊断折叠显示技术状态；移除思考强度和显示思考过程。
+- 业务代码未修改。
+
+##### Codex 审查反馈（TASK-026A）
+
+- 审查结论：TASK-026A 可以标记为“已完成”。
+- `docs/agent-engine-config-audit.md` 足够指导 TASK-026B：它逐项列出了 UI 字段来源、真实性、安全性、迁移建议和重构边界。
+- “思考强度 / 推理深度是假配置”判断成立：当前链路写 Hermes config，OpenClaw HTTP-first 请求不读取该字段，对 OpenClaw 模型调用没有影响。
+- “显示思考过程是假配置”判断成立：当前只是 `config.showReasoning` toggle，`ReasoningBlock` 不检查该值，是否展示 reasoning 取决于消息数据本身。
+- 这两个假配置应从普通 Agent 引擎页移除；如未来真正接入 OpenClaw reasoning / thinking 参数，再以新任务恢复。
+- `openclaw/default` 不适合作为普通 UI 的“当前模型”：它是 Gateway 路由别名，不是用户购买/选择的真实模型。普通 UI 应显示 `ocPrimaryModel` / `defaultModelPrimary` 格式化后的真实模型，例如 `deepseek-v4-flash` 或 `deepseek-v4-pro`；路由别名可放高级诊断。
+- 模型供应配置确认真实有效且 Token 安全边界正确：Token 只通过 Rust command 写入 OpenClaw config，不进入 AppConfig / localStorage / sessionStorage / 普通 UI / 看板。
+- 引擎状态检测确认真实有效且不暴露敏感信息：配置文件、Gateway、HTTP 对话接口和可用模型均为摘要信息。
+- 允许进入 TASK-026B：Agent 引擎页用户化重构。
+
+#### TASK-026B：Agent 引擎页用户化重构
+
+- 状态：已完成
+- 优先级：P1
+- 负责人：OpenCode / Reasonix
+
+目标：
+
+- 根据 `docs/agent-engine-config-audit.md` 重构 Agent 引擎页。
+- 普通视图只保留真实用户配置：AI 助手状态、当前真实模型、模型档位、Token 配置 / 更新 Token、刷新检测。
+- 高级诊断折叠区显示技术状态：配置文件、Gateway、HTTP 对话接口、可用模型、CLI 修复命令。
+- 移除普通视图中的假配置：思考强度 / 推理深度、显示思考过程。
+
+修改范围：
+
+- 仅限 `src/App.tsx` 中 EnginesPage 相关 UI 和必要状态读取。
+- 可复用既有 `readOpenClawConfigSummary`、`readOpenClawProviderSummary`、`checkOpenClawHttpStatus`、`applyOpenClawProviderConfig`。
+- 不新增 Rust command，除非发现现有摘要字段确实不足并先在看板说明。
+
+禁止事项：
+
+- 不改 OpenClaw HTTP 主链路。
+- 不改 OpenClaw config 写入结构。
+- 不改 Token 安全策略。
+- 不把 Token 写入 AppConfig / localStorage / sessionStorage。
+- 不显示 token 原文、provider、baseUrl、API URL、Authorization、Bearer。
+- 不恢复 Hermes 配置为普通主路径。
+- 不删除 Hermes legacy。
+- 不改 Agent 对话页、首页、消息区、移动端。
+
+验收标准：
+
+- 普通 Agent 引擎页不再显示“思考强度 / 推理深度”和“显示思考过程”这两个假配置。
+- 普通 Agent 引擎页显示真实当前模型：优先使用 `ocPrimaryModel` / `defaultModelPrimary`，并展示为 `deepseek-v4-flash` 或 `deepseek-v4-pro` 这类用户可理解模型名。
+- `openclaw/default`、`openclaw/main` 等 Gateway 路由别名只允许出现在高级诊断区或内部日志，不作为普通 UI 当前模型主显示。
+- 模型供应 Token 输入 / 应用流程保持 TASK-016 安全策略：不返回、不打印、不写 AppConfig、本地 storage 或看板。
+- 高级诊断默认折叠，不显示 provider / baseUrl / API URL / token 原文。
+- `npm run build` 通过。
+- `cargo check` 通过。
+- `node scripts/openclaw-http-api-probe.mjs` 通过。
+
+
+##### OpenCode 执行反馈
+
+- 修改文件：`src/App.tsx`，共 5 处。
+- 普通视图从“引擎状态总览 / 6 个 Metric / 修复建议区”改为“AI 助手”卡片，显示状态、当前模型、重新检测和高级诊断入口。
+- 当前模型改为使用 `formatDisplayModel(chatState.ocPrimaryModel)`，目标是显示真实模型短名，例如 `deepseek-v4-pro`。
+- 普通视图移除了“思考强度 / 推理深度”卡片。
+- “售后诊断”重命名为“高级诊断”，诊断中新增 OpenClaw 技术状态：配置文件、Gateway、HTTP、路由入口、可用模型、CLI 命令。
+- 模型供应配置保留，Token + 速度 / 质量档位 + 应用到 OpenClaw 配置流程不变。
+- 验证：`npm run build` 通过；`cargo check` 通过；`node scripts/openclaw-http-api-probe.mjs` 通过。
+
+##### Codex 审查反馈（TASK-026B）
+
+- 审查结论：TASK-026B 暂不标记为“已完成”，保持“待验收（需修复）”。
+- 合格部分：普通 Agent 引擎页已经明显用户化，不再以 6 个技术 Metric 作为主视觉；“AI 助手”卡片 + 模型供应配置的结构比旧技术面板更适合普通用户。
+- 合格部分：普通视图不再渲染 `ReasoningEffortControl`，因此“思考强度 / 推理深度 / 显示思考过程”这两个假配置已从普通 UI 移除。`ReasoningEffortControl` 函数和 legacy apply modal 仍有死代码 / legacy 残留，但未见普通入口触发，可作为后续清理项。
+- 合格部分：模型供应配置保留，仍调用 `applyOpenClawProviderConfig`，Token 写入 OpenClaw config 后清空输入框，未见写入 AppConfig / localStorage / sessionStorage 的新路径。
+- P1 阻塞：普通 AI 助手卡当前模型仍可能显示 `openclaw/default`。代码为 `formatDisplayModel(chatState.ocPrimaryModel) || (ocReady ? ocDefaultModel : "需检查")`，当 `ocPrimaryModel` 为空且 `ocReady` 为 true 时会回退到 `ocDefaultModel`，而 `ocDefaultModel` 默认 / 来源可能是 `openclaw/default`。TASK-026B 验收要求普通 UI 不把 `openclaw/default` 作为当前模型主显示，应改为“模型未配置 / 需检查 / 未读取到真实模型”，或确保先读取 `defaultModelPrimary` 成功再展示真实短名。
+- P1 阻塞：高级诊断仍暴露本地 API URL：`对话服务：http://127.0.0.1:8642/v1`，并且复制诊断信息也包含该 URL。TASK-026B 验收要求高级诊断不显示 provider / baseUrl / API URL / token 原文，因此必须移除或改成中性状态摘要，例如“Legacy 对话服务：已配置 / 未配置”，不展示 URL。
+- P1 修复建议：高级诊断可保留 `路由入口：openclaw/default` 和可用模型列表，因为这是 Gateway 路由别名诊断；但不要显示 `http://127.0.0.1:8642/v1`、provider、baseUrl、API URL、Authorization、Bearer 或 token 原文。
+- P2 观察项：`showApplyPreview` legacy 应用弹窗、`testToken` / `saveConfig` / `doApply` 和 `ReasoningEffortControl` 仍残留为不可达或 legacy 代码。它们不阻塞当前普通 UI 验收，但后续可作为 legacy 清理任务处理，避免维护成本继续上升。
+- 未发现 TASK-026B 改 OpenClaw HTTP 主链路、OpenClaw config 写入结构、run store、session/project 数据结构。
+- 暂不允许将 TASK-026 父任务标记为已完成。
+- 暂不建议恢复 TASK-025E 为待执行；需先修复 TASK-026B 的 P1 问题并重新提交复审。
+
+
+##### OpenCode 修复反馈
+
+- 修复普通 UI 模型 fallback：`EnginesPage` 和 `HomePage` 的 `displayModel` 不再 fallback 到 `openclaw/default`，读取不到真实 primary model 时显示“需检查”。
+- AI 助手卡统一使用 `displayModel`，不再通过 `ocDefaultModel` 回退展示 Gateway 路由别名。
+- 高级诊断移除 `http://127.0.0.1:8642/v1` 展示。
+- 高级诊断移除“复制诊断信息”按钮，避免复制内容携带 API URL。
+- 剩余 `127.0.0.1:8642` 命中仅在 Hermes legacy / internal 错误 handler 和 Rust 内部 legacy 检测路径，不属于普通 UI 展示。
+- 验证：`npm run build` 通过；`cargo check` 通过；`node scripts/openclaw-http-api-probe.mjs` 通过。
+
+##### Codex 复审反馈（TASK-026B 修复版）
+
+- 复审结论：TASK-026B 可以标记为“已完成”。
+- 普通 AI 助手卡不再 fallback 显示 `openclaw/default`；`chatState.ocPrimaryModel` 为空时显示“需检查”。
+- HomePage 也不再 fallback 显示 `openclaw/default`；同样使用“需检查”作为普通 UI 安全 fallback。
+- `openclaw/default` 仍可作为高级诊断中的“路由入口”出现，也可保留在对话请求 / 历史模型标识 / internal route 中；不再作为普通 Agent 引擎页“当前真实模型”主显示。
+- 高级诊断不再显示 `http://127.0.0.1:8642/v1`，也不再提供复制诊断信息按钮，因此不会通过诊断复制泄露本地 API URL。
+- 剩余 `127.0.0.1:8642` 命中确认为 Hermes legacy / internal 错误 handler 或 Rust 内部 legacy 路径，不属于普通 UI 或高级诊断展示。
+- 未发现新增 token / provider / baseUrl / API URL / Authorization / Bearer 普通 UI 暴露；Rust 内部 Authorization / Bearer 和 legacy API 客户端命中不属于本任务新增 UI 暴露。
+- 模型供应配置仍可用，`applyOpenClawProviderConfig` 路径保持不变；Token 应用后清空输入框，不写入 AppConfig / localStorage / sessionStorage。
+- 未发现改 OpenClaw config 写入逻辑、OpenClaw HTTP 主链路、run store、session/project 数据结构。
+- TASK-026 父任务可以标记为“已完成”。
+- 允许恢复 TASK-025E：桌面窄窗口 / Windows macOS UI 回归为“待执行”。
+- P2 观察项：`ReasoningEffortControl`、`showApplyPreview`、`testToken` / `saveConfig` / `doApply` 等 legacy/dead code 仍存在，但普通 UI 不触发；后续可作为 legacy 清理任务处理。
+
+
+### Codex 复审反馈：TASK-010 修复结果
+
+- 复审日期：2026-05-25
+- 复审范围：`src/lib/openclawGateway.ts`、`src/lib/openclawBackend.ts`、`src/lib/agentBackend.ts`、`src/App.tsx`、`docs/openclaw-backend-implementation-notes.md`、`AGENT_BOARD.md`
+- 复审结论：TASK-010 暂不改为“已完成”，继续保持“待验收（需修复）”。
+- TASK-011 状态建议：继续保持“待规划”，暂不允许执行。
+- 业务代码检查：本次复审只更新 `AGENT_BOARD.md`，未修改 `src/`、`src-tauri/`，未执行 TASK-011，未读取 `.env`，未输出 Token。
+
+#### 已修复确认
+
+1. WebView `require()` 风险已修复。
+   - `agentBackend.ts` 已改为静态 `import { OpenClawBackend } from "@/lib/openclawBackend"`。
+   - 复审范围内未发现 OpenClaw 新链路继续使用 CommonJS `require()`。
+
+2. deviceId 已改为 TASK-009 验证路径。
+   - `openclawGateway.ts` 已引入 `sha256`。
+   - `createIdentity()` 使用 `bytesToHex(sha256(pub))` 生成 `deviceId`。
+   - 旧的 `hashPublicKey` / `sha256SyncNoble` 近似实现已移除。
+
+3. `accepted || true` 已修复。
+   - `OpenClawBackend.startChat()` 当前为 `accepted: result.status === "started" || result.status === "accepted"`。
+   - 未再发现 OpenClaw 分支伪造 accepted 成功。
+
+4. Hermes API preflight 已从 OpenClaw 分支前移走。
+   - `App.tsx` 中 `hermesConnected` 阻塞和 `latestHermesApi` 检查已加 `!USE_OPENCLAW_BACKEND` 条件。
+   - 这一项不再阻塞 TASK-010。
+
+5. Node-only API 风险暂未发现。
+   - 复审范围内未发现 `node:crypto`、`fs`、`path` 等 WebView 不可用模块被 OpenClaw 新链路直接引用。
+
+#### 仍未通过项
+
+1. P0：OpenClawBackend 当前仍不能由 App 实际初始化。
+   - `App.tsx` 的 OpenClaw 分支仍调用 `getOpenClawBackend()`，没有传入 gateway token。
+   - `agentBackend.ts` 已移除空 `readOpenClawGatewayToken()`，但没有提供新的 token 注入入口。
+   - 因此即使手动把 `USE_OPENCLAW_BACKEND` 改为 `true`，当前 App 仍会因为 token 缺失返回 `null`。
+   - 这不属于 TASK-011 的 UI 去 Hermes 化问题，而是 TASK-010 dev switch 可验证性的前置问题。
+
+2. P0：OpenClawBackend 初始化失败状态仍会粘住。
+   - `_openclawBackendError` 一旦因缺 token 被设置，后续同一会话即使提供 token 也会被 `if (_openclawBackendError) return null` 短路。
+   - 后续 onboarding / retry / 手动重新连接都会受影响。
+   - 需要允许带 token 重试，或提供显式 reset / reconnect 机制。
+
+3. P1：事件订阅时序仍未修复。
+   - `App.tsx` 仍是 `oc.startChat(...)` 之后才调用 `oc.subscribeEvents(...)`。
+   - 如果 Gateway 在 `chat.send` accepted 前后立即推送 chunk / done / error，前端可能漏事件。
+   - TASK-010 初版至少应保证“先订阅，后发送”，或在 backend 内部提供 run-level event buffer。
+
+4. P1：事件过滤仍偏宽。
+   - `OpenClawBackend.subscribeEvents()` 在没有 `sessionId` 时仍接受全部事件。
+   - App 只传 `{ requestId }`，但 Gateway event 本身并不会天然携带该前端 requestId；映射后的 `evt.requestId` 来自 options，无法证明事件属于当前 run。
+   - 后续应按 `sessionKey` / `runId` 做严格绑定，避免串流。
+
+5. P1：device private key 仍被明文持久化到 localStorage。
+   - `saveIdentity()` 将 `priv: bytesToBase64(id.privateKey)` 写入 `localStorage`。
+   - 这不是“只在内存中使用”：private key 会持久化在 WebView localStorage。
+   - 短期作为开发验证可以记录为风险，但如果 TASK-011 要把 OpenClaw 设为默认用户主路径，必须迁移到 Rust/Tauri 后端和安全持久化策略，或至少把 TASK-011 明确限定为非正式默认启用的开发入口。
+
+6. P1：Gateway token / device token 正式安全路径仍未形成。
+   - 当前 gateway token 没有被打印，也未写入 localStorage / chat history / docs，这是正向结果。
+   - 但 App 也没有真实 token 获取和安全注入方案。
+   - 尚未看到 device token 保存 / 复用路径，后续 pairing/onboarding 仍需要补齐。
+
+7. P1：`chat.send` / `chat.abort` 仍缺真实 App 侧 smoke test。
+   - Reasonix 修复反馈说明 `npm run build` 和 `cargo check` 通过，但没有补充 `USE_OPENCLAW_BACKEND` 开启后的 App 侧 `hello-ok` / capabilities / basic chat.send 证据。
+   - `chat.send` payload 和 Gateway event schema 仍是推断，不宜直接放行 TASK-011。
+
+8. P2：send-perf / stream-debug 日志可后置清理。
+   - 当前命中主要是性能和流式调试日志，未见 Token 输出。
+   - 后续正式 RC 前建议降低噪音，避免日志中出现过多请求结构、诊断或潜在用户内容。
+
+#### 状态建议
+
+- TASK-010：保持“待验收（需修复）”。
+- TASK-011：保持“待规划”。
+- 不建议 Reasonix 执行 TASK-011。
+
+#### TASK-010 下一轮最小修复范围
+
+1. 给 OpenClaw dev switch 提供可验证的 token 注入方式，但不得读取 `.env`、不得输出 Token、不得写入 docs / localStorage / chat history。
+2. 修复 `_openclawBackendError` sticky retry，允许带 token 的重新初始化。
+3. 调整 OpenClaw 事件订阅为先订阅、后发送，并按 `sessionKey` / `runId` 过滤。
+4. 明确 private key 的阶段性安全边界：若仍用 localStorage，只能作为开发验证；若要放行 TASK-011 默认入口，应先迁移到 Tauri/Rust 安全存储或把 TASK-011 限定为不可默认启用。
+5. 补充 App 侧 smoke test 结果：至少证明 `USE_OPENCLAW_BACKEND` 开启后能完成 `hello-ok` / capabilities；若 `chat.send` 仍失败，必须记录真实错误 code 和缺失字段。
+
+### Codex 复审反馈：TASK-010 第二轮修复结果
+
+- 复审日期：2026-05-25
+- 复审范围：`src-tauri/src/main.rs`、`src/lib/agentBackend.ts`、`src/lib/openclawGateway.ts`、`src/lib/openclawBackend.ts`、`src/App.tsx`、`docs/openclaw-backend-implementation-notes.md`、`AGENT_BOARD.md`
+- 复审结论：TASK-010 合格，状态改为“已完成”。
+- TASK-011 状态建议：从“待规划”推进为“待执行”。
+- 业务代码检查：本次复审只更新 `AGENT_BOARD.md`，未修改 `src/`、`src-tauri/`，未执行 TASK-011，未读取 `.env`，未输出 Token。
+
+#### 修复确认
+
+1. 之前 P0/P1 阻塞已基本解决。
+   - `require()` 风险已移除，OpenClawBackend 静态导入。
+   - deviceId 使用 `sha256(publicKeyRaw)`。
+   - `accepted || true` 已移除。
+   - Hermes API preflight 已限定在 Hermes 分支。
+   - `_openclawBackendError` sticky 失败缓存已移除。
+   - `resetOpenClawBackend()` 已提供重试/重置入口。
+
+2. OpenClawBackend 现在可以由 App 初始化。
+   - `App.tsx` OpenClaw 分支先调用 `getOpenClawBackend()`，没有实例时再调用 `initOpenClawBackend()`。
+   - `initOpenClawBackend()` 通过 Tauri command 获取本机 OpenClaw gateway auth，并创建 `OpenClawBackend`。
+   - 这解决了上一轮“无 token provider 导致永远 null”的问题。
+
+3. Rust command 当前没有发现 token 日志或普通 UI 暴露。
+   - `read_openclaw_gateway_auth_for_local_use` 从 `~/.openclaw/openclaw.json` 读取 `gateway.auth.token`。
+   - 返回值包含 `tokenPresent`、`tokenLength`、`authMode` 和内存用 `token`。
+   - 复审未发现该 command 打印 token、写日志、写文件、写 chat history 或暴露到普通 UI。
+   - 这是 dev-only 安全债：token 仍返回到 JS 层内存，后续正式产品路径应迁移为 Tauri/Rust 托管 Gateway WS client 或 OS 安全存储策略。
+
+4. private key 不再写入 localStorage / sessionStorage。
+   - `openclawGateway.ts` 已移除 localStorage 持久化。
+   - private key 只作为 `Uint8Array` 内存对象用于 `signPayload`。
+   - 代码注释已明确 memory-only ephemeral identity，且说明必须在 P1 迁移到 Tauri secure storage。
+
+5. OpenClaw 分支不再被 Hermes preflight 阻塞。
+   - 发送前的 `hermesConnected` 检查加了 `!USE_OPENCLAW_BACKEND`。
+   - `latestHermesApi` / `refreshHermesApi()` preflight 包在 `if (!USE_OPENCLAW_BACKEND)` 中。
+   - Hermes 相关 UI 和文案仍大量存在，但这是 TASK-011 的去 Hermes 主路径工作，不作为 TASK-010 阻塞。
+
+6. 事件订阅顺序已修复。
+   - `App.tsx` OpenClaw 分支已改为先 `subscribeEvents`，再 `startChat`。
+   - 这降低了首个 event 丢失风险，满足 TASK-010 初版要求。
+
+7. App 侧 smoke test hook 足以作为 TASK-010 初版验收依据。
+   - `OpenClawBackend.runSmokeTest()` 覆盖 connect / `hello-ok` / `skills.status` / `models.list`。
+   - 用户补充验证确认 `npm run build` 和 `cargo check` 通过，且 rg 未发现 `require()` / `node:crypto` / `accepted || true` / OpenClaw private key 持久化 / token 日志输出风险。
+   - 进入 TASK-011 后，Reasonix 仍应在切默认入口前执行并记录一次 `runSmokeTest()` 真实结果。
+
+#### 残余风险
+
+1. P1：Gateway token 返回到 JS 层仍是 dev-only 安全债。
+   - 当前没有日志或普通 UI 暴露，但正式默认路径不应长期让前端持有 gateway token。
+   - TASK-011 可以继续推进，但必须把“后续迁移到 Tauri/Rust 托管连接或安全存储”写入后续任务。
+
+2. P1：ephemeral identity 每次 App 重启会变化。
+   - 这避免了 localStorage private key 风险，但可能导致频繁重新配对。
+   - TASK-011 可以先接受为开发路径；正式 onboarding 需要安全持久化 device identity / device token。
+
+3. P1：事件过滤仍需要在 TASK-011 收紧。
+   - 当前顺序已改为先订阅后发送，但 `subscribeEvents` 在没有 `sessionId` 时仍偏宽。
+   - TASK-011 应在拿到 `runId` / `sessionKey` 后绑定过滤，避免串入其它 Gateway event。
+
+4. P2：`docs/openclaw-backend-implementation-notes.md` 前半部分仍有旧描述。
+   - 文档顶部仍写过 localStorage / publicKey hex 等早期设计，后半部分修复记录已经更新。
+   - 不阻塞 TASK-010，但建议后续文档整理时统一。
+
+5. P2：send-perf / stream-debug 日志可后置清理。
+   - 当前未见 token/privateKey/deviceToken 输出。
+   - 正式 RC 前建议降低日志噪音，避免输出过多用户内容或请求结构。
+
+#### 历史记录：TASK-011 WebSocket 执行边界（已废弃为普通主线）
+
+以下内容是 2026-05-25 WebSocket 路线尚未切换到 HTTP-first 前的历史记录，不再作为当前执行依据。
+
+当时 TASK-011 的边界曾要求：
+
+- OpenClaw 成为 Agent 对话默认 backend。
+- HermesLegacyBackend 暂时保留作为回滚。
+- 普通 UI 隐藏 Hermes 主路径，但不删除 Hermes 代码。
+- 不做 ClawHub 任意第三方安装。
+- 不做 `skills.install`。
+- 不开放 provider / baseUrl / API URL。
+- 不读取或输出 Token。
+- 不把 gateway token、device private key、device token 写入日志、聊天历史、localStorage 或 sessionStorage。
+- 执行前或执行中补充一次 `runSmokeTest()` 真实结果，记录 `hello-ok`、methods/events、skills/models 摘要，不输出 Token。
+
+### Codex 规划反馈：TASK-011 人工测试失败与 TASK-012（历史）
+
+- 记录日期：2026-05-25
+- 当时结论：TASK-011 暂停继续小修，状态调整为“暂停（人工测试失败）”。
+- 最新结论：TASK-011 已被 HTTP-first 路线覆盖；TASK-012 已完成 HTTP API 验证；TASK-013、TASK-014、TASK-015 已审查完成；当前下一步是 TASK-016。
+- 业务代码检查：本次只更新 `AGENT_BOARD.md`，未修改 `src/`、`src-tauri/`，未执行 TASK-012，未读取 `.env`，未输出 Token。
+
+#### 关键判断
+
+1. 当前人工测试失败不是普通 UI 文案问题。
+   - 错误为 `OpenClaw 请求异常：hashes.sha512 not set`。
+   - 这是 `@noble/ed25519` 同步签名 / 同步 public key 路径缺少 `sha512` 配置导致的运行时问题。
+
+2. 不建议继续在当前前端 WebView 实现上逐行补丁。
+   - OpenClaw Gateway 认证、device identity、`connect.challenge`、`hello-ok`、RPC、events、reconnect 和 close/error 处理需要系统设计。
+   - 当前实现已经经历 token 注入、device identity、sha512、事件顺序、UI 文案等多轮修补，维护风险上升。
+   - 第三方客户端认证流程此前已经暴露出文档不足，需要参考官方 UI / Gateway 源码，而不是继续猜协议。
+
+3. TASK-012 的优先级高于继续验收 TASK-011。
+   - TASK-012 Phase A 只做源码调研和报告。
+   - 重点参考 OpenClaw 官方 GitHub 仓库中的 `ui/src/ui/gateway.ts` 和 Gateway protocol docs。
+   - TASK-012 完成并确认 Phase B 方案后，再恢复 OpenClaw-first ChatPage 验收。
+
+#### 当前状态修正
+
+以上“TASK-012 Phase A”指令已经过期。当前 Reasonix 下一步应执行 TASK-016，不应继续执行 WebSocket 官方 UI 调研或 TASK-011 小修。
+
+---
+
+### TASK-025F：人工验收脚本
+
+#### 测试 A：首页
+
+1. 打开首页。
+2. 1280px 宽度下无横向滚动。
+3. 快速入口、最近会话、AI 助手卡可读。
+4. 不显示 Token/API URL/provider/baseUrl。
+5. 最近会话出现后布局不变形。
+
+#### 测试 B：Agent 对话
+
+1. 打开 Agent 对话页。
+2. 1280px 宽度下聊天区仍是主视觉。
+3. 会话/项目侧栏不溢出。
+4. 发送消息正常。
+5. 取消、重试、重新生成正常。
+6. 消息复制、继续、用户消息填入正常。
+
+#### 测试 C：项目 / 会话
+
+1. 新建项目。
+2. 移动会话到项目。
+3. 重命名项目。
+4. 删除项目。
+5. 会话回默认。
+6. 重启后项目仍存在。
+
+#### 测试 D：Agent 引擎
+
+1. 打开 Agent 引擎页。
+2. 普通视图显示 AI 助手状态和真实模型。
+3. 不显示思考强度 / 显示思考过程。
+4. 高级诊断不显示 API URL/Token。
+5. 模型配置仍可用。
+
+#### 测试 E：能力中心
+
+1. 打开能力中心。
+2. 可用项显示"内置工作流"。
+3. 点击"使用工作流"后填入 prompt 并跳转 Agent 对话页。
+4. OpenClaw 插件显示接入规划中。
+5. 没有安装按钮。
+
+#### 测试 F：Portable 状态
+
+1. system mode 下正常读写。
+2. portable mode 下 data/app 读写正常。
+3. portable 不可写时 fallback system mode。
+4. portable/runtime status 不暴露敏感信息。

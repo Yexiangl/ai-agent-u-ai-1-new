@@ -41,14 +41,67 @@ fn task_map() -> &'static TaskMap {
 }
 
 fn config_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    let dir = app.path().app_data_dir().map_err(|error| error.to_string())?;
-    fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+    let dir = app_data_root(app)?;
     Ok(dir.join("config.json"))
 }
 
-fn chat_sessions_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+// TASK-028G-1: Unified workspace root detection (Windows + macOS .app bundle)
+fn workspace_root() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let current = exe.parent()?;
+
+    // macOS: inside .app bundle → go up to .app's parent
+    if let Some(s) = current.to_str() {
+        if s.contains(".app/Contents/MacOS") || s.contains(".app/Contents/MacOS") {
+            // current = .../Contents/MacOS
+            // go up: MacOS -> Contents -> .app -> .app parent (workspace root)
+            return Some(current.parent()?.parent()?.parent()?.to_path_buf());
+        }
+    }
+    // Windows/Linux: current = .../app/
+    // go up: app/ -> workspace root
+    Some(current.parent()?.to_path_buf())
+}
+
+// TASK-028D: portable data mode — request vs availability
+fn portable_requested(_app: &tauri::AppHandle) -> bool {
+    if let Some(root) = workspace_root() {
+        return root.join("data").join("portable.json").exists();
+    }
+    false
+}
+
+fn portable_available(_app: &tauri::AppHandle) -> bool {
+    if let Some(root) = workspace_root() {
+        let dir = root.join("data").join("app");
+        if let Err(_) = fs::create_dir_all(&dir) { return false; }
+        let probe = dir.join(".portable-write-test");
+        if fs::write(&probe, b"ok").is_err() { return false; }
+        let _ = fs::remove_file(&probe);
+        return true;
+    }
+    false
+}
+
+fn effective_portable(app: &tauri::AppHandle) -> bool {
+    portable_requested(app) && portable_available(app)
+}
+
+fn app_data_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    if effective_portable(app) {
+        if let Some(root) = workspace_root() {
+            let dir = root.join("data").join("app");
+            fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+            return Ok(dir);
+        }
+    }
     let dir = app.path().app_data_dir().map_err(|error| error.to_string())?;
     fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+    Ok(dir)
+}
+
+fn chat_sessions_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let dir = app_data_root(app)?;
     Ok(dir.join("chat-sessions.json"))
 }
 
@@ -160,6 +213,150 @@ fn clear_chat_sessions(app: tauri::AppHandle) -> Result<(), String> {
         fs::remove_file(path).map_err(|error| error.to_string())?;
     }
     Ok(())
+}
+
+// ── TASK-028C: chat-projects.json read/write ──
+
+fn chat_projects_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let dir = app_data_root(app)?;
+    Ok(dir.join("chat-projects.json"))
+}
+
+#[tauri::command]
+fn read_chat_projects(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
+    let path = chat_projects_path(&app)?;
+    if !path.exists() {
+        return Ok(serde_json::json!([]));
+    }
+    let content = fs::read_to_string(&path).map_err(|error| error.to_string())?;
+    let parsed: serde_json::Value = serde_json::from_str(&content).map_err(|error| format!("JSON parse error: {}", error))?;
+    Ok(parsed)
+}
+
+#[tauri::command]
+fn write_chat_projects(app: tauri::AppHandle, projects: serde_json::Value) -> Result<(), String> {
+    let path = chat_projects_path(&app)?;
+    let content = serde_json::to_string(&projects).map_err(|error| error.to_string())?;
+    fs::write(&path, &content).map_err(|error| format!("写入失败：{}", error))
+}
+
+// TASK-028D: Report portable data mode status (no sensitive paths in output)
+#[tauri::command]
+fn portable_data_status(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
+    let requested = portable_requested(&app);
+    let available = portable_available(&app);
+    let mode = if requested && available { "portable" } else { "system" };
+    let root = app_data_root(&app)?;
+    let writable = match std::fs::File::create(root.join(".probe_tmp")) {
+        Ok(f) => { drop(f); let _ = std::fs::remove_file(root.join(".probe_tmp")); true }
+        Err(_) => false,
+    };
+    let reason = if requested && !available {
+        Some("portable data is not writable, fallback to system mode")
+    } else {
+        None
+    };
+    Ok(serde_json::json!({
+        "mode": mode,
+        "portableRequested": requested,
+        "portableAvailable": available,
+        "writable": writable,
+        "reason": reason,
+    }))
+}
+
+// TASK-028E: Probe portable runtime (read-only, no install/start/stop)
+#[tauri::command]
+fn portable_runtime_status() -> Result<serde_json::Value, String> {
+    let mut warnings: Vec<String> = Vec::new();
+
+    // Determine runtime root
+    let runtime_root = workspace_root().unwrap_or_default().join("runtime");
+    let runtime_exists = runtime_root.exists();
+    if !runtime_exists {
+        warnings.push("runtime directory not found".into());
+    }
+
+    // Node detection
+    let node_paths = if cfg!(target_os = "windows") {
+        vec!["node/node.exe", "node/bin/node.exe"]
+    } else {
+        vec!["node/bin/node"]
+    };
+    let node_found = node_paths.iter().any(|p| runtime_root.join(p).is_file());
+    let node_exe = node_found;
+    let mut node_version: Option<String> = None;
+    if node_found {
+        let node_bin = node_paths.iter().find_map(|p| {
+            let path = runtime_root.join(p);
+            if path.is_file() { Some(path) } else { None }
+        });
+        if let Some(bin) = node_bin {
+            if let Ok(out) = std::process::Command::new(&bin).arg("--version").output() {
+                if out.status.success() {
+                    node_version = String::from_utf8(out.stdout).ok().map(|s| s.trim().to_string());
+                }
+            }
+        }
+    }
+
+    // OpenClaw detection
+    let oc_paths = if cfg!(target_os = "windows") {
+        vec!["openclaw/openclaw.cmd", "openclaw/openclaw.exe", "openclaw/bin/openclaw.cmd"]
+    } else {
+        vec!["openclaw/bin/openclaw", "openclaw/openclaw"]
+    };
+    let oc_found = oc_paths.iter().any(|p| runtime_root.join(p).is_file());
+    let oc_exe = oc_found;
+    let mut oc_version: Option<String> = None;
+    if oc_found {
+        let oc_bin = oc_paths.iter().find_map(|p| {
+            let path = runtime_root.join(p);
+            if path.is_file() { Some(path) } else { None }
+        });
+        if let Some(bin) = oc_bin {
+            if let Ok(out) = std::process::Command::new(&bin).arg("--version").output() {
+                if out.status.success() {
+                    oc_version = String::from_utf8(out.stdout).ok().map(|s| s.trim().to_string());
+                }
+            }
+        }
+    }
+
+    // Scripts detection
+    let scripts_root = workspace_root().unwrap_or_default().join("scripts");
+    let start_win = scripts_root.join("start-windows.bat").is_file();
+    let stop_win = scripts_root.join("stop-windows.bat").is_file();
+    let start_mac = scripts_root.join("start-macos.command").is_file();
+
+    // Gateway reachable via TCP probe
+    let gw_reachable = match std::net::TcpStream::connect_timeout(
+        &"127.0.0.1:18789".parse().unwrap(),
+        std::time::Duration::from_millis(500),
+    ) {
+        Ok(_) => true,
+        Err(_) => false,
+    };
+    let gw_status = if gw_reachable { "reachable" } else { "unreachable" };
+
+    Ok(serde_json::json!({
+        "runtimeRootExists": runtime_exists,
+        "nodeFound": node_found,
+        "nodeExecutable": node_exe,
+        "nodeVersion": node_version,
+        "openclawFound": oc_found,
+        "openclawExecutable": oc_exe,
+        "openclawVersion": oc_version,
+        "scripts": {
+            "startWindows": start_win,
+            "stopWindows": stop_win,
+            "startMacos": start_mac,
+        },
+        "gatewayReachable": gw_reachable,
+        "gatewayStatus": gw_status,
+        "portInUse": serde_json::Value::Null,
+        "warnings": warnings,
+    }))
 }
 
 fn checked_at() -> String {
@@ -1947,9 +2144,608 @@ fn save_generated_file(app: tauri::AppHandle, filename: String, content: String)
     Ok(serde_json::json!({ "ok": true, "path": dest.display().to_string() }))
 }
 
+#[tauri::command]
+fn read_openclaw_gateway_auth_for_local_use() -> Result<serde_json::Value, String> {
+    // DEV-ONLY: reads ~/.openclaw/openclaw.json gateway.auth config.
+    // Token returned ONLY for internal WebSocket connect use.
+    // MUST be migrated to Tauri-managed WS client in P1.
+    // Token must never be logged, stored in frontend state, or exposed to UI.
+    let Some(home) = home_dir() else {
+        return Ok(serde_json::json!({ "tokenPresent": false, "error": "no home dir" }));
+    };
+    let config_path = home.join(".openclaw").join("openclaw.json");
+    if !config_path.exists() {
+        return Ok(serde_json::json!({ "tokenPresent": false, "error": "config not found" }));
+    }
+    let content = fs::read_to_string(&config_path).map_err(|e| e.to_string())?;
+    let cfg: serde_json::Value = serde_json::from_str(&content).map_err(|e| e.to_string())?;
+    let auth = cfg.get("gateway").and_then(|g| g.get("auth"));
+    let mode = auth.and_then(|a| a.get("mode")).and_then(|m| m.as_str()).unwrap_or("unknown");
+    let token = auth.and_then(|a| a.get("token")).and_then(|t| t.as_str()).unwrap_or("");
+    let present = !token.is_empty();
+    Ok(serde_json::json!({
+        "tokenPresent": present,
+        "tokenLength": if present { token.len() } else { 0 },
+        "authMode": mode,
+        // DEV-ONLY: token returned in-memory for WS connect. Do NOT log or store.
+        "token": if present { serde_json::Value::String(token.to_string()) } else { serde_json::Value::Null },
+    }))
+}
+
+fn openclaw_device_identity_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir.join("openclaw-device-identity.json"))
+}
+
+#[tauri::command]
+fn get_or_create_openclaw_device_identity(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
+    use ed25519_dalek::{SigningKey, VerifyingKey};
+    use sha2::Sha256;
+    use sha2::Digest;
+    use rand::rngs::OsRng;
+    use rand::RngCore;
+
+    let path = openclaw_device_identity_path(&app)?;
+
+    // Try to load existing identity
+    if path.exists() {
+        let content = fs::read_to_string(&path).map_err(|e| e.to_string())?;
+        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&content) {
+            let pk_bytes = parsed.get("privateKeyHex").and_then(|v| v.as_str());
+            let pub_bytes = parsed.get("publicKeyHex").and_then(|v| v.as_str());
+            let device_id = parsed.get("deviceId").and_then(|v| v.as_str());
+            if let (Some(pk), Some(pub_k), Some(id)) = (pk_bytes, pub_bytes, device_id) {
+                if let (Ok(pk_decoded), Ok(pub_decoded)) = (hex::decode(pk), hex::decode(pub_k)) {
+                    if pk_decoded.len() == 32 && pub_decoded.len() == 32 {
+                        return Ok(serde_json::json!({
+                            "deviceId": id,
+                            "publicKeyHex": pub_k,
+                            "privateKeyHex": pk,
+                            "created": false,
+                        }));
+                    }
+                }
+            }
+        }
+        // Corrupted — regenerate
+        let _ = fs::remove_file(&path);
+    }
+
+    // Generate new Ed25519 keypair
+    let mut seed = [0u8; 32];
+    OsRng.fill_bytes(&mut seed);
+    let signing_key = SigningKey::from_bytes(&seed.into());
+    let verifying_key: VerifyingKey = signing_key.verifying_key();
+    let pk_bytes = signing_key.to_bytes();
+    let pub_bytes = verifying_key.to_bytes();
+
+    // deviceId = sha256(publicKeyRaw)
+    let mut hasher = Sha256::new();
+    hasher.update(&pub_bytes);
+    let device_id = hex::encode(hasher.finalize());
+
+    let identity = serde_json::json!({
+        "deviceId": device_id,
+        "publicKeyHex": hex::encode(pub_bytes),
+        "privateKeyHex": hex::encode(pk_bytes),
+    });
+
+    let content = serde_json::to_string_pretty(&identity).map_err(|e| e.to_string())?;
+    fs::write(&path, &content).map_err(|e| e.to_string())?;
+
+    // Set file permissions to owner-only on Unix
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+    }
+
+    Ok(serde_json::json!({
+        "deviceId": device_id,
+        "publicKeyHex": hex::encode(pub_bytes),
+        "privateKeyHex": hex::encode(pk_bytes),
+        "created": true,
+    }))
+}
+
+fn load_openclaw_gateway_token() -> Result<String, String> {
+    let Some(home) = home_dir() else {
+        return Err("无法定位用户主目录".to_string());
+    };
+    let config_path = home.join(".openclaw").join("openclaw.json");
+    if !config_path.exists() {
+        return Err("OpenClaw 配置文件不存在".to_string());
+    }
+    let content = fs::read_to_string(&config_path).map_err(|e| e.to_string())?;
+    let cfg: serde_json::Value = serde_json::from_str(&content).map_err(|e| e.to_string())?;
+    let token = cfg.get("gateway")
+        .and_then(|g| g.get("auth"))
+        .and_then(|a| a.get("token"))
+        .and_then(|t| t.as_str())
+        .unwrap_or("");
+    if token.is_empty() {
+        return Err("gateway.auth.token 未配置".to_string());
+    }
+    Ok(token.to_string())
+}
+
+#[tauri::command]
+async fn openclaw_http_chat_completion(
+    messages: serde_json::Value,
+    model: Option<String>,
+) -> Result<serde_json::Value, String> {
+    // Read token from config (never returned to frontend)
+    let token = load_openclaw_gateway_token()?;
+
+    let model_candidates = if let Some(ref m) = model {
+        vec![m.clone(), "openclaw/default".to_string(), "openclaw".to_string(), "openclaw/main".to_string()]
+    } else {
+        vec!["openclaw/default".to_string(), "openclaw".to_string(), "openclaw/main".to_string()]
+    };
+
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| format!("创建 HTTP client 失败: {}", e))?;
+
+    let mut last_error = String::new();
+
+    for model_name in &model_candidates {
+        let body = serde_json::json!({
+            "model": model_name,
+            "messages": messages,
+            "stream": false,
+        });
+
+        let resp = match client
+            .post("http://127.0.0.1:18789/v1/chat/completions")
+            .header("Content-Type", "application/json")
+            .header("Authorization", format!("Bearer {}", token))
+            .json(&body)
+            .timeout(std::time::Duration::from_secs(180))
+            .send()
+            .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                last_error = format!("HTTP 请求失败: {}", e);
+                continue;
+            }
+        };
+
+        let status = resp.status().as_u16();
+
+        if status == 400 {
+            last_error = format!("模型 {} 无效（HTTP 400）", model_name);
+            continue;
+        }
+
+        if !resp.status().is_success() {
+            last_error = format!("HTTP {}", status);
+            continue;
+        }
+
+        // Parse response
+        let json: serde_json::Value = match resp.json().await {
+            Ok(j) => j,
+            Err(e) => {
+                last_error = format!("JSON 解析失败: {}", e);
+                continue;
+            }
+        };
+
+        let content = json
+            .get("choices")
+            .and_then(|c| c.get(0))
+            .and_then(|c| c.get("message"))
+            .and_then(|m| m.get("content"))
+            .and_then(|c| c.as_str())
+            .unwrap_or("");
+
+        let finish_reason = json
+            .get("choices")
+            .and_then(|c| c.get(0))
+            .and_then(|c| c.get("finish_reason"))
+            .and_then(|f| f.as_str());
+
+        let usage = json.get("usage").cloned();
+
+        return Ok(serde_json::json!({
+            "ok": true,
+            "content": content,
+            "model": json.get("model").and_then(|m| m.as_str()).unwrap_or(model_name.as_str()),
+            "finishReason": finish_reason,
+            "usage": usage,
+        }));
+    }
+
+    Err(last_error)
+}
+
+#[tauri::command]
+fn read_openclaw_config_summary() -> Result<serde_json::Value, String> {
+    let Some(home) = home_dir() else {
+        return Ok(serde_json::json!({ "configExists": false, "error": "no home dir" }));
+    };
+    let config_path = home.join(".openclaw").join("openclaw.json");
+    if !config_path.exists() {
+        return Ok(serde_json::json!({
+            "configExists": false,
+            "configPathHint": "~/.openclaw/openclaw.json",
+            "errors": ["配置文件不存在"]
+        }));
+    }
+
+    let content = fs::read_to_string(&config_path).map_err(|e| e.to_string())?;
+    let cfg: serde_json::Value = serde_json::from_str(&content).map_err(|e| e.to_string())?;
+
+    let gateway = cfg.get("gateway");
+    let auth = gateway.and_then(|g| g.get("auth"));
+    let http = gateway.and_then(|g| g.get("http"));
+    let endpoints = http.and_then(|h| h.get("endpoints"));
+    let cc = endpoints.and_then(|e| e.get("chatCompletions"));
+    let responses = endpoints.and_then(|e| e.get("responses"));
+
+    Ok(serde_json::json!({
+        "configExists": true,
+        "configPathHint": "~/.openclaw/openclaw.json",
+        "gatewayAuthMode": auth.and_then(|a| a.get("mode")).and_then(|m| m.as_str()),
+        "gatewayTokenPresent": auth.and_then(|a| a.get("token")).and_then(|t| t.as_str()).map(|s| !s.is_empty()).unwrap_or(false),
+        "gatewayPort": gateway.and_then(|g| g.get("port")).and_then(|p| p.as_u64()),
+        "gatewayHost": gateway.and_then(|g| g.get("host")).and_then(|h| h.as_str()),
+        "httpChatCompletionsEnabled": cc.and_then(|c| c.get("enabled")).and_then(|e| e.as_bool()).unwrap_or(false),
+        "httpResponsesEnabled": responses.and_then(|r| r.get("enabled")).and_then(|e| e.as_bool()).unwrap_or(false),
+        "defaultModelPrimary": cfg.get("agents").and_then(|a| a.get("defaults")).and_then(|d| d.get("model")).and_then(|m| m.get("primary")).and_then(|v| v.as_str()).map(|s| s.to_string()),
+        "errors": [],
+    }))
+}
+
+#[tauri::command]
+async fn openclaw_http_status() -> Result<serde_json::Value, String> {
+    let token = match load_openclaw_gateway_token() {
+        Ok(t) => t,
+        Err(e) => {
+            return Ok(serde_json::json!({
+                "ready": false,
+                "error": e,
+                "models": [],
+            }));
+        }
+    };
+
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(5))
+        .build()
+        .map_err(|e| format!("创建 HTTP client 失败: {}", e))?;
+
+    let resp = match client
+        .get("http://127.0.0.1:18789/v1/models")
+        .header("Authorization", format!("Bearer {}", token))
+        .timeout(std::time::Duration::from_secs(10))
+        .send()
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            return Ok(serde_json::json!({
+                "ready": false,
+                "error": format!("Gateway 不可达: {}", e),
+                "models": [],
+            }));
+        }
+    };
+
+    if !resp.status().is_success() {
+        return Ok(serde_json::json!({
+            "ready": false,
+            "error": format!("HTTP {}", resp.status().as_u16()),
+            "models": [],
+        }));
+    }
+
+    let ct = resp.headers().get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    if ct.contains("text/html") {
+        return Ok(serde_json::json!({
+            "ready": false,
+            "error": "HTTP API 未启用（返回 Control UI HTML）",
+            "models": [],
+        }));
+    }
+
+    let json: serde_json::Value = match resp.json().await {
+        Ok(j) => j,
+        Err(e) => {
+            return Ok(serde_json::json!({
+                "ready": false,
+                "error": format!("JSON 解析失败: {}", e),
+                "models": [],
+            }));
+        }
+    };
+
+    let models: Vec<String> = json
+        .get("data")
+        .and_then(|d| d.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|m| m.get("id").and_then(|id| id.as_str()).map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let default_model = if models.contains(&"openclaw/default".to_string()) {
+        "openclaw/default"
+    } else if models.contains(&"openclaw".to_string()) {
+        "openclaw"
+    } else {
+        models.first().map(|s| s.as_str()).unwrap_or("openclaw/default")
+    };
+
+    Ok(serde_json::json!({
+        "ready": !models.is_empty(),
+        "models": models,
+        "defaultModel": default_model,
+        "statusCode": 200,
+        "gatewayReachable": true,
+        "authOk": true,
+        "authRequired": true,
+    }))
+}
+
+const MODEL_PROXY_BASE_URL: &str = "https://ai.f1class.icu/v1";
+const MODEL_PROXY_PROVIDER_ID: &str = "ai-agent-proxy";
+
+#[tauri::command]
+fn read_openclaw_model_provider_summary() -> Result<serde_json::Value, String> {
+    let Some(home) = home_dir() else {
+        return Ok(serde_json::json!({ "providerConfigured": false, "errors": ["no home dir"] }));
+    };
+    let config_path = home.join(".openclaw").join("openclaw.json");
+    if !config_path.exists() {
+        return Ok(serde_json::json!({ "providerConfigured": false, "errors": ["config not found"] }));
+    }
+    let content = fs::read_to_string(&config_path).map_err(|e| e.to_string())?;
+    let cfg: serde_json::Value = serde_json::from_str(&content).map_err(|e| e.to_string())?;
+    let providers = cfg.get("models").and_then(|m| m.get("providers"));
+    let proxy = providers.and_then(|p| p.get(MODEL_PROXY_PROVIDER_ID));
+    let has_key = proxy.and_then(|p| p.get("apiKey")).and_then(|k| k.as_str()).map(|s| !s.is_empty()).unwrap_or(false);
+    let default_primary = cfg.get("agents").and_then(|a| a.get("defaults")).and_then(|d| d.get("model")).and_then(|m| m.get("primary")).and_then(|v| v.as_str());
+    let models = proxy.and_then(|p| p.get("models")).and_then(|m| m.as_array()).map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect::<Vec<_>>()).unwrap_or_default();
+    Ok(serde_json::json!({
+        "providerConfigured": proxy.is_some() && has_key && !models.is_empty(),
+        "providerId": if proxy.is_some() { Some(MODEL_PROXY_PROVIDER_ID) } else { None::<&str> },
+        "tokenPresent": has_key,
+        "defaultModelRef": default_primary,
+        "availableConfiguredModels": models,
+        "errors": [],
+    }))
+}
+
+#[tauri::command]
+fn apply_openclaw_model_provider_config(token: String, model_preset: String) -> Result<serde_json::Value, String> {
+    if token.trim().is_empty() { return Err("Token 不能为空".to_string()); }
+    let model_id = match model_preset.as_str() {
+        "speed" => "deepseek-v4-flash",
+        "quality" => "deepseek-v4-pro",
+        _ => return Err(format!("无效模型档位: {}", model_preset)),
+    };
+    let primary_ref = format!("{}/{}", MODEL_PROXY_PROVIDER_ID, model_id);
+    let Some(home) = home_dir() else { return Err("无法定位用户主目录".to_string()); };
+    let config_path = home.join(".openclaw").join("openclaw.json");
+    if config_path.exists() {
+        let bak = home.join(".openclaw").join(format!("openclaw.json.bak-{}", chrono_timestamp()));
+        if let Err(e) = fs::copy(&config_path, &bak) {
+            return Err(format!("OpenClaw 配置备份失败，已取消写入。请检查文件权限: {}", e));
+        }
+    }
+    let mut cfg: serde_json::Value = if config_path.exists() {
+        let content = fs::read_to_string(&config_path).map_err(|e| e.to_string())?;
+        serde_json::from_str(&content).map_err(|e| format!("JSON parse: {}", e))?
+    } else { serde_json::json!({}) };
+    // Merge provider (never log token)
+    if cfg.get("models").is_none() { cfg["models"] = serde_json::json!({}); }
+    if cfg["models"].get("providers").is_none() { cfg["models"]["providers"] = serde_json::json!({}); }
+    cfg["models"]["providers"][MODEL_PROXY_PROVIDER_ID] = serde_json::json!({
+        "baseUrl": MODEL_PROXY_BASE_URL, "apiKey": token, "api": "openai-completions", "models": ["deepseek-v4-flash", "deepseek-v4-pro"],
+    });
+    if cfg.get("agents").is_none() { cfg["agents"] = serde_json::json!({}); }
+    if cfg["agents"].get("defaults").is_none() { cfg["agents"]["defaults"] = serde_json::json!({}); }
+    if cfg["agents"]["defaults"].get("model").is_none() { cfg["agents"]["defaults"]["model"] = serde_json::json!({}); }
+    cfg["agents"]["defaults"]["model"]["primary"] = serde_json::Value::String(primary_ref.clone());
+    if cfg.get("gateway").is_none() { cfg["gateway"] = serde_json::json!({}); }
+    if cfg["gateway"].get("http").is_none() { cfg["gateway"]["http"] = serde_json::json!({}); }
+    if cfg["gateway"]["http"].get("endpoints").is_none() { cfg["gateway"]["http"]["endpoints"] = serde_json::json!({}); }
+    if cfg["gateway"]["http"]["endpoints"].get("chatCompletions").is_none() { cfg["gateway"]["http"]["endpoints"]["chatCompletions"] = serde_json::json!({}); }
+    cfg["gateway"]["http"]["endpoints"]["chatCompletions"]["enabled"] = serde_json::Value::Bool(true);
+    let content = serde_json::to_string_pretty(&cfg).map_err(|e| e.to_string())?;
+    fs::write(&config_path, &content).map_err(|e| e.to_string())?;
+    Ok(serde_json::json!({ "success": true, "appliedPreset": model_preset, "appliedModelId": model_id, "defaultModelRef": primary_ref, "httpChatCompletionsEnabled": true, "needsRestart": true }))
+}
+
+// TASK-027C-C: Read-only list of installed skills/plugins via OpenClaw CLI
+#[tauri::command]
+fn read_installed_capabilities() -> Result<serde_json::Value, String> {
+    let mut warnings: Vec<String> = Vec::new();
+    let mut skills: Vec<serde_json::Value> = Vec::new();
+    let mut plugins: Vec<serde_json::Value> = Vec::new();
+    let cli_available = std::process::Command::new("openclaw").arg("--version").output().is_ok();
+
+    if !cli_available {
+        return Ok(serde_json::json!({
+            "cliAvailable": false,
+            "skills": [],
+            "plugins": [],
+            "warnings": ["OpenClaw CLI not found"],
+        }));
+    }
+
+    // Read skills (skills list --json)
+    match std::process::Command::new("openclaw").args(["skills", "list", "--json"]).output() {
+        Ok(out) if out.status.success() => {
+            if let Ok(text) = String::from_utf8(out.stdout) {
+                if let Ok(parsed) = serde_json::from_str::<Vec<serde_json::Value>>(&text) {
+                    for s in parsed {
+                        let mut entry = serde_json::json!({});
+                        if let Some(id) = s.get("id").and_then(|v| v.as_str()) { entry["id"] = id.into(); }
+                        if let Some(name) = s.get("name").and_then(|v| v.as_str()) { entry["name"] = name.into(); }
+                        if let Some(desc) = s.get("description").and_then(|v| v.as_str()) { entry["description"] = desc.into(); }
+                        if let Some(source) = s.get("source").and_then(|v| v.as_str()) { entry["source"] = source.into(); }
+                        if let Some(version) = s.get("version").and_then(|v| v.as_str()) { entry["version"] = version.into(); }
+                        entry["kind"] = "skill".into();
+                        entry["installed"] = true.into();
+                        skills.push(entry);
+                    }
+                } else {
+                    warnings.push("skills list: failed to parse JSON output".into());
+                }
+            }
+        }
+        Ok(out) => {
+            let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+            warnings.push(if stderr.contains("config is invalid") {
+                "skills list: OpenClaw config invalid".into()
+            } else {
+                format!("skills list: CLI error (exit {:?})", out.status.code())
+            });
+        }
+        Err(e) => warnings.push(format!("skills list: {}", e)),
+    }
+
+    // Read plugins (plugins list)
+    // Note: plugins list does not support --json in this version; use text output
+    match std::process::Command::new("openclaw").args(["plugins", "list"]).output() {
+        Ok(out) if out.status.success() => {
+            // Parse text output — each line is typically "name  kind  status  source  version  path"
+            if let Ok(text) = String::from_utf8(out.stdout) {
+                for line in text.lines() {
+                    let trimmed = line.trim();
+                    if trimmed.is_empty() || trimmed.starts_with("Listing") { continue; }
+                    let mut entry = serde_json::json!({
+                        "kind": "plugin",
+                        "installed": true,
+                    });
+                    let parts: Vec<&str> = trimmed.split_whitespace().collect();
+                    if !parts.is_empty() { entry["name"] = parts[0].into(); }
+                    if parts.len() > 1 { entry["source"] = parts[1].into(); }
+                    if parts.len() > 2 { entry["enabled"] = (parts[2] == "enabled").into(); }
+                    plugins.push(entry);
+                }
+            }
+        }
+        Ok(out) => {
+            let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+            warnings.push(if stderr.contains("config is invalid") {
+                "plugins list: OpenClaw config invalid".into()
+            } else {
+                format!("plugins list: CLI error (exit {:?})", out.status.code())
+            });
+        }
+        Err(e) => warnings.push(format!("plugins list: {}", e)),
+    }
+
+    Ok(serde_json::json!({
+        "cliAvailable": true,
+        "skills": skills,
+        "plugins": plugins,
+        "warnings": warnings,
+    }))
+}
+
+// TASK-027C-D/E: Install/uninstall records path
+fn skill_records_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let dir = app_data_root(app)?;
+    Ok(dir.join("skill-install-records.json"))
+}
+
+fn load_skill_records(app: &tauri::AppHandle) -> Vec<serde_json::Value> {
+    let path = match skill_records_path(app) { Ok(p) => p, Err(_) => return vec![] };
+    match fs::read_to_string(&path).ok().and_then(|s| serde_json::from_str(&s).ok()) {
+        Some(v) => v,
+        None => vec![],
+    }
+}
+
+fn save_skill_records(app: &tauri::AppHandle, records: &[serde_json::Value]) {
+    if let Ok(path) = skill_records_path(app) {
+        if let Ok(content) = serde_json::to_string(records) {
+            let _ = fs::write(&path, &content);
+        }
+    }
+}
+
+// Built-in allowlist: catalog_id -> (kind, install_ref)
+fn get_install_info(id: &str) -> Option<(&str, &str)> {
+    match id {
+        "ext-file-summary" => Some(("skill", "clawhub:file-summary")),
+        "ext-table-analyze" => Some(("skill", "clawhub:table-analyze")),
+        "ext-web-research" => Some(("skill", "clawhub:web-research")),
+        "ext-github-helper" => Some(("plugin", "clawhub:github-helper")),
+        "ext-browser-auto" => Some(("plugin", "clawhub:browser-auto")),
+        "ext-memory-kb" => Some(("plugin", "openclaw:memory-kb")),
+        "ext-data-api" => Some(("skill", "clawhub:data-api")),
+        "ext-fun-fact" => Some(("skill", "clawhub:fun-fact")),
+        "ext-countdown" => Some(("skill", "clawhub:countdown")),
+        _ => None,
+    }
+}
+#[tauri::command]
+fn install_capability(app: tauri::AppHandle, catalogId: String, name: String, kind: String, riskLevel: String) -> Result<serde_json::Value, String> {
+    let (kind_str, install_ref) = get_install_info(&catalogId).ok_or("未识别的安装引用")?;
+    if kind_str != kind.as_str() { return Err("类型不匹配".into()); }
+
+    let output = std::process::Command::new("openclaw")
+        .arg(if kind_str == "skill" { "skills" } else { "plugins" })
+        .arg("install").arg(install_ref).output();
+
+    let success = output.map(|o| o.status.success()).unwrap_or(false);
+
+    if success {
+        let mut records = load_skill_records(&app);
+        records.retain(|r| r.get("catalogId").and_then(|v| v.as_str()) != Some(&catalogId));
+        records.push(serde_json::json!({
+            "catalogId": catalogId, "name": name, "kind": kind_str, "riskLevel": riskLevel,
+            "installRef": install_ref, "installedAt": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis(),
+            "installedByApp": true,
+        }));
+        save_skill_records(&app, &records);
+        Ok(serde_json::json!({ "success": true, "action": "installed" }))
+    } else {
+        Err(format!("openclaw {} install {} failed", kind_str, install_ref))
+    }
+}
+#[tauri::command]
+fn uninstall_capability(app: tauri::AppHandle, catalogId: String, kind: String) -> Result<serde_json::Value, String> {
+    let mut records = load_skill_records(&app);
+    let rec = records.iter().find(|r| r.get("catalogId").and_then(|v| v.as_str()) == Some(&catalogId))
+        .cloned().ok_or("未找到安装记录")?;
+    let install_ref = rec.get("installRef").and_then(|v| v.as_str()).unwrap_or("");
+    let kind_str = rec.get("kind").and_then(|v| v.as_str()).unwrap_or(&kind);
+
+    let output = std::process::Command::new("openclaw")
+        .arg(if kind_str == "skill" { "skills" } else { "plugins" })
+        .arg("uninstall").arg(install_ref).output();
+
+    let success = output.map(|o| o.status.success()).unwrap_or(false);
+    if success {
+        records.retain(|r| r.get("catalogId").and_then(|v| v.as_str()) != Some(&catalogId));
+        save_skill_records(&app, &records);
+        Ok(serde_json::json!({ "success": true, "action": "uninstalled" }))
+    } else {
+        Err(format!("openclaw {} uninstall {} failed", kind_str, install_ref))
+    }
+}
+
+#[tauri::command]
+fn read_install_records(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
+    Ok(serde_json::json!(load_skill_records(&app)))
+}
+
 fn main() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![read_config, write_config, clear_config, read_chat_sessions, write_chat_sessions, clear_chat_sessions, check_hermes_installed, get_hermes_version, get_hermes_paths, get_hermes_help, check_hermes_api_server, hermes_chat_completion, cancel_hermes_chat_completion, read_hermes_model_config, read_hermes_native_memory, apply_hermes_model_config, apply_hermes_reasoning_config, read_hermes_cron_overview, read_hermes_cron_cli_status, ensure_ai_files_dirs, list_ai_files, delete_ai_file, open_ai_file_location, pick_and_upload_file, extract_ai_file_text, save_generated_file])
+        .invoke_handler(tauri::generate_handler![read_config, write_config, clear_config, read_chat_sessions, write_chat_sessions, clear_chat_sessions, read_chat_projects, write_chat_projects, portable_data_status, portable_runtime_status, read_installed_capabilities, install_capability, uninstall_capability, read_install_records, check_hermes_installed, get_hermes_version, get_hermes_paths, get_hermes_help, check_hermes_api_server, hermes_chat_completion, cancel_hermes_chat_completion, read_hermes_model_config, read_hermes_native_memory, apply_hermes_model_config, apply_hermes_reasoning_config, read_hermes_cron_overview, read_hermes_cron_cli_status, ensure_ai_files_dirs, list_ai_files, delete_ai_file, open_ai_file_location, pick_and_upload_file, extract_ai_file_text, save_generated_file, read_openclaw_gateway_auth_for_local_use, get_or_create_openclaw_device_identity, openclaw_http_chat_completion, openclaw_http_status, read_openclaw_config_summary, read_openclaw_model_provider_summary, apply_openclaw_model_provider_config])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

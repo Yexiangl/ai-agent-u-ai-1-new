@@ -23,7 +23,7 @@ async function requestJson<T>(url: string, apiKey: string, init?: RequestInit): 
 
   try {
     if (!apiKey.trim()) {
-      return { ok: false, latencyMs: 0, error: "专属模型供应 Token 未填写，请先在 Hermes 管理页填写并保存" };
+      return { ok: false, latencyMs: 0, error: "专属模型供应 Token 未填写，请先在 Agent 引擎页填写并保存" };
     }
 
     if (!/^https?:\/\//i.test(url)) {

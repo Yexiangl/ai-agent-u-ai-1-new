@@ -14,6 +14,8 @@ import {
   type HermesStreamDiagnostics,
   type HermesToolProgress,
 } from "@/lib/hermes";
+import { OpenClawBackend } from "@/lib/openclawBackend";
+import { invoke } from "@tauri-apps/api/core";
 
 export type AgentBackendType = "hermes" | "openclaw";
 
@@ -189,5 +191,62 @@ export class HermesLegacyBackend implements AgentBackend {
 
 export const hermesLegacyBackend = new HermesLegacyBackend();
 
-// TODO TASK-005: Implement OpenClawBackend through Gateway WebSocket RPC/events,
-// not by forcing it into the Hermes SSE shape.
+// ── OpenClawBackend lazy singleton ──
+// DEV-ONLY: uses Rust command to read gateway token from ~/.openclaw/openclaw.json.
+// Token never leaves memory, never appears in logs, never reaches the UI.
+// MUST be migrated to Tauri-managed WS client in P1.
+
+let _openclawBackend: OpenClawBackend | null = null;
+
+async function fetchGatewayToken(): Promise<string | null> {
+  try {
+    const result = await invoke<{ tokenPresent: boolean; token: string | null; tokenLength: number; authMode: string }>(
+      "read_openclaw_gateway_auth_for_local_use"
+    );
+    if (result.tokenPresent && result.token) {
+      // DEV-ONLY: token used only for WS connect, never logged/stored.
+      return result.token;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export function getOpenClawBackend(gatewayToken?: string): OpenClawBackend | null {
+  // Return existing instance if available and connected
+  if (_openclawBackend) return _openclawBackend;
+
+  // If caller provides token directly, use it
+  if (gatewayToken) {
+    try {
+      _openclawBackend = new OpenClawBackend(gatewayToken);
+      return _openclawBackend;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+export async function initOpenClawBackend(): Promise<OpenClawBackend | null> {
+  if (_openclawBackend) return _openclawBackend;
+  const token = await fetchGatewayToken();
+  if (!token) return null;
+  try {
+    _openclawBackend = new OpenClawBackend(token);
+    return _openclawBackend;
+  } catch {
+    return null;
+  }
+}
+
+export function resetOpenClawBackend(): void {
+  if (_openclawBackend) {
+    _openclawBackend = null;
+  }
+}
+
+export function isOpenClawBackendAvailable(): boolean {
+  return _openclawBackend !== null;
+}

@@ -12,6 +12,8 @@
     "tauri:build:windows": "tauri build --target x86_64-pc-windows-msvc"
   },
   "dependencies": {
+    "@noble/ed25519": "^3.1.0",
+    "@noble/hashes": "^2.2.0",
     "@tauri-apps/api": "^2.8.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
@@ -22,11 +24,11 @@
     "tailwind-merge": "^3.3.0"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2.8.4",
     "@types/node": "^22.15.21",
     "@types/react": "^19.0.12",
     "@types/react-dom": "^19.0.4",
     "@vitejs/plugin-react": "^5.0.0",
-    "@tauri-apps/cli": "^2.8.4",
     "autoprefixer": "^10.4.21",
     "eslint": "^9.27.0",
     "postcss": "^8.5.3",
