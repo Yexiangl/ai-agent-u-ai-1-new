@@ -130,7 +130,7 @@ export interface HermesNativeMemoryFile {
   title: string;
   path: string;
   relativePath: string;
-  kind: "memory" | "user" | "soul" | "unknown";
+  kind: "memory" | "user" | "soul" | "agents" | "heartbeat" | "identity" | "tools" | "unknown";
   exists: boolean;
   size: number;
   updatedAt: string | null;
@@ -195,6 +195,18 @@ export async function readHermesModelConfig(): Promise<HermesModelConfig> {
 
 export async function readHermesNativeMemory(): Promise<HermesNativeMemoryResult> {
   return invoke<HermesNativeMemoryResult>("read_hermes_native_memory");
+}
+
+export interface OpenClawWorkspaceMemoryResult {
+  available: boolean;
+  source: string;
+  files: HermesNativeMemoryFile[];
+  checkedAt: string;
+  warnings: string[];
+}
+
+export async function readOpenClawWorkspaceMemory(): Promise<OpenClawWorkspaceMemoryResult> {
+  return invoke<OpenClawWorkspaceMemoryResult>("read_openclaw_workspace_memory");
 }
 
 export async function readChatSessions(): Promise<ChatSession[]> {

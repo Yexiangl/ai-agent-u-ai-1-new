@@ -37,7 +37,7 @@ import {
 import { listModels, type ChatMessage } from "@/lib/api";
 import { DEFAULT_CONFIG, type AppConfig } from "@/lib/config";
 import { clearConfig, loadConfig, saveConfig } from "@/lib/storage";
-import { applyHermesModelConfig, applyHermesReasoningConfig, deleteAiFile, ensureAiFilesDirs, extractAiFileText, listAiFiles, openAiFileLocation, pickAndUploadFile, readChatSessions, readHermesCronCliStatus, readHermesCronOverview, readHermesModelConfig, readHermesNativeMemory, saveGeneratedFile, writeChatSessions, type AiFileEntry, type ChatSession, type HermesApiServerStatus, type HermesChatChunk, type HermesChatDone, type HermesChatError, type HermesCronCliStatus, type HermesCronOverview, type HermesModelConfig, type HermesNativeMemoryFile, type HermesNativeMemoryResult, type HermesStatus, type HermesStreamDiagnostics, type HermesToolProgress } from "@/lib/hermes";
+import { applyHermesModelConfig, applyHermesReasoningConfig, deleteAiFile, ensureAiFilesDirs, extractAiFileText, listAiFiles, openAiFileLocation, pickAndUploadFile, readChatSessions, readHermesCronCliStatus, readHermesCronOverview, readHermesModelConfig, readHermesNativeMemory, readOpenClawWorkspaceMemory, saveGeneratedFile, writeChatSessions, type AiFileEntry, type ChatSession, type HermesApiServerStatus, type HermesChatChunk, type HermesChatDone, type HermesChatError, type HermesCronCliStatus, type HermesCronOverview, type HermesModelConfig, type HermesNativeMemoryFile, type HermesNativeMemoryResult, type HermesStatus, type HermesStreamDiagnostics, type HermesToolProgress, type OpenClawWorkspaceMemoryResult } from "@/lib/hermes";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { hermesLegacyBackend, getOpenClawBackend, initOpenClawBackend, isOpenClawBackendAvailable } from "@/lib/agentBackend";
 import { readOpenClawConfigSummary, checkOpenClawHttpStatus, readOpenClawProviderSummary, applyOpenClawProviderConfig } from "@/lib/openclawHttpClient";
@@ -3811,7 +3811,7 @@ function MoyuCenterPage({ setActive, setChatDraft }: { setActive: (id: RouteId) 
 }
 
 function MemoryPage() {
-  const [memory, setMemory] = useState<HermesNativeMemoryResult | null>(null);
+  const [memory, setMemory] = useState<OpenClawWorkspaceMemoryResult | null>(null);
   const [selectedId, setSelectedId] = useState<string>("");
   const [loadingMemory, setLoadingMemory] = useState(false);
   const [memoryError, setMemoryError] = useState("");
@@ -3820,7 +3820,7 @@ function MemoryPage() {
     setLoadingMemory(true);
     setMemoryError("");
     try {
-      const result = await readHermesNativeMemory();
+      const result = await readOpenClawWorkspaceMemory();
       setMemory(result);
       setSelectedId((current) => current && result.files.some((file) => file.id === current) ? current : result.files[0]?.id ?? "");
     } catch (err) {
@@ -3842,25 +3842,31 @@ function MemoryPage() {
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <CardTitle>助手记忆</CardTitle>
-              <CardDescription>这里显示 Agent 的原生记忆文件。Agent 会在对话中自动使用这些记忆，本页面当前只提供查看，不会修改文件。</CardDescription>
+              <CardDescription>这里显示 OpenClaw 工作区记忆文件。当前页面仅支持查看，不会修改记忆内容。</CardDescription>
             </div>
             <Button variant="outline" onClick={loadMemory} disabled={loadingMemory}><RefreshCcw className={cn("h-4 w-4", loadingMemory && "animate-spin")} />重新扫描</Button>
           </div>
         </CardHeader>
         <CardContent className="grid gap-3 md:grid-cols-3">
-          <Metric label="助手记忆目录" value={memory?.found ? "已检测到" : "未检测到"} tone={memory?.found ? "success" : "warning"} />
-          <Metric label="已发现记忆文件" value={String(memory?.files.length ?? 0)} tone={(memory?.files.length ?? 0) > 0 ? "success" : "muted"} />
+          <Metric label="数据源" value={memory?.source ?? "OpenClaw 工作区"} tone="info" />
+          <Metric label="记忆文件数" value={String(memory?.files.length ?? 0)} tone={(memory?.files.length ?? 0) > 0 ? "success" : "muted"} />
           <Metric label="最近扫描" value={checkedAt} tone="info" />
           {memoryError && <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-rose-700 dark:text-rose-400 md:col-span-3">{memoryError}</div>}
+          {memory?.warnings && memory.warnings.length > 0 && (
+            <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-3 text-xs text-amber-600 dark:text-amber-400 md:col-span-3 space-y-0.5">
+              {memory.warnings.map((w) => <div key={w}>{w}</div>)}
+            </div>
+          )}
         </CardContent>
       </Card>
 
       <div className="grid gap-4 xl:grid-cols-[380px_1fr]">
         <Card>
-          <CardHeader><CardTitle>文件列表</CardTitle><CardDescription>扫描助手记忆目录下的记忆文件。</CardDescription></CardHeader>
+          <CardHeader><CardTitle>文件列表</CardTitle><CardDescription>OpenClaw 工作区下的记忆文件。</CardDescription></CardHeader>
           <CardContent className="space-y-2">
-            {loadingMemory && <div className="text-sm text-muted-foreground"><Loader2 className="mr-2 inline h-4 w-4 animate-spin" />正在扫描 Agent 原生记忆…</div>}
-            {!loadingMemory && memory?.files.length === 0 && <div className="rounded-xl border bg-muted/30 p-3 text-sm text-muted-foreground">未发现记忆文件。不同版本可能路径不同，文件不存在不会视为错误。</div>}
+            {loadingMemory && <div className="text-sm text-muted-foreground"><Loader2 className="mr-2 inline h-4 w-4 animate-spin" />正在扫描 OpenClaw 工作区记忆…</div>}
+            {!loadingMemory && memory?.available !== false && memory?.files.length === 0 && <div className="rounded-xl border bg-muted/30 p-3 text-sm text-muted-foreground">未发现记忆文件。OpenClaw 工作区可能尚未初始化。</div>}
+            {!loadingMemory && memory?.available === false && <div className="rounded-xl border bg-muted/30 p-3 text-sm text-muted-foreground">{memory?.warnings?.[0] ?? "OpenClaw 工作区不可用"}</div>}
             {memory?.files.map((file) => (
               <button key={file.id} onClick={() => setSelectedId(file.id)} className={cn("w-full rounded-xl border p-3 text-left transition", selected?.id === file.id ? "border-primary/40 bg-primary/5" : "bg-card hover:bg-muted/40")}>
                 <div className="flex items-center justify-between gap-3">
@@ -3882,7 +3888,7 @@ function MemoryPage() {
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <CardTitle>{selected?.title ?? "选择记忆文件"}</CardTitle>
-                <CardDescription>{selected ? selected.relativePath : "从左侧选择一个 Hermes 原生记忆文件查看。"}</CardDescription>
+                <CardDescription>{selected ? selected.relativePath : "从左侧选择一个记忆文件查看。"}</CardDescription>
               </div>
               {selected && <Badge tone="warning">只读</Badge>}
             </div>
@@ -3892,39 +3898,48 @@ function MemoryPage() {
               <>
                 <div className="rounded-xl border bg-muted/30 p-3 text-xs leading-6 text-muted-foreground">
                   <div>文件：<span className="break-all text-foreground">{selected.relativePath || selected.title}</span></div>
-                  <div>类型：{memoryKindDescription(selected)}</div>
-                  <div>安全：当前版本只读展示，不写入、不删除、不执行 Hermes 命令。</div>
+                  <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-muted-foreground">
+                    <span>大小：{formatBytes(selected.size)}</span>
+                    <span>更新：{formatUnixTime(selected.updatedAt)}</span>
+                  </div>
                 </div>
-                <div className="max-h-[560px] overflow-auto rounded-xl border bg-background p-4 text-sm leading-7">
-                  <MarkdownContent text={selected.content || "（文件为空）"} />
+                <div className="rounded-xl border bg-muted/30 p-4 text-sm leading-7 text-muted-foreground">
+                  {selected.content ? (
+                    <pre className="whitespace-pre-wrap font-sans text-foreground/80 break-words">{selected.content}</pre>
+                  ) : (
+                    <span>文件内容为空。</span>
+                  )}
                 </div>
               </>
             ) : (
-              <div className="rounded-xl border bg-muted/30 p-4 text-center">
-                <div className="text-sm font-medium">暂无可查看的记忆文件</div>
-                <div className="mt-1 text-xs text-muted-foreground">Hermes 会在对话中自动创建和管理这些文件。当前版本只读展示。</div>
+              <div className="rounded-xl border bg-muted/30 p-4 text-sm text-muted-foreground">
+                {memory && memory.available === false
+                  ? "OpenClaw 工作区不可用。请确认已安装并初始化 OpenClaw。"
+                  : "选择左侧文件查看详细内容。"}
               </div>
             )}
           </CardContent>
         </Card>
       </div>
 
-      <Card>
-        <CardHeader><CardTitle>业务记忆模板，后续版本开放</CardTitle><CardDescription>后续可将这些模板安全写入 Hermes 原生记忆文件，但当前版本只读。</CardDescription></CardHeader>
-        <CardContent className="flex flex-wrap gap-2 text-sm text-muted-foreground">
-          {["业务介绍", "价格表", "回复风格", "常见问题", "售后规则"].map((item) => <Badge key={item} tone="muted">{item}</Badge>)}
-        </CardContent>
-      </Card>
+      {/* Legacy note */}
+      <div className="rounded-lg border border-muted/60 bg-muted/20 px-3 py-2 text-center text-xs text-muted-foreground">
+        旧版 Hermes 记忆暂未接入本页主视图，后续可作为旧数据分区查看。
+      </div>
     </div>
   );
 }
 
 function memoryKindLabel(file: HermesNativeMemoryFile) {
   if (file.relativePath.includes("memories/users/")) return "用户记忆";
-  if (file.kind === "memory") return "MEMORY";
-  if (file.kind === "user") return "USER";
-  if (file.kind === "soul") return "SOUL";
-  return "UNKNOWN";
+  if (file.kind === "memory") return "记忆";
+  if (file.kind === "user") return "用户";
+  if (file.kind === "soul") return "人格";
+  if (file.kind === "agents") return "代理";
+  if (file.kind === "heartbeat") return "心跳";
+  if (file.kind === "identity") return "身份";
+  if (file.kind === "tools") return "工具";
+  return "未知";
 }
 
 function memoryKindDescription(file: HermesNativeMemoryFile) {

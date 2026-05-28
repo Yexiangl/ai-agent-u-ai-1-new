@@ -411,6 +411,10 @@ fn memory_kind(path: &std::path::Path) -> &'static str {
     if name == "memory.md" { "memory" }
     else if name == "user.md" { "user" }
     else if name == "soul.md" { "soul" }
+    else if name == "agents.md" { "agents" }
+    else if name == "heartbeat.md" { "heartbeat" }
+    else if name == "identity.md" { "identity" }
+    else if name == "tools.md" { "tools" }
     else { "unknown" }
 }
 
@@ -1466,6 +1470,55 @@ fn read_hermes_native_memory() -> Result<serde_json::Value, String> {
         "files": files,
         "checkedAt": checked_at(),
         "error": null
+    }))
+}
+
+#[tauri::command]
+fn read_openclaw_workspace_memory() -> Result<serde_json::Value, String> {
+    let Some(home) = home_dir() else {
+        return Ok(serde_json::json!({
+            "available": false,
+            "source": "OpenClaw 工作区",
+            "files": [],
+            "checkedAt": checked_at(),
+            "warnings": vec!["无法定位用户主目录"]
+        }));
+    };
+    let workspace_root = home.join(".openclaw").join("workspace");
+    if !workspace_root.exists() || !workspace_root.is_dir() {
+        return Ok(serde_json::json!({
+            "available": false,
+            "source": "OpenClaw 工作区",
+            "files": [],
+            "checkedAt": checked_at(),
+            "warnings": vec!["OpenClaw 工作区目录不存在"]
+        }));
+    }
+
+    let mut files: Vec<serde_json::Value> = Vec::new();
+    let mut warnings: Vec<String> = Vec::new();
+
+    for file_name in &["SOUL.md", "USER.md", "AGENTS.md", "HEARTBEAT.md", "IDENTITY.md", "TOOLS.md"] {
+        let path = workspace_root.join(file_name);
+        if path.exists() {
+            collect_memory_file(&mut files, &workspace_root, path);
+        } else {
+            warnings.push(format!("文件 {} 不存在", file_name));
+        }
+    }
+
+    files.sort_by(|a, b| {
+        let ar = a.get("relativePath").and_then(|v| v.as_str()).unwrap_or_default();
+        let br = b.get("relativePath").and_then(|v| v.as_str()).unwrap_or_default();
+        ar.cmp(br)
+    });
+
+    Ok(serde_json::json!({
+        "available": true,
+        "source": "OpenClaw 工作区",
+        "files": files,
+        "checkedAt": checked_at(),
+        "warnings": warnings
     }))
 }
 
@@ -2745,7 +2798,7 @@ fn read_install_records(app: tauri::AppHandle) -> Result<serde_json::Value, Stri
 
 fn main() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![read_config, write_config, clear_config, read_chat_sessions, write_chat_sessions, clear_chat_sessions, read_chat_projects, write_chat_projects, portable_data_status, portable_runtime_status, read_installed_capabilities, install_capability, uninstall_capability, read_install_records, check_hermes_installed, get_hermes_version, get_hermes_paths, get_hermes_help, check_hermes_api_server, hermes_chat_completion, cancel_hermes_chat_completion, read_hermes_model_config, read_hermes_native_memory, apply_hermes_model_config, apply_hermes_reasoning_config, read_hermes_cron_overview, read_hermes_cron_cli_status, ensure_ai_files_dirs, list_ai_files, delete_ai_file, open_ai_file_location, pick_and_upload_file, extract_ai_file_text, save_generated_file, read_openclaw_gateway_auth_for_local_use, get_or_create_openclaw_device_identity, openclaw_http_chat_completion, openclaw_http_status, read_openclaw_config_summary, read_openclaw_model_provider_summary, apply_openclaw_model_provider_config])
+        .invoke_handler(tauri::generate_handler![read_config, write_config, clear_config, read_chat_sessions, write_chat_sessions, clear_chat_sessions, read_chat_projects, write_chat_projects, portable_data_status, portable_runtime_status, read_installed_capabilities, install_capability, uninstall_capability, read_install_records, check_hermes_installed, get_hermes_version, get_hermes_paths, get_hermes_help, check_hermes_api_server, hermes_chat_completion, cancel_hermes_chat_completion, read_hermes_model_config, read_hermes_native_memory, read_openclaw_workspace_memory, apply_hermes_model_config, apply_hermes_reasoning_config, read_hermes_cron_overview, read_hermes_cron_cli_status, ensure_ai_files_dirs, list_ai_files, delete_ai_file, open_ai_file_location, pick_and_upload_file, extract_ai_file_text, save_generated_file, read_openclaw_gateway_auth_for_local_use, get_or_create_openclaw_device_identity, openclaw_http_chat_completion, openclaw_http_status, read_openclaw_config_summary, read_openclaw_model_provider_summary, apply_openclaw_model_provider_config])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

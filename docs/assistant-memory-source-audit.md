@@ -132,21 +132,21 @@ MemoryPage (App.tsx:3813)
 
 ## 4. 推荐实现方案
 
-### 4.1 TASK-033B：新增 OpenClaw 记忆只读命令（P0）
+### 4.1 TASK-033B：新增 OpenClaw 记忆只读命令 ✅ 已完成（2026-05-29）
 
-**目标**：读取 `~/.openclaw/workspace/*.md`，与 Hermes 记忆并列或优先显示。
+**实现**：
 
-**Rust 命令**：`read_openclaw_workspace_memory`
+| 层 | 文件 | 改动 |
+|---|---|---|
+| Rust | `main.rs:409` | `memory_kind` 扩展支持 agents/heartbeat/identity/tools |
+| Rust | `main.rs:1477` | 新增 `#[tauri::command] read_openclaw_workspace_memory` |
+| Rust | `main.rs:2801` | 注册命令到 Tauri invoke_handler |
+| TS | `hermes.ts` | 新增 `OpenClawWorkspaceMemoryResult` 类型 + `readOpenClawWorkspaceMemory()` |
+| TS | `App.tsx` | `MemoryPage` 重写为 OpenClaw 工作区 + `memoryKindLabel` 扩展 |
 
-- 路径：`~/.openclaw/workspace/`
-- 读取 `.md` 文件（SOUL, USER, AGENTS, IDENTITY, TOOLS, HEARTBEAT）
-- 复用 `collect_memory_file` 的脱敏/预览/防穿越逻辑
-- 返回格式与 `HermesNativeMemoryResult` 兼容
+**数据流**：`~/.openclaw/workspace/*.md` → Rust `collect_memory_file`（脱敏）→ Tauri invoke → MemoryPage 只读展示
 
-**前端改动**：
-- MemoryPage 调用 `read_openclaw_workspace_memory()`
-- 数据源标识：显示 "OpenClaw 工作区" 或 "OpenClaw workspace"
-- 描述改为 "Agent 的工作区记忆文件"
+**不变量**：只读、内容脱敏、不暴露绝对路径、不改 Hermes 文件。
 
 ### 4.2 TASK-033C：双源分区显示（P1）
 
