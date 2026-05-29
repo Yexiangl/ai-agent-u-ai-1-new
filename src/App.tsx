@@ -33,6 +33,7 @@ import {
   Sun,
   Trash2,
   Upload,
+  ExternalLink,
 } from "lucide-react";
 import { listModels, type ChatMessage } from "@/lib/api";
 import { DEFAULT_CONFIG, type AppConfig } from "@/lib/config";
@@ -1518,10 +1519,86 @@ function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelCo
         </div>
       )}
 
-      {/* 4. Diagnostic entry (lightweight) */}
-      <div className="flex items-center gap-3">
-        <button onClick={() => setShowAdvanced(true)} className="text-xs text-muted-foreground underline-offset-2 hover:underline">高级诊断</button>
-      </div>
+      {/* 4. Local service diagnostics (TASK-034B) */}
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <CardTitle>本地服务诊断</CardTitle>
+              <CardDescription>检查 AI 对话所需的 OpenClaw 本地服务状态。</CardDescription>
+            </div>
+            <Button variant="outline" size="sm" disabled={refreshing} onClick={refreshAll}>
+              {refreshing && <Loader2 className="h-4 w-4 animate-spin" />}<RefreshCcw className="h-4 w-4" />重新检查
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className={cn("grid gap-3 sm:grid-cols-2", "text-sm")}>
+            <div className="flex items-center gap-2">
+              <span className={cn("h-2 w-2 rounded-full", ocReady ? "bg-emerald-500" : ocChecked ? "bg-amber-500" : "bg-slate-400")} />
+              <span className="text-muted-foreground">本地服务</span>
+              <span className="font-medium">{ocReady ? "运行中" : ocChecked ? "未运行" : "检测中"}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-muted-foreground">密钥状态</span>
+              <span className={cn("font-medium", ocConfig?.gatewayTokenPresent ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400")}>
+                {ocConfig?.gatewayTokenPresent ? "已配置" : "未配置"}
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-muted-foreground">模型接口</span>
+              <span className="font-medium">{ocModels.length > 0 ? "正常" : "异常"}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-muted-foreground">当前模型</span>
+              <span className="font-medium">{displayModel}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-muted-foreground">对话接口</span>
+              <span className={cn("font-medium", ocReady ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground")}>
+                {ocReady ? "正常" : ocChecked ? "异常" : "待检测"}
+              </span>
+            </div>
+            {ocChecked && (
+              <div className="flex items-center gap-2">
+                <span className="text-muted-foreground">最近检查</span>
+                <span className="font-medium text-muted-foreground">{timeAgo(Date.now() / 1000 - 1) || "刚刚"}</span>
+              </div>
+            )}
+          </div>
+
+          {/* Status message / fix suggestion */}
+          {ocChecked && !ocReady && (
+            <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-3 text-xs space-y-1">
+              {!ocConfig?.configExists && (
+                <p className="text-amber-600 dark:text-amber-400">未找到 OpenClaw 配置文件。请在终端运行 <code className="rounded bg-muted px-1 font-mono text-[11px]">openclaw gateway start</code> 初始化本地服务，然后点击重新检查。</p>
+              )}
+              {ocConfig?.configExists && !ocReady && (
+                <p className="text-amber-600 dark:text-amber-400">本地服务未运行。请在终端运行 <code className="rounded bg-muted px-1 font-mono text-[11px]">openclaw gateway start</code>，然后点击重新检查。</p>
+              )}
+              {ocConfig?.configExists && !ocConfig.gatewayTokenPresent && (
+                <p className="text-amber-600 dark:text-amber-400">密钥未配置。请在模型配置中保存模型访问密钥。</p>
+              )}
+              {ocConfig?.configExists && ocReady && !ocConfig.httpChatCompletionsEnabled && (
+                <p className="text-amber-600 dark:text-amber-400">HTTP 对话接口未启用。请打开控制台检查 Gateway 配置。</p>
+              )}
+            </div>
+          )}
+          {ocReady && ocConfig?.gatewayTokenPresent && (
+            <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-2 text-xs text-emerald-700 dark:text-emerald-400">
+              本地服务已连接，AI 对话可用。
+            </div>
+          )}
+
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" size="sm" onClick={() => window.open("http://127.0.0.1:18789/", "_blank")}>
+              <ExternalLink className="h-4 w-4" />打开 OpenClaw 控制台
+            </Button>
+            <button onClick={() => setShowAdvanced(true)} className="text-xs text-muted-foreground underline-offset-2 hover:underline">高级诊断</button>
+          </div>
+          <p className="text-[10px] text-muted-foreground">控制台仅打开本机地址，请勿暴露到公网。</p>
+        </CardContent>
+      </Card>
 
       {/* Diagnostic popup */}
       {showAdvanced && (
