@@ -3627,7 +3627,9 @@ function SkillsPage({ config, updateConfig, setActive, setChatDraft, setPendingN
                       <CardTitle className="text-sm">{displayName}</CardTitle>
                       <Badge tone="success">已安装</Badge>
                     </div>
-                    <CardDescription className="text-xs text-muted-foreground">原生名称：<code className="rounded bg-muted/50 px-1 font-mono text-[10px]">{nativeName}</code></CardDescription>
+                    <CardDescription className="text-xs text-muted-foreground">
+                    <span className="text-muted-foreground/70">原生名称：</span><code className="rounded bg-muted/50 px-1 font-mono text-[10px]">{nativeName}</code>
+                  </CardDescription>
                     {installedAt && <div className="text-[10px] text-muted-foreground/70">安装时间：{installedAt}</div>}
                   </CardHeader>
                   <CardContent className="flex-1 space-y-2 pt-0">
@@ -3636,7 +3638,7 @@ function SkillsPage({ config, updateConfig, setActive, setChatDraft, setPendingN
                       <Badge tone={kind === "skill" ? "info" : "warning"}>{kind === "skill" ? "工作流" : "插件"}</Badge>
                       {risk !== "unknown" && <Badge tone={riskTone(risk)}>{riskLabel(risk)}</Badge>}
                     </div>
-                    {installCmd && <div className="text-[10px] text-muted-foreground truncate">安装命令：<code className="rounded bg-muted/50 px-1 font-mono text-[10px]">{installCmd}</code></div>}
+                    {installCmd && <div className="text-[10px] text-muted-foreground/60 truncate">安装命令：<code className="rounded bg-muted/40 px-1 font-mono text-[10px]">{installCmd}</code></div>}
                     <div className="pt-1">
                       <Button size="sm" variant="outline" disabled={installingId === rec.catalogId}
                         className="text-xs" onClick={() => handleUninstall(rec.catalogId!, kind, displayName, nativeName, source)}>
@@ -3681,10 +3683,6 @@ function SkillsPage({ config, updateConfig, setActive, setChatDraft, setPendingN
                 <CardDescription className="line-clamp-2 text-xs">{item.desc}</CardDescription>
               </CardHeader>
               <CardContent className="flex-1 space-y-2 pt-0">
-                <div className="space-y-0.5 text-[11px]">
-                  <div className="text-muted-foreground">原生名称：<code className="rounded bg-muted/50 px-1 font-mono text-[10px]">{item.nativeName}</code></div>
-                  <div className="text-muted-foreground truncate">安装口令：<code className="rounded bg-muted/50 px-1 font-mono text-[10px]">{item.installCommand}</code></div>
-                </div>
                 <div className="flex flex-wrap gap-1.5">
                   <Badge tone="info">{item.category}</Badge>
                   <Badge tone={item.source === "clawhub" ? "info" : item.source === "openclaw" ? "info" : "muted"}>
@@ -3698,6 +3696,13 @@ function SkillsPage({ config, updateConfig, setActive, setChatDraft, setPendingN
                 </div>
                 {item.perms.length > 0 && <p className="text-[11px] text-muted-foreground">权限：{item.perms.map(permLabel).join("、")}</p>}
                 {item.risk === "high" && <p className="text-[10px] text-rose-600 dark:text-rose-400">安装前需二次确认</p>}
+                <details className="text-[10px] text-muted-foreground/70">
+                  <summary className="cursor-pointer hover:text-muted-foreground">安装详情</summary>
+                  <div className="mt-1 space-y-0.5 pl-1">
+                    <div>原生名称：<code className="rounded bg-muted/50 px-1 font-mono text-[10px]">{item.nativeName}</code></div>
+                    <div className="truncate">安装命令：<code className="rounded bg-muted/50 px-1 font-mono text-[10px]">{item.installCommand}</code></div>
+                  </div>
+                </details>
                 <div className="flex gap-2 pt-1">
                   {installedIds.has(item.id) ? (
                     <Button size="sm" variant="outline" disabled={installingId === item.id}
