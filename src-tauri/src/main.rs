@@ -2611,8 +2611,8 @@ fn apply_openclaw_model_provider_config(token: String, model_preset: String) -> 
     cfg["models"]["providers"][MODEL_PROXY_PROVIDER_ID] = serde_json::json!({
         "baseUrl": MODEL_PROXY_BASE_URL, "apiKey": token, "api": "openai-completions",
         "models": [
-            { "id": "deepseek-v4-flash" },
-            { "id": "deepseek-v4-pro" },
+            { "id": "deepseek-v4-flash", "name": "DeepSeek V4 Flash" },
+            { "id": "deepseek-v4-pro", "name": "DeepSeek V4 Pro" },
         ],
     });
     if cfg.get("agents").is_none() { cfg["agents"] = serde_json::json!({}); }
