@@ -1612,12 +1612,12 @@ function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelCo
           )}
 
           <div className="flex flex-wrap gap-2">
-            <Button variant="outline" size="sm" onClick={() => { invoke("open_url", { url: "http://127.0.0.1:18789/" }).catch(() => { /* ignore */ }); }}>
+            <Button variant="outline" size="sm" onClick={() => { invoke("open_openclaw_dashboard").catch(() => { /* toast placeholder */ }); }}>
               <ExternalLink className="h-4 w-4" />打开 OpenClaw 控制台
             </Button>
             <button onClick={() => setShowAdvanced(true)} className="text-xs text-muted-foreground underline-offset-2 hover:underline">高级诊断</button>
           </div>
-          <p className="text-[10px] text-muted-foreground">控制台仅打开本机地址，请勿暴露到公网。</p>
+          <p className="text-[10px] text-muted-foreground">使用 OpenClaw 官方方式打开本机控制台，可处理本机认证。</p>
         </CardContent>
       </Card>
 
