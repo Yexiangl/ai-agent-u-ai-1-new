@@ -21,6 +21,7 @@ import {
   PackageOpen,
   Pencil,
   Pin,
+  Play,
   Plus,
   RefreshCcw,
   RotateCcw,
@@ -1187,6 +1188,7 @@ function ReasoningEffortControl({ hermesModelConfig, setHermesModelConfig, confi
 function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelConfig, setHermesModelConfig, refreshHermesCli, refreshHermesApi, setActive, chatState }: { config: AppConfig; updateConfig: (next: AppConfig) => Promise<void>; hermesCli: HermesStatus | null; hermesApi: HermesApiServerStatus | null; hermesModelConfig: HermesModelConfig | null; setHermesModelConfig: (value: HermesModelConfig | null) => void; refreshHermesCli: () => Promise<HermesStatus>; refreshHermesApi: () => Promise<HermesApiServerStatus>; setActive: (id: RouteId) => void; chatState: ChatPageState }) {
   const displayModel = formatDisplayModel(chatState.ocPrimaryModel) || "需要检查";
   const [refreshing, setRefreshing] = useState(false);
+  const [startingGateway, setStartingGateway] = useState(false);
   const [showKey, setShowKey] = useState(false);
   const [testing, setTesting] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
@@ -1602,7 +1604,20 @@ function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelCo
                 <p className="text-amber-600 dark:text-amber-400">未找到 OpenClaw 配置文件。请在终端运行 <code className="rounded bg-muted px-1 font-mono text-[11px]">openclaw gateway start</code> 初始化本地服务，然后点击重新检查。</p>
               )}
               {ocConfig?.configExists && !ocReady && (
-                <p className="text-amber-600 dark:text-amber-400">本地服务未运行。请在终端运行 <code className="rounded bg-muted px-1 font-mono text-[11px]">openclaw gateway start</code>，然后点击重新检查。</p>
+                <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-3 text-xs space-y-2">
+                  <p className="text-amber-600 dark:text-amber-400">本地服务未运行。请在终端运行 <code className="rounded bg-muted px-1 font-mono text-[11px]">openclaw gateway start</code>，或点击下方按钮启动。</p>
+                  <Button size="sm" disabled={startingGateway} onClick={async () => {
+                    setStartingGateway(true);
+                    try {
+                      await invoke("start_openclaw_gateway");
+                      await refreshAll();
+                    } catch { /* fall through */ }
+                    setStartingGateway(false);
+                  }}>
+                    {startingGateway ? <><Loader2 className="h-3.5 w-3.5 animate-spin" />正在启动...</> : <><Play className="h-3.5 w-3.5" />启动本地服务</>}
+                  </Button>
+                  <p className="text-[10px] text-muted-foreground">启动后会自动重新检查本地服务状态。</p>
+                </div>
               )}
               {ocConfig?.configExists && !ocConfig.gatewayTokenPresent && (
                 <p className="text-amber-600 dark:text-amber-400">密钥未配置。请在模型配置中保存模型访问密钥。</p>
