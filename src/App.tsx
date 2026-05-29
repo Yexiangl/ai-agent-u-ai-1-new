@@ -1402,7 +1402,7 @@ function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelCo
                   {!ocReady && <p>请在终端运行 openclaw gateway start 启动本地服务，完成后重新检查。</p>}
                 </>
               ) : (
-                <><p className="font-medium">需要检查</p><p>未找到配置文件。请确认 OpenClaw 已安装并初始化。</p></>
+                <><p className="font-medium">需要检查</p><p>未找到本地配置文件。请确认 AI 助手已安装并初始化。</p></>
               )}
             </div>
           )}
@@ -1610,7 +1610,7 @@ function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelCo
           <div className="flex items-center justify-between gap-3">
             <div>
               <CardTitle>本地服务诊断</CardTitle>
-              <CardDescription>检查 AI 对话所需的 OpenClaw 本地服务状态。</CardDescription>
+              <CardDescription>检查 AI 对话所需的本地服务状态。</CardDescription>
             </div>
             <Button variant="outline" size="sm" disabled={refreshing} onClick={refreshAll}>
               {refreshing && <Loader2 className="h-4 w-4 animate-spin" />}<RefreshCcw className="h-4 w-4" />重新检查
@@ -1656,11 +1656,11 @@ function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelCo
           {ocChecked && !ocReady && (
             <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-3 text-xs space-y-1">
               {!ocConfig?.configExists && (
-                <p className="text-amber-600 dark:text-amber-400">未找到 OpenClaw 配置文件。请在终端运行 <code className="rounded bg-muted px-1 font-mono text-[11px]">openclaw gateway start</code> 初始化本地服务，然后点击重新检查。</p>
+                <p className="text-amber-600 dark:text-amber-400">未找到本地配置文件。请点击下方"启动本地服务"按钮初始化。</p>
               )}
               {ocConfig?.configExists && !ocReady && (
                 <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-3 text-xs space-y-2">
-                  <p className="text-amber-600 dark:text-amber-400">本地服务未运行。请在终端运行 <code className="rounded bg-muted px-1 font-mono text-[11px]">openclaw gateway start</code>，或点击下方按钮启动。</p>
+                  <p className="text-amber-600 dark:text-amber-400">本地服务未运行。请点击下方按钮启动，或稍后重新检查。</p>
                   <Button size="sm" disabled={startingGateway} onClick={async () => {
                     setStartingGateway(true);
                     setGatewayStartError("");
@@ -1668,7 +1668,7 @@ function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelCo
                       await invoke("start_openclaw_gateway");
                       await refreshAll();
                     } catch {
-                      setGatewayStartError("无法启动本地服务，请确认 OpenClaw 已安装，或在终端运行 openclaw gateway start。");
+                      setGatewayStartError("无法启动本地服务，请确认 AI 助手已安装，或点击重试。");
                     }
                     setStartingGateway(false);
                   }}>
@@ -1687,7 +1687,7 @@ function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelCo
                 <p className="text-amber-600 dark:text-amber-400">密钥未配置。请在模型配置中保存模型访问密钥。</p>
               )}
               {ocConfig?.configExists && ocReady && !ocConfig.httpChatCompletionsEnabled && (
-                <p className="text-amber-600 dark:text-amber-400">HTTP 对话接口未启用。请打开控制台检查 Gateway 配置。</p>
+                <p className="text-amber-600 dark:text-amber-400">本地连接未启用。请打开控制台检查配置。</p>
               )}
             </div>
           )}
@@ -1703,7 +1703,7 @@ function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelCo
             </Button>
             <button onClick={() => setShowAdvanced(true)} className="text-xs text-muted-foreground underline-offset-2 hover:underline">高级诊断</button>
           </div>
-          <p className="text-[10px] text-muted-foreground">使用 OpenClaw 官方方式打开本机控制台，可处理本机认证。</p>
+          <p className="text-[10px] text-muted-foreground">打开本机控制台，可查看和管理本地服务状态。</p>
         </CardContent>
       </Card>
 
@@ -3202,7 +3202,7 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
                     )}
                     {message.role === "assistant" && (
                       <div className="mt-1.5 flex flex-wrap items-center gap-2 pl-1 text-[10px] text-muted-foreground/40">
-                        <span>{message.source || (USE_OPENCLAW_BACKEND ? "OpenClaw Agent" : "Hermes")}</span>
+                        <span>{message.source === "OpenClaw Agent" ? "AI Agent" : message.source === "Hermes Agent" ? "Hermes" : (message.source || (USE_OPENCLAW_BACKEND ? "AI Agent" : "Hermes"))}</span>
                         {message.modelName && <span>{formatDisplayModel(message.modelName)}</span>}
                         {compactElapsed && <span>{compactElapsed}</span>}
                         <div className="flex items-center gap-0.5 opacity-40 transition-opacity group-hover:opacity-100">
@@ -4264,7 +4264,7 @@ function MemoryPage() {
             ) : (
               <div className="rounded-xl border bg-muted/30 p-4 text-sm text-muted-foreground">
                 {memory && memory.available === false
-                  ? "OpenClaw 工作区不可用。请确认已安装并初始化 OpenClaw。"
+                  ? "OpenClaw 工作区不可用。请确认已安装并初始化 AI 助手。"
                   : "选择左侧文件查看详细内容。"}
               </div>
             )}
@@ -4570,7 +4570,7 @@ function TutorialsPage({ config }: { config: AppConfig }) {
 
 function AboutPage({ config, updateConfig }: { config: AppConfig; updateConfig: (next: AppConfig) => Promise<void> }) {
   const [confirm, setConfirm] = useState(false);
-  return <div className="space-y-4"><Card><CardHeader><CardTitle>AI Agent 工作台 U盘版</CardTitle><CardDescription>AI Agent Workspace v0.1.1</CardDescription></CardHeader><CardContent className="grid gap-3 text-sm"><Metric label="Agent 服务" value="本机 OpenClaw" tone="info" /><Metric label="对话模型" value="OpenClaw Agent" tone="success" /></CardContent></Card><Card><CardHeader><CardTitle>使用步骤</CardTitle><CardDescription>购买 U盘会赠送初始额度，用完后可联系续费。</CardDescription></CardHeader><CardContent className="space-y-3 text-sm text-muted-foreground">{["插入 U盘", "打开 AI Agent Workspace", "在 AI 助手页配置密钥和模型", "确认本地服务运行中", "开始和 AI Agent 对话"].map((step, index) => <div key={step} className="flex gap-3"><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-primary text-xs text-primary-foreground">{index + 1}</span>{step}</div>)}</CardContent></Card><Card><CardContent className="pt-4"><button onClick={() => setConfirm(true)} className="text-[11px] text-muted-foreground underline-offset-2 hover:underline">清除本地配置（重置密钥和设置）</button></CardContent></Card><ConfirmDialog open={confirm} onClose={() => setConfirm(false)} title="确认清除" description="此操作会清除本地保存的密钥和配置，不会影响助手记忆文件。" confirmLabel="确认清除" onConfirm={() => clearConfig().then(updateConfig)} /></div>;
+  return <div className="space-y-4"><Card><CardHeader><CardTitle>AI Agent 工作台 U盘版</CardTitle><CardDescription>AI Agent Workspace v0.1.1</CardDescription></CardHeader><CardContent className="grid gap-3 text-sm"><Metric label="本地服务" value="AI 助手服务" tone="info" /><Metric label="对话模型" value="OpenClaw Agent" tone="success" /></CardContent></Card><Card><CardHeader><CardTitle>使用步骤</CardTitle><CardDescription>购买 U盘会赠送初始额度，用完后可联系续费。</CardDescription></CardHeader><CardContent className="space-y-3 text-sm text-muted-foreground">{["插入 U盘", "打开 AI Agent Workspace", "在 AI 助手页配置密钥和模型", "确认本地服务运行中", "开始和 AI Agent 对话"].map((step, index) => <div key={step} className="flex gap-3"><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-primary text-xs text-primary-foreground">{index + 1}</span>{step}</div>)}</CardContent></Card><Card><CardContent className="pt-4"><button onClick={() => setConfirm(true)} className="text-[11px] text-muted-foreground underline-offset-2 hover:underline">清除本地配置（重置密钥和设置）</button></CardContent></Card><ConfirmDialog open={confirm} onClose={() => setConfirm(false)} title="确认清除" description="此操作会清除本地保存的密钥和配置，不会影响助手记忆文件。" confirmLabel="确认清除" onConfirm={() => clearConfig().then(updateConfig)} /></div>;
 }
 
 function PhaseBadge({ phase }: { phase: ChatPhase }) {
