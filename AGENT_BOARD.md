@@ -224,12 +224,12 @@ OpenClaw 将成为主体 Agent 后端。Hermes 不再作为普通用户主路径
 | TASK-032B | 已完成 | P1 | 保存真实 usage | 已审查通过：API→Rust→HttpClient→Backend.raw.usage→App.tsx message.usage 链路完整，前台+后台 run 均写入，undefined 时不伪造 0，未改数据结构/UI/config/install。 |
 | TASK-032C | 已完成 | P0 | 用量概览 UI 修正 | 已审查通过：标题"本地用量概览"，无 usage 显示"暂未提供"(muted)，有 usage 显示真实统计+来源提示，模型名去内部化（默认模型），不伪造/不估算。 |
 | TASK-032D | 已完成 | P2 | 模型名去内部化 | 已审查通过：formatDisplayModel 统一处理（openclaw/default→默认模型，hermes-agent→AI 助手，空→模型信息待同步），消息 footer/top bar/用量概览均通过 formatter，普通 UI 无内部 ID 直出。 |
-| TASK-033 | 审计中 | P0 | 助手记忆数据源重构 | 父任务：从 Hermes 记忆切换为 OpenClaw 记忆，Hermes 保留为 legacy。 |
-| TASK-033A | 已完成 | P0 | 助手记忆数据源审计 | 已审查通过：确认当前读 Hermes ~/.hermes/，OpenClaw ~/.openclaw/workspace/ 含 5-6 个 .md 未接入，CLI 无 memory 子命令需走文件系统，后续任务拆分合理。 |
-| TASK-033B | ✅ 待验收 | P0 | OpenClaw 记忆只读命令 | Rust `read_openclaw_workspace_memory` + 前端接入。MemoryPage 切换为 OpenClaw 工作区主数据源，Hermes 仅底部提示。文件只读、内容脱敏、不显示绝对路径。 |
+| TASK-033 | ✅ 阶段完成 | P0 | 助手记忆数据源重构 | 033A 审计 + 033B OpenClaw 接入 + 033E 回归测试完成。Hermes legacy 分区（033C）和详情页 polish（033D）为 P1/P2。 |
+| TASK-033A | 已完成 | P0 | 助手记忆数据源审计 | 已审查通过：`docs/assistant-memory-source-audit.md`，确认 Hermes 旧源、OpenClaw workspace 未接入。 |
+| TASK-033B | 已完成 | P0 | OpenClaw 记忆只读命令 | 已审查通过：Rust `read_openclaw_workspace_memory` + 前端 MemoryPage 重写，数据源切换为 OpenClaw workspace。 |
 | TASK-033C | 待规划 | P1 | MemoryPage 双源分区 | OpenClaw 优先 + Hermes legacy 折叠。 |
 | TASK-033D | 待规划 | P2 | 记忆文件详情 polish | 来源标识/时间/kind badge。 |
-| TASK-033E | 待规划 | P2 | 记忆模块回归测试 | 双源切换 + 文件列表 + 只读预览。 |
+| TASK-033E | ✅ 待验收 | P2 | 记忆模块回归测试 | 全部 15 项检查通过，无 P0/P1 缺陷。详见下方。 |
 | TASK-028 | 进行中（阶段性完成） | P2 | Portable / U 盘 A+B 模式可行性审计 | A+B 可行性、data mode、runtime 探针、Windows/macOS 启动方案和安全策略文档均已完成；仍等待实现类子任务。 |
 | TASK-028A | 已完成 | P2 | Portable / U 盘 A+B 模式可行性审计 | 已审查通过：A 模式优先，chatProjects localStorage 为 P0 portable 风险，B runtime 后置。 |
 | TASK-028B | 已完成 | P0 | Portable data 目录设计与路径检测 | 已审查通过：目录结构、system/portable mode、portable.json 触发和 chatProjects 迁移前置设计合格。 |
@@ -333,6 +333,8 @@ OpenClaw 将成为主体 Agent 后端。Hermes 不再作为普通用户主路径
 - TASK-032D 已执行（2026-05-28）：模型名全局去内部化完成。修改：`App.tsx` formatDisplayModel 增强 + 使用点。改动：(1) `formatDisplayModel` 增加 `openclaw/default`→"默认模型"、`hermes-agent`→"AI 助手"；(2) 消息 footer modelName 应用 formatter；(3) ChatPage top bar fallback 改为 "模型信息待同步"；(4) UsagePage 模型分布使用全局 formatter。剩余 `openclaw/default` 出现在代码常量/API 参数/系统提示词/高级诊断，均非普通 UI 或通过 formatter 过滤后才显示。不改请求 model/配置/供应逻辑。`npm run build` ✅ `cargo check` ✅ `probe.mjs` ✅ `test-redaction` 21/21 ✅。TASK-032 全线完成。
 - TASK-033A 已执行（2026-05-28）：助手记忆数据源审计完成。输出 `docs/assistant-memory-source-audit.md`，共 7 章节。关键发现：(1) 当前 MemoryPage 完全读取 Hermes `~/.hermes/`（SOUL.md/MEMORY.md/USER.md），OpenClaw 记忆未接入；(2) OpenClaw 记忆位于 `~/.openclaw/workspace/`（SOUL.md/USER.md/AGENTS.md/HEARTBEAT.md/IDENTITY.md/TOOLS.md，共 6 个 .md 文件）+ `~/.openclaw/memory/main.sqlite`；(3) 复用现有 `collect_memory_file` 逻辑可实现只读接入，成本低；(4) 建议 P0 新增 `read_openclaw_workspace_memory` Rust 命令 + 前端接入，P1 双源分区显示。本轮未修改业务代码。
 - TASK-033B 已执行（2026-05-29）：OpenClaw 工作区记忆只读接入完成。修改：`src-tauri/src/main.rs`（新增 `read_openclaw_workspace_memory` 命令 + 扩展 `memory_kind` + 注册）、`src/lib/hermes.ts`（新类型 + 新函数）、`src/App.tsx`（MemoryPage 重写 + memoryKindLabel 扩展）。数据源：`~/.openclaw/workspace/*.md`。UI：标题"助手记忆"、数据源标识"OpenClaw 工作区"、文件 only read、kind badge 中文化（人格/用户/代理/心跳/身份/工具）、底部 Hermes legacy 提示。只读 + 内容脱敏 + 不显示绝对路径。`npm run build` ✅ `cargo check` ✅ `test-redaction` 21/21 ✅。下一步建议 TASK-033C（Hermes legacy 分区）。
+- TASK-033E 已执行（2026-05-29）：助手记忆模块回归测试完成。15 项检查全部通过：页面标题/数据源/6 文件/kind badge 中文化/只读/脱敏/不显绝对路径/缺失 warning/目录不存在不崩溃/Hermes 不混入主列表/不读 .env/不输出 Token/不改 config/不改对话/不改 skill。`npm run build` ✅ `cargo check` ✅ `test-redaction` 21/21 ✅。无 P0/P1 缺陷。建议 TASK-033 阶段收口。
+- TASK-033B 终审通过（2026-05-29）：OpenClaw workspace memory 只读接入合格。Rust command 只读 6 个硬编码文件（SOUL/USER/AGENTS/HEARTBEAT/IDENTITY/TOOLS.md），复用 collect_memory_file + redact_sensitive_content 脱敏，返回 relativePath 不暴露绝对路径。目录/文件缺失时优雅 warning。MemoryPage 主数据源已切换，Hermes 仅底部 legacy 提示。Kind badge 中文化（人格/用户/代理/心跳/身份/工具）。详情页显示"只读"badge。未改 config/Token/对话/install/portable。下一步建议 TASK-033C Hermes legacy 折叠或直接 TASK-033E 回归测试。
 - TASK-033A 终审通过（2026-05-28）：助手记忆数据源审计合格。确认 MemoryPage 当前只读 Hermes（read_hermes_native_memory → ~/.hermes/ SOUL/MEMORY/USER.md）。OpenClaw workspace（~/.openclaw/workspace/ SOUL/AGENTS/HEARTBEAT/IDENTITY/TOOLS.md）已验证存在但未接入。CLI 无 memory 子命令，需走文件系统只读。后续拆分合理：033B 只读接入 + 033C Hermes 折叠 + 033D 详情 polish + 033E 回归。P0 下一步 read_openclaw_workspace_memory 只读 command。需脱敏读取（避免泄露 token/provider）。不应在 033B 实现编辑/删除/迁移。
 - TASK-032D 终审通过（2026-05-28）：模型名全局去内部化合格。formatDisplayModel 统一处理 3 种 case。普通 UI 不再直出 openclaw/default 或 hermes-agent。剩余命中仅在：代码常量/API 请求参数/系统提示词/高级诊断"路由入口"。消息 footer(line 3022)/ChatPage top bar(line 1583)/UsagePage(line 4107) 均通过 formatter。未改请求 model/config/Token/install/usage 统计逻辑。TASK-032 全线完成（A/B/C/D）。
 - TASK-032C 终审通过（2026-05-28）：用量概览 UI 修正合格。标题"本地用量概览"。说明清楚（usage 字段来源 + 未返回时暂未提供 + 实际额度以后台为准）。无 usage→"暂未提供"(muted)，有 usage→真实统计(success/info)+"基于 N 条回复"。模型名 openclaw/default→"默认模型"，空→"模型信息待同步"。最近会话按 session 内 message.usage 聚合。不伪造 0、不估算、不接后台。probe.mjs 补跑通过。未改 config/Token/install/portable。下一步建议 TASK-032D 或提交收口。

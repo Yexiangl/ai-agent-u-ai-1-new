@@ -198,3 +198,13 @@
 - [ ] 模型分布中 openclaw/default → "默认模型"
 - [ ] 最近会话 Token 列按真实 usage 判定
 - [ ] 旧会话兼容，无 usage 不报错
+
+### 助手记忆 (TASK-033B/E)
+
+- [ ] 页面标题为"助手记忆"
+- [ ] 数据源显示"OpenClaw 工作区"
+- [ ] 6 个文件：SOUL/USER/AGENTS/HEARTBEAT/IDENTITY/TOOLS
+- [ ] kind badge 中文化：人格/用户/代理/心跳/身份/工具
+- [ ] 只读查看，内容脱敏，不显示绝对路径
+- [ ] 缺失文件 warning，目录不存在时不崩溃
+- [ ] Hermes 仅底部 legacy 提示，不混入主列表

@@ -172,9 +172,34 @@ MemoryPage (App.tsx:3813)
 
 **目标**：文件预览页显示文件来源、最后修改时间、kind badge。
 
-### 4.4 TASK-033E：记忆模块回归测试（P2）
+### 4.5 TASK-033E：记忆模块回归测试 ✅ 已完成（2026-05-29）
 
-**目标**：验证双源切换、文件列表、只读预览。
+**验证清单**：
+
+| 检查项 | 结果 |
+|---|---|
+| 页面标题仍为"助手记忆" | ✅ |
+| 主数据源显示为"OpenClaw 工作区" | ✅ |
+| 6 个 memory 文件正确列出 | ✅ SOUL/USER/AGENTS/HEARTBEAT/IDENTITY/TOOLS |
+| kind badge 中文化 | ✅ 人格/用户/代理/心跳/身份/工具 |
+| 文件详情只读 | ✅ Badge "只读" |
+| 内容脱敏 | ✅ `redact_sensitive_content` |
+| 不显示绝对路径 | ✅ 仅显示 `relativePath` |
+| 缺失文件 warning，不崩溃 | ✅ warnings 数组 |
+| 目录不存在时 available: false | ✅ |
+| Hermes 不混入主列表 | ✅ 仅底部 legacy 提示 |
+| 不读取 .env | ✅ |
+| 不输出 Token | ✅ |
+| 不改 OpenClaw config | ✅ |
+| 不改 AI 对话逻辑 | ✅ |
+| 不改 Skill 安装/卸载 | ✅ |
+
+**验证命令**：
+- `npm run build` ✅
+- `cargo check` ✅（3 个命名风格警告，已登记）
+- `test-redaction` 21/21 ✅
+
+**结论**：TASK-033B 实现稳定，无 P0/P1 缺陷。TASK-033 阶段收口可提。
 
 ---
 
