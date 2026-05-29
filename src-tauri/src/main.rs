@@ -2588,11 +2588,13 @@ fn apply_openclaw_model_provider_config(token: String, model_preset: String) -> 
     let primary_ref = format!("{}/{}", MODEL_PROXY_PROVIDER_ID, model_id);
     let Some(home) = home_dir() else { return Err("无法定位用户主目录".to_string()); };
     let config_path = home.join(".openclaw").join("openclaw.json");
+    let mut bak_path: Option<std::path::PathBuf> = None;
     if config_path.exists() {
         let bak = home.join(".openclaw").join(format!("openclaw.json.bak-{}", chrono_timestamp()));
         if let Err(e) = fs::copy(&config_path, &bak) {
             return Err(format!("OpenClaw 配置备份失败，已取消写入。请检查文件权限: {}", e));
         }
+        bak_path = Some(bak);
     }
     let mut cfg: serde_json::Value = if config_path.exists() {
         let content = fs::read_to_string(&config_path).map_err(|e| e.to_string())?;
@@ -2615,7 +2617,47 @@ fn apply_openclaw_model_provider_config(token: String, model_preset: String) -> 
     cfg["gateway"]["http"]["endpoints"]["chatCompletions"]["enabled"] = serde_json::Value::Bool(true);
     let content = serde_json::to_string_pretty(&cfg).map_err(|e| e.to_string())?;
     fs::write(&config_path, &content).map_err(|e| e.to_string())?;
-    Ok(serde_json::json!({ "success": true, "appliedPreset": model_preset, "appliedModelId": model_id, "defaultModelRef": primary_ref, "httpChatCompletionsEnabled": true, "needsRestart": true }))
+
+    // TASK-038D: Set permissions 0o600 after write
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Err(e) = fs::set_permissions(&config_path, fs::Permissions::from_mode(0o600)) {
+            return Err(format!("无法设置配置文件权限: {}", e));
+        }
+    }
+
+    // TASK-038D: Validate config after write
+    let validate = std::process::Command::new("openclaw")
+        .arg("config").arg("validate")
+        .output();
+    let validated = validate.as_ref().map(|o| o.status.success()).unwrap_or(false);
+    if !validated {
+        // Rollback: restore from backup
+        if config_path.exists() {
+            let _ = fs::remove_file(&config_path);
+        }
+        if let Some(ref bak) = bak_path {
+            if let Err(_) = fs::copy(bak, &config_path) {
+                return Err("配置校验失败，且自动恢复失败，请联系支持处理。".to_string());
+            }
+            // Restore backup permissions if possible
+            #[cfg(unix)]
+            {
+                if let Ok(meta) = fs::metadata(bak) {
+                    let _ = fs::set_permissions(&config_path, meta.permissions());
+                }
+            }
+        } else {
+            // No backup to restore from — remove the newly written config
+            if config_path.exists() {
+                let _ = fs::remove_file(&config_path);
+            }
+        }
+        return Err("配置校验失败，已恢复原配置。请检查模型访问密钥或稍后重试。".to_string());
+    }
+
+    Ok(serde_json::json!({ "success": true, "appliedPreset": model_preset, "appliedModelId": model_id, "defaultModelRef": primary_ref, "httpChatCompletionsEnabled": true, "needsRestart": true, "validated": true, "backupCreated": true }))
 }
 
 // TASK-027C-C: Read-only list of installed skills/plugins via OpenClaw CLI
