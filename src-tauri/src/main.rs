@@ -2566,7 +2566,12 @@ fn read_openclaw_model_provider_summary() -> Result<serde_json::Value, String> {
     let proxy = providers.and_then(|p| p.get(MODEL_PROXY_PROVIDER_ID));
     let has_key = proxy.and_then(|p| p.get("apiKey")).and_then(|k| k.as_str()).map(|s| !s.is_empty()).unwrap_or(false);
     let default_primary = cfg.get("agents").and_then(|a| a.get("defaults")).and_then(|d| d.get("model")).and_then(|m| m.get("primary")).and_then(|v| v.as_str());
-    let models = proxy.and_then(|p| p.get("models")).and_then(|m| m.as_array()).map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect::<Vec<_>>()).unwrap_or_default();
+    let models = proxy.and_then(|p| p.get("models")).and_then(|m| m.as_array()).map(|arr| arr.iter().filter_map(|v| {
+        // Support both { "id": "..." } objects and plain string entries
+        if let Some(id) = v.as_str() { Some(id.to_string()) }
+        else if let Some(obj) = v.as_object() { obj.get("id").and_then(|id| id.as_str()).map(|s| s.to_string()) }
+        else { None }
+    }).collect::<Vec<_>>()).unwrap_or_default();
     Ok(serde_json::json!({
         "providerConfigured": proxy.is_some() && has_key && !models.is_empty(),
         "providerId": if proxy.is_some() { Some(MODEL_PROXY_PROVIDER_ID) } else { None::<&str> },
@@ -2604,7 +2609,11 @@ fn apply_openclaw_model_provider_config(token: String, model_preset: String) -> 
     if cfg.get("models").is_none() { cfg["models"] = serde_json::json!({}); }
     if cfg["models"].get("providers").is_none() { cfg["models"]["providers"] = serde_json::json!({}); }
     cfg["models"]["providers"][MODEL_PROXY_PROVIDER_ID] = serde_json::json!({
-        "baseUrl": MODEL_PROXY_BASE_URL, "apiKey": token, "api": "openai-completions", "models": ["deepseek-v4-flash", "deepseek-v4-pro"],
+        "baseUrl": MODEL_PROXY_BASE_URL, "apiKey": token, "api": "openai-completions",
+        "models": [
+            { "id": "deepseek-v4-flash" },
+            { "id": "deepseek-v4-pro" },
+        ],
     });
     if cfg.get("agents").is_none() { cfg["agents"] = serde_json::json!({}); }
     if cfg["agents"].get("defaults").is_none() { cfg["agents"]["defaults"] = serde_json::json!({}); }
