@@ -3328,7 +3328,7 @@ function SkillsPage({ config, updateConfig, setActive, setChatDraft, setPendingN
   // TASK-027C-D/E: Install/uninstall state
   const [installedIds, setInstalledIds] = useState<Set<string>>(new Set());
   const [installingId, setInstallingId] = useState<string | null>(null);
-  const [installConfirm, setInstallConfirm] = useState<{ id: string; name: string; kind: string; risk: string; perms: string[]; source: string } | null>(null);
+  const [installConfirm, setInstallConfirm] = useState<{ id: string; name: string; nativeName?: string; installCommand?: string; kind: string; risk: string; perms: string[]; source: string } | null>(null);
   const [installConfirmChecked, setInstallConfirmChecked] = useState(false);
   const [installError, setInstallError] = useState("");
 
@@ -3442,6 +3442,8 @@ function SkillsPage({ config, updateConfig, setActive, setChatDraft, setPendingN
                 <Badge tone={riskTone(installConfirm.risk)}>{riskLabel(installConfirm.risk)}</Badge>
               </div>
               {installConfirm.perms.length > 0 && <p className="text-xs text-muted-foreground">权限：{installConfirm.perms.map(permLabel).join("、")}</p>}
+              {installConfirm.nativeName && <p className="text-xs text-muted-foreground">原生名称：<code className="rounded bg-muted/50 px-1 font-mono text-[11px]">{installConfirm.nativeName}</code></p>}
+              {installConfirm.installCommand && <p className="text-xs text-muted-foreground truncate">安装口令：<code className="rounded bg-muted/50 px-1 font-mono text-[11px]">{installConfirm.installCommand}</code></p>}
               <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-3 text-xs space-y-1">
                 <p className="font-medium text-amber-700 dark:text-amber-300">免责声明</p>
                 <p className="text-amber-600 dark:text-amber-400">第三方能力可能访问文件、联网或执行本地命令。请只安装你信任的来源。安装前请确认风险等级和权限说明。</p>
@@ -3481,15 +3483,15 @@ function SkillsPage({ config, updateConfig, setActive, setChatDraft, setPendingN
         </div>
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {[
-            { id:"ext-file-summary", name:"文件总结", desc:"自动总结文档/PDF/文本核心内容", source:"clawhub" as const, kind:"skill" as const, category:"文件处理", risk:"medium" as const, perms:["file_read"], publisher:"ClawHub", rank:1, rankGroup:"hot" as const },
-            { id:"ext-table-analyze", name:"表格分析", desc:"CSV/Excel 数据清洗和洞察提取", source:"clawhub" as const, kind:"skill" as const, category:"数据处理", risk:"medium" as const, perms:["file_read"], publisher:"ClawHub", rank:2, rankGroup:"trending" as const },
-            { id:"ext-web-research", name:"网页资料整理", desc:"搜索并汇总网页资料为结构化笔记", source:"clawhub" as const, kind:"skill" as const, category:"文件处理", risk:"medium" as const, perms:["file_read","network"], publisher:"ClawHub", rank:3, rankGroup:"hot" as const },
-            { id:"ext-github-helper", name:"GitHub 辅助", desc:"管理 Issue、PR 和代码审查摘要", source:"skillhub" as const, kind:"plugin" as const, category:"开发调试", risk:"high" as const, perms:["network","shell"], publisher:"SkillHub", rank:4, rankGroup:"high_risk" as const },
-            { id:"ext-browser-auto", name:"浏览器自动化", desc:"Playwright 网页操作和截图", source:"skillhub" as const, kind:"plugin" as const, category:"开发调试", risk:"high" as const, perms:["network","shell"], publisher:"SkillHub", rank:5, rankGroup:"high_risk" as const },
-            { id:"ext-memory-kb", name:"知识库记忆", desc:"本地向量检索和长期记忆", source:"openclaw" as const, kind:"plugin" as const, category:"文件处理", risk:"medium" as const, perms:["file_read","file_write"], publisher:"OpenClaw", rank:6, rankGroup:"trending" as const },
-            { id:"ext-data-api", name:"数据 API 查询", desc:"连接 REST/GraphQL API 获取数据", source:"clawhub" as const, kind:"skill" as const, category:"数据处理", risk:"medium" as const, perms:["network"], publisher:"ClawHub", rank:7, rankGroup:"new" as const },
-            { id:"ext-fun-fact", name:"随机冷知识", desc:"每天一条有趣的冷知识", source:"curated" as const, kind:"skill" as const, category:"娱乐摸鱼", risk:"low" as const, perms:[], publisher:"Curated", rank:8, rankGroup:"new" as const },
-            { id:"ext-countdown", name:"下班倒计时", desc:"显示距离下班的剩余时间", source:"curated" as const, kind:"skill" as const, category:"娱乐摸鱼", risk:"low" as const, perms:[], publisher:"Curated", rank:9, rankGroup:"trending" as const },
+            { id:"ext-file-summary", name:"文件总结", nativeName:"clawhub:file-summary", installCommand:"openclaw skills install clawhub:file-summary", desc:"自动总结文档/PDF/文本核心内容", source:"clawhub" as const, kind:"skill" as const, category:"文件处理", risk:"medium" as const, perms:["file_read"], publisher:"ClawHub", rank:1, rankGroup:"hot" as const },
+            { id:"ext-table-analyze", name:"表格分析", nativeName:"clawhub:table-analyze", installCommand:"openclaw skills install clawhub:table-analyze", desc:"CSV/Excel 数据清洗和洞察提取", source:"clawhub" as const, kind:"skill" as const, category:"数据处理", risk:"medium" as const, perms:["file_read"], publisher:"ClawHub", rank:2, rankGroup:"trending" as const },
+            { id:"ext-web-research", name:"网页资料整理", nativeName:"clawhub:web-research", installCommand:"openclaw skills install clawhub:web-research", desc:"搜索并汇总网页资料为结构化笔记", source:"clawhub" as const, kind:"skill" as const, category:"文件处理", risk:"medium" as const, perms:["file_read","network"], publisher:"ClawHub", rank:3, rankGroup:"hot" as const },
+            { id:"ext-github-helper", name:"GitHub 辅助", nativeName:"clawhub:github-helper", installCommand:"openclaw plugins install clawhub:github-helper", desc:"管理 Issue、PR 和代码审查摘要", source:"skillhub" as const, kind:"plugin" as const, category:"开发调试", risk:"high" as const, perms:["network","shell"], publisher:"SkillHub", rank:4, rankGroup:"high_risk" as const },
+            { id:"ext-browser-auto", name:"浏览器自动化", nativeName:"clawhub:browser-auto", installCommand:"openclaw plugins install clawhub:browser-auto", desc:"Playwright 网页操作和截图", source:"skillhub" as const, kind:"plugin" as const, category:"开发调试", risk:"high" as const, perms:["network","shell"], publisher:"SkillHub", rank:5, rankGroup:"high_risk" as const },
+            { id:"ext-memory-kb", name:"知识库记忆", nativeName:"openclaw:memory-kb", installCommand:"openclaw plugins install openclaw:memory-kb", desc:"本地向量检索和长期记忆", source:"openclaw" as const, kind:"plugin" as const, category:"文件处理", risk:"medium" as const, perms:["file_read","file_write"], publisher:"OpenClaw", rank:6, rankGroup:"trending" as const },
+            { id:"ext-data-api", name:"数据 API 查询", nativeName:"clawhub:data-api", installCommand:"openclaw skills install clawhub:data-api", desc:"连接 REST/GraphQL API 获取数据", source:"clawhub" as const, kind:"skill" as const, category:"数据处理", risk:"medium" as const, perms:["network"], publisher:"ClawHub", rank:7, rankGroup:"new" as const },
+            { id:"ext-fun-fact", name:"随机冷知识", nativeName:"clawhub:fun-fact", installCommand:"openclaw skills install clawhub:fun-fact", desc:"每天一条有趣的冷知识", source:"curated" as const, kind:"skill" as const, category:"娱乐摸鱼", risk:"low" as const, perms:[], publisher:"Curated", rank:8, rankGroup:"new" as const },
+            { id:"ext-countdown", name:"下班倒计时", nativeName:"clawhub:countdown", installCommand:"openclaw skills install clawhub:countdown", desc:"显示距离下班的剩余时间", source:"curated" as const, kind:"skill" as const, category:"娱乐摸鱼", risk:"low" as const, perms:[], publisher:"Curated", rank:9, rankGroup:"trending" as const },
           ].filter(item => rankTab === "全部" || (rankTab === "热门" && item.rankGroup === "hot") || (rankTab === "趋势" && item.rankGroup === "trending") || (rankTab === "新上架" && item.rankGroup === "new") || (rankTab === "高风险" && item.rankGroup === "high_risk"))
           .map(item => (
             <Card key={item.id} className="group flex flex-col transition-colors hover:border-primary/20">
@@ -3503,6 +3505,10 @@ function SkillsPage({ config, updateConfig, setActive, setChatDraft, setPendingN
                 <CardDescription className="line-clamp-2 text-xs">{item.desc}</CardDescription>
               </CardHeader>
               <CardContent className="flex-1 space-y-2 pt-0">
+                <div className="space-y-0.5 text-[11px]">
+                  <div className="text-muted-foreground">原生名称：<code className="rounded bg-muted/50 px-1 font-mono text-[10px]">{item.nativeName}</code></div>
+                  <div className="text-muted-foreground truncate">安装口令：<code className="rounded bg-muted/50 px-1 font-mono text-[10px]">{item.installCommand}</code></div>
+                </div>
                 <div className="flex flex-wrap gap-1.5">
                   <Badge tone="info">{item.category}</Badge>
                   <Badge tone={item.source === "clawhub" ? "info" : item.source === "skillhub" ? "warning" : item.source === "openclaw" ? "info" : "muted"}>
@@ -3524,7 +3530,7 @@ function SkillsPage({ config, updateConfig, setActive, setChatDraft, setPendingN
                     </Button>
                   ) : (
                     <Button size="sm" disabled={installingId === item.id}
-                      className="text-xs" onClick={() => setInstallConfirm({ id:item.id, name:item.name, kind:item.kind, risk:item.risk, perms:item.perms, source:item.source })}>
+                      className="text-xs" onClick={() => setInstallConfirm({ id:item.id, name:item.name, nativeName:item.nativeName, installCommand:item.installCommand, kind:item.kind, risk:item.risk, perms:item.perms, source:item.source })}>
                       {installingId === item.id ? "安装中..." : "安装"}
                     </Button>
                   )}

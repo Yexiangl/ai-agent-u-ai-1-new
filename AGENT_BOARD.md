@@ -237,6 +237,16 @@ OpenClaw 将成为主体 Agent 后端。Hermes 不再作为普通用户主路径
 | TASK-034D | 待规划 | P1 | Rust 只读 CLI 诊断命令 | gateway_status / config_validate。 |
 | TASK-034E | 待规划 | P2 | 复制脱敏诊断摘要 | 格式化 + 脱敏。 |
 | TASK-034F | 待规划 | P2 | 诊断模块回归测试 | 验证各状态检测正确。 |
+| TASK-035 | 进行中 | P1 | 能力中心安装体验优化 | 父任务：卡片信息结构 + 安装确认 + 卸载确认。 |
+| TASK-035A | 已完成 | P1 | 能力中心安装体验审计 | 已审查通过：`docs/skill-center-install-ux-audit.md`，8 项问题/建议。 |
+| TASK-035B | ✅ 待验收 | P1 | 能力卡片信息结构优化 | 新增 nativeName/installCommand 字段，卡片展示原生名称+安装口令，弹窗同步。 |
+| TASK-035 | 进行中 | P0 | 能力中心安装体验与排行可信度优化 | 父任务：卡片信息透明化 + 安装确认重构 + loading 优化 + 卸载确认 + 已安装状态。 |
+| TASK-035A | 待验收 | P0 | 安装体验审计方案 | 已完成：docs/skill-center-install-ux-audit.md。P0 问题：卡片无原生名称/安装口令，确认弹窗信息不完整。 |
+| TASK-035B | 待规划 | P0 | 能力卡片信息结构优化 | 加 nativeName/installCommand 字段。 |
+| TASK-035C | 待规划 | P1 | 安装确认弹窗重构 | 展示原生名称+安装命令+完整信息。 |
+| TASK-035D | 待规划 | P1 | 安装/卸载 loading 与反馈优化 | 状态机+分阶段文案+卸载确认。 |
+| TASK-035E | 待规划 | P2 | 已安装状态 polish | 安装时间/版本/来源。 |
+| TASK-035F | 待规划 | P2 | 能力中心安装体验回归测试 | 验证安装/卸载全流程。 |
 | TASK-028 | 进行中（阶段性完成） | P2 | Portable / U 盘 A+B 模式可行性审计 | A+B 可行性、data mode、runtime 探针、Windows/macOS 启动方案和安全策略文档均已完成；仍等待实现类子任务。 |
 | TASK-028A | 已完成 | P2 | Portable / U 盘 A+B 模式可行性审计 | 已审查通过：A 模式优先，chatProjects localStorage 为 P0 portable 风险，B runtime 后置。 |
 | TASK-028B | 已完成 | P0 | Portable data 目录设计与路径检测 | 已审查通过：目录结构、system/portable mode、portable.json 触发和 chatProjects 迁移前置设计合格。 |
@@ -344,6 +354,7 @@ OpenClaw 将成为主体 Agent 后端。Hermes 不再作为普通用户主路径
 - TASK-034A 已执行（2026-05-29）：OpenClaw 本地服务自助诊断方案设计完成。输出 `docs/openclaw-self-diagnostics-design.md`，共 8 章节。设计要点：(1) 诊断面板位置在 AI 助手页，取代当前"高级诊断"小字链接；(2) 6 种状态枚举 + 9 项检测项；(3) 普通视图显示用户化状态卡片 + 修复建议，高级诊断折叠保留技术细节；(4) 安全分级：只读命令可执行（gateway_status/config_validate/probe），写入命令禁止执行（doctor --fix/gateway restart/config set）；(5) 错误原因映射表：网关未运行/密钥未配置/接口未启用/请求异常；(6) 5 个子任务 034B-F。本轮未修改业务代码。
 - TASK-034B/C 已执行（2026-05-29）：AI 助手页本地服务诊断面板 + 控制台按钮完成。修改：`App.tsx`（新增诊断卡片 + ExternalLink 图标导入）。UI：(1) 卡片标题"本地服务诊断"，说明"检查 AI 对话所需的 OpenClaw 本地服务状态"；(2) 6 检测项：本地服务（运行中/未运行）、密钥状态（已配置/未配置）、模型接口（正常/异常）、当前模型、对话接口（正常/异常）、最近检查；(3) 异常时显示修复建议（gateway start / 保存密钥等）；(4) "打开 OpenClaw 控制台"按钮（window.open 本机地址）；(5) 安全提示"控制台仅打开本机地址"；(6) 高级诊断链接保留。未执行 doctor --fix / gateway restart / config set 等写入命令。`npm run build` ✅ `cargo check` ✅ `probe.mjs` ✅ `test-redaction` 21/21 ✅。下一步建议 TASK-034D 或 TASK-034F。
 - TASK-034B/C 终审通过（2026-05-29）：诊断面板 + 控制台按钮合格。6 项检测覆盖常见问题（本地服务/密钥/模型接口/当前模型/对话接口/最近检查）。修复建议为文本提示（"请在终端运行 openclaw gateway start"），非自动执行。控制台按钮 window.open 本机地址，无 token 拼接，安全提示"请勿暴露到公网"。高级诊断中 config set 命令仅为参考文本。未执行 doctor --fix/restart/stop/config set。未改对话/install/config/Token 写入。P2 观察项：window.open 在 Tauri 中可能需后续改为 shell.open 以获得更好的桌面体验。下一步建议 TASK-034E 复制脱敏诊断摘要或 TASK-034F 回归测试。
+- TASK-035A 已完成（2026-05-29）：能力中心安装体验审计。输出 docs/skill-center-install-ux-audit.md。P0 发现：(1) 卡片无原生名称/安装口令，用户不知道实际安装什么；(2) 确认弹窗缺安装命令。P1 发现：(3) 安装 loading 无分阶段文案；(4) 卸载无确认弹窗。方案：加 nativeName/installCommand 字段 + 确认弹窗重构 + 状态机 loading + 卸载确认。后续 5 子任务（035B-F）。本轮未修改业务代码。
 - TASK-034A 终审通过（2026-05-29）：诊断方案设计合格。入口在 AI 助手页合理（用户遇到问题时自然去 AI 助手页）。普通视图卡片+高级诊断折叠结构合理。状态枚举覆盖 6 种常见场景。9 项检测项合理（不过多，核心覆盖）。优先使用已有能力（openclaw_http_status/read_openclaw_config_summary）。明确禁止 doctor --fix/gateway restart/stop/config set。修复建议为"提示用户操作"非自动执行。脱敏规则明确（不显示 Token/Authorization/Bearer/baseUrl/API URL）。子任务拆分合理。建议先做 034B+C 合并（诊断面板 UI + 打开控制台按钮）。
 - TASK-033E 终审通过（2026-05-29）：回归测试 15/15 合格。TASK-033 阶段性收口确认：主数据源已切换 OpenClaw workspace，只读+脱敏+不暴露绝对路径+缺失优雅处理。Hermes 仅底部 legacy 提示不混入主列表。033C（双源折叠）和 033D（详情 polish）为 P1/P2 后置，不阻塞当前版本。建议暂不做 033C，当前 Hermes 底部提示已足够。
 - TASK-033B 终审通过（2026-05-29）：OpenClaw workspace memory 只读接入合格。Rust command 只读 6 个硬编码文件（SOUL/USER/AGENTS/HEARTBEAT/IDENTITY/TOOLS.md），复用 collect_memory_file + redact_sensitive_content 脱敏，返回 relativePath 不暴露绝对路径。目录/文件缺失时优雅 warning。MemoryPage 主数据源已切换，Hermes 仅底部 legacy 提示。Kind badge 中文化（人格/用户/代理/心跳/身份/工具）。详情页显示"只读"badge。未改 config/Token/对话/install/portable。下一步建议 TASK-033C Hermes legacy 折叠或直接 TASK-033E 回归测试。
