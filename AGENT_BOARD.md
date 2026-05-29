@@ -237,15 +237,14 @@ OpenClaw 将成为主体 Agent 后端。Hermes 不再作为普通用户主路径
 | TASK-034D | 待规划 | P1 | Rust 只读 CLI 诊断命令 | gateway_status / config_validate。 |
 | TASK-034E | 待规划 | P2 | 复制脱敏诊断摘要 | 格式化 + 脱敏。 |
 | TASK-034F | 待规划 | P2 | 诊断模块回归测试 | 验证各状态检测正确。 |
-| TASK-035 | 进行中 | P1 | 能力中心安装体验优化 | 父任务：卡片信息结构 + 安装确认 + 卸载确认。 |
+| TASK-035 | 已完成 | P0 | 能力中心安装体验与排行可信度优化 | 已审查通过：A-F 全量完成。卡片透明化 + 安装确认重构 + source 修复 + loading 优化 + 卸载确认 + 已安装区域 + 回归测试 7/7。 |
 | TASK-035A | 已完成 | P1 | 能力中心安装体验审计 | 已审查通过：`docs/skill-center-install-ux-audit.md`，8 项问题/建议。 |
 | TASK-035B | 已完成 | P0 | 能力卡片信息结构优化 | 已审查通过：9 条 catalog 加 nativeName/installCommand，卡片+弹窗展示原生名称和安装口令。P1 观察项：ext-github-helper/ext-browser-auto source=skillhub 但 nativeName=clawhub:*，需后续统一。 |
-| TASK-035 | 进行中 | P0 | 能力中心安装体验与排行可信度优化 | 父任务：卡片信息透明化 + 安装确认重构 + loading 优化 + 卸载确认 + 已安装状态。 |
-| TASK-035A | 待验收 | P0 | 安装体验审计方案 | 已完成：docs/skill-center-install-ux-audit.md。P0 问题：卡片无原生名称/安装口令，确认弹窗信息不完整。 |
+| TASK-035A | 已完成 | P0 | 安装体验审计方案 | 已审查通过：docs/skill-center-install-ux-audit.md。P0 问题：卡片无原生名称/安装口令，确认弹窗信息不完整。 |
 | TASK-035C | 已完成 | P1 | 安装确认弹窗重构 | 已审查通过：清单式确认（名称/原生名称/来源/类型/风险/权限/安装命令），source 不一致已修复（skillhub→clawhub），安全说明去甩锅，高风险二次确认保留。 |
 | TASK-035D | 已完成 | P1 | 安装/卸载 loading 与反馈优化 | 已审查通过：安装分阶段（installing→refreshing），卸载确认弹窗（含"不删除对话数据"），错误可关闭，按钮 disabled 防重复，未改执行逻辑。 |
 | TASK-035E | 已完成 | P1 | 已安装能力中心 | 已审查通过：已安装能力区域位于排行之前，卡片展示完整（名称/badge/原生名称/安装时间/来源/类型/风险/命令/卸载），缺失字段"信息待同步"兜底，卸载复用 035D 确认流。 |
-| TASK-035F | ✅ 待验收 | P2 | 能力中心回归测试 | 代码审查全通过：无 skillhub/甩锅文案残留，一致性好。未执行真实安装。 |
+| TASK-035F | 已完成 | P2 | 能力中心回归测试 | 已审查通过：7/7 代码级检查通过，无 skillhub/甩锅残留，状态流/弹窗/安全边界合格。未执行真实安装（可接受，留待冒烟测试）。 |
 | TASK-028 | 进行中（阶段性完成） | P2 | Portable / U 盘 A+B 模式可行性审计 | A+B 可行性、data mode、runtime 探针、Windows/macOS 启动方案和安全策略文档均已完成；仍等待实现类子任务。 |
 | TASK-028A | 已完成 | P2 | Portable / U 盘 A+B 模式可行性审计 | 已审查通过：A 模式优先，chatProjects localStorage 为 P0 portable 风险，B runtime 后置。 |
 | TASK-028B | 已完成 | P0 | Portable data 目录设计与路径检测 | 已审查通过：目录结构、system/portable mode、portable.json 触发和 chatProjects 迁移前置设计合格。 |
@@ -361,6 +360,7 @@ OpenClaw 将成为主体 Agent 后端。Hermes 不再作为普通用户主路径
 - TASK-035D 终审通过（2026-05-29）：安装/卸载 loading 与反馈优化合格。安装流程：确认→"正在安装..."→"更新中..."→切换为卸载/显示错误。卸载流程：确认弹窗（"不会删除对话、项目或本地数据"）→"正在卸载..."→"更新中..."→切换为安装/显示错误。installStatus 共享状态（installing/refreshing/null）。错误提示有×关闭按钮。按钮 disabled 防重复点击。refreshInstallRecords 提取合理。错误信息来自 Rust fixed message（不含 stderr 原文）。未改 install_capability/uninstall_capability 执行逻辑/Rust allowlist。下一步建议 TASK-035E 已安装状态 polish 或 TASK-035F 回归测试。
 - TASK-035E 已执行（2026-05-29）：已安装能力中心完成。修改：`App.tsx`（installRecords 状态 + catalogItems 提取 + 已安装能力区域 JSX）。改动：(1) `refreshInstallRecords` 存储完整记录（含 installedAt/installRef/name/kind/riskLevel）；(2) catalogItems 提取为 useMemo 常量供两处引用；(3) 已安装能力区域：标题 + 说明 + 空状态'暂未安装能力'+ 卡片列表；(4) 每张卡片展示：显示名称 + 已安装 badge + 原生名称 + 安装时间 + 来源/类型/风险 badge + 安装命令 + 卸载按钮；(5) 卸载按钮复用 035D 确认弹窗和 loading。未扫描外部安装能力、未改 install/uninstall 执行逻辑。`npm run build` ✅ `cargo check` ✅ `test-redaction` 21/21 ✅。下一步建议 TASK-035F 回归测试。
 - TASK-035E 终审通过（2026-05-29）：已安装能力中心合格。区域位于排行之前（line 3570），用户容易看到。数据来源为 read_install_records（本应用安装记录），不扫描外部。卡片展示完整：显示名称+"已安装"badge+原生名称+安装时间+来源/类型/风险 badge+安装命令+卸载按钮。nativeName/installCommand 缺失时兜底"信息待同步"。空状态"暂未安装能力"清楚。卸载按钮复用 035D 确认弹窗（setUninstallConfirm）。卸载成功后 refreshInstallRecords 刷新列表。未改 install/uninstall 执行逻辑/Rust allowlist。TASK-035 主线 A-E 全部完成，仅剩 F 回归测试。
+- TASK-035F 终审通过（2026-05-29）：能力中心回归测试合格。7/7 代码级检查通过：卡片信息完整、source/installCommand 一致（无 skillhub）、弹窗透明可信（无甩锅文案）、loading 状态清楚、已安装区域闭环、卸载确认完整、安全边界保持。未执行真实安装测试可接受（代码路径已验证，真实安装依赖 OpenClaw CLI 可用性）。TASK-035 全线完成（A-F），标记为阶段性收口。建议后续可补 TASK-035G 低风险能力冒烟测试（需 OpenClaw CLI 环境）。
 - TASK-034A 终审通过（2026-05-29）：诊断方案设计合格。入口在 AI 助手页合理（用户遇到问题时自然去 AI 助手页）。普通视图卡片+高级诊断折叠结构合理。状态枚举覆盖 6 种常见场景。9 项检测项合理（不过多，核心覆盖）。优先使用已有能力（openclaw_http_status/read_openclaw_config_summary）。明确禁止 doctor --fix/gateway restart/stop/config set。修复建议为"提示用户操作"非自动执行。脱敏规则明确（不显示 Token/Authorization/Bearer/baseUrl/API URL）。子任务拆分合理。建议先做 034B+C 合并（诊断面板 UI + 打开控制台按钮）。
 - TASK-033E 终审通过（2026-05-29）：回归测试 15/15 合格。TASK-033 阶段性收口确认：主数据源已切换 OpenClaw workspace，只读+脱敏+不暴露绝对路径+缺失优雅处理。Hermes 仅底部 legacy 提示不混入主列表。033C（双源折叠）和 033D（详情 polish）为 P1/P2 后置，不阻塞当前版本。建议暂不做 033C，当前 Hermes 底部提示已足够。
 - TASK-033B 终审通过（2026-05-29）：OpenClaw workspace memory 只读接入合格。Rust command 只读 6 个硬编码文件（SOUL/USER/AGENTS/HEARTBEAT/IDENTITY/TOOLS.md），复用 collect_memory_file + redact_sensitive_content 脱敏，返回 relativePath 不暴露绝对路径。目录/文件缺失时优雅 warning。MemoryPage 主数据源已切换，Hermes 仅底部 legacy 提示。Kind badge 中文化（人格/用户/代理/心跳/身份/工具）。详情页显示"只读"badge。未改 config/Token/对话/install/portable。下一步建议 TASK-033C Hermes legacy 折叠或直接 TASK-033E 回归测试。
