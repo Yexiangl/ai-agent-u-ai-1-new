@@ -3325,25 +3325,29 @@ function SkillsPage({ config, updateConfig, setActive, setChatDraft, setPendingN
     return map[p] || p;
   };
 
-  // TASK-027C-D/E: Install/uninstall state
+  // TASK-027C-D/E + TASK-035D: Install/uninstall state
   const [installedIds, setInstalledIds] = useState<Set<string>>(new Set());
   const [installingId, setInstallingId] = useState<string | null>(null);
+  const [installStatus, setInstallStatus] = useState<"installing" | "refreshing" | null>(null);
   const [installConfirm, setInstallConfirm] = useState<{ id: string; name: string; nativeName?: string; installCommand?: string; kind: string; risk: string; perms: string[]; source: string } | null>(null);
   const [installConfirmChecked, setInstallConfirmChecked] = useState(false);
+  const [uninstallConfirm, setUninstallConfirm] = useState<{ id: string; name: string; nativeName?: string; kind: string; source: string } | null>(null);
   const [installError, setInstallError] = useState("");
 
-  useEffect(() => {
-    invoke<Array<{ catalogId?: string }>>("read_install_records").then(r => {
-      const ids = new Set<string>();
-      (Array.isArray(r) ? r : []).forEach(rec => {
-        if (rec.catalogId) ids.add(rec.catalogId);
-      });
-      setInstalledIds(ids);
-    }).catch(() => {});
+  const refreshInstallRecords = useCallback(async () => {
+    const r = await invoke<Array<{ catalogId?: string }>>("read_install_records");
+    const ids = new Set<string>();
+    (Array.isArray(r) ? r : []).forEach(rec => { if (rec.catalogId) ids.add(rec.catalogId); });
+    setInstalledIds(ids);
   }, []);
+
+  useEffect(() => {
+    refreshInstallRecords().catch(() => {});
+  }, [refreshInstallRecords]);
 
   const handleInstall = async () => {
     if (!installConfirm) return;
+    setInstallStatus("installing");
     setInstallingId(installConfirm.id);
     try {
       await invoke("install_capability", {
@@ -3353,23 +3357,36 @@ function SkillsPage({ config, updateConfig, setActive, setChatDraft, setPendingN
         riskLevel: installConfirm.risk,
       });
       setInstalledIds(prev => new Set([...prev, installConfirm.id]));
+      setInstallStatus("refreshing");
+      try { await refreshInstallRecords(); } catch { /* ignore */ }
     } catch (err) {
       setInstallError(`安装失败：${getErrorMessage(err)}`);
     }
+    setInstallStatus(null);
     setInstallingId(null);
     setInstallConfirm(null);
     setInstallConfirmChecked(false);
   };
 
-  const handleUninstall = async (catalogId: string, kind: string) => {
-    setInstallingId(catalogId);
+  const handleUninstallConfirm = async () => {
+    if (!uninstallConfirm) return;
+    setInstallStatus("installing");
+    setInstallingId(uninstallConfirm.id);
+    setUninstallConfirm(null);
     try {
-      await invoke("uninstall_capability", { catalogId, kind });
-      setInstalledIds(prev => { const next = new Set(prev); next.delete(catalogId); return next; });
+      await invoke("uninstall_capability", { catalogId: uninstallConfirm.id, kind: uninstallConfirm.kind });
+      setInstalledIds(prev => { const next = new Set(prev); next.delete(uninstallConfirm.id); return next; });
+      setInstallStatus("refreshing");
+      try { await refreshInstallRecords(); } catch { /* ignore */ }
     } catch (err) {
       setInstallError(`卸载失败：${getErrorMessage(err)}`);
     }
+    setInstallStatus(null);
     setInstallingId(null);
+  };
+
+  const handleUninstall = async (catalogId: string, kind: string, name: string, nativeName: string, source: string) => {
+    setUninstallConfirm({ id: catalogId, name, nativeName, kind, source });
   };
 
   const needsHardConfirm = (risk: string) => risk === "high" || risk === "unknown";
@@ -3383,7 +3400,7 @@ function SkillsPage({ config, updateConfig, setActive, setChatDraft, setPendingN
           <div className="mt-2 rounded-lg border border-blue-500/20 bg-blue-500/5 px-3 py-2 text-xs text-blue-700 dark:text-blue-300">内置工作流为本地 prompt 模板，不会执行系统命令。真实插件能力将在后续版本接入。</div>
         </CardHeader>
       </Card>
-      {installError && <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-2 text-xs text-rose-700 dark:text-rose-400">{installError}</div>}
+      {installError && <div className="flex items-start gap-2 rounded-lg border border-rose-500/30 bg-rose-500/10 p-2 text-xs text-rose-700 dark:text-rose-400">{installError}<button className="ml-auto shrink-0 text-rose-400 hover:text-rose-600" onClick={() => setInstallError("")} aria-label="关闭">×</button></div>}
 
       <div className="flex flex-wrap items-center gap-2">
         <Input className="max-w-[200px]" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="搜索能力" />
@@ -3484,9 +3501,49 @@ function SkillsPage({ config, updateConfig, setActive, setChatDraft, setPendingN
               )}
               <div className="flex gap-2 pt-1">
                 <Button className="flex-1" onClick={handleInstall} disabled={installingId !== null || (needsHardConfirm(installConfirm.risk) && !installConfirmChecked)}>
-                  {installingId ? <Loader2 className="h-4 w-4 animate-spin" /> : null}确认安装
+                  {installStatus === "installing" ? <><Loader2 className="h-4 w-4 animate-spin" />正在安装...</> : installStatus === "refreshing" ? <><Loader2 className="h-4 w-4 animate-spin" />更新中...</> : "确认安装"}
                 </Button>
-                <Button variant="outline" onClick={() => { setInstallConfirm(null); setInstallConfirmChecked(false); }}>取消</Button>
+                <Button variant="outline" onClick={() => { setInstallConfirm(null); setInstallConfirmChecked(false); }} disabled={installingId !== null}>取消</Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* TASK-035D: Uninstall confirmation dialog */}
+      {uninstallConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setUninstallConfirm(null)}>
+          <Card className="w-full max-w-md" onClick={e => e.stopPropagation()}>
+            <CardHeader>
+              <CardTitle className="text-lg">确认卸载能力</CardTitle>
+              <CardDescription>这只会卸载该能力，不会删除你的对话、项目或本地数据。</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3 text-sm">
+              <div className="space-y-1.5 rounded-xl border bg-muted/30 p-3 text-xs">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">显示名称</span>
+                  <span className="font-medium">{uninstallConfirm.name}</span>
+                </div>
+                {uninstallConfirm.nativeName && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">原生名称</span>
+                    <code className="rounded bg-muted/50 px-1 font-mono text-[11px]">{uninstallConfirm.nativeName}</code>
+                  </div>
+                )}
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">来源</span>
+                  <span className="font-medium">{uninstallConfirm.source}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">类型</span>
+                  <Badge tone={uninstallConfirm.kind === "skill" ? "info" : "warning"}>{uninstallConfirm.kind === "skill" ? "工作流" : "插件"}</Badge>
+                </div>
+              </div>
+              <div className="flex gap-2 pt-1">
+                <Button className="flex-1" onClick={handleUninstallConfirm} disabled={installingId !== null}>
+                  {installStatus === "installing" ? <><Loader2 className="h-4 w-4 animate-spin" />正在卸载...</> : installStatus === "refreshing" ? <><Loader2 className="h-4 w-4 animate-spin" />更新中...</> : "确认卸载"}
+                </Button>
+                <Button variant="outline" onClick={() => setUninstallConfirm(null)} disabled={installingId !== null}>取消</Button>
               </div>
             </CardContent>
           </Card>
@@ -3553,13 +3610,13 @@ function SkillsPage({ config, updateConfig, setActive, setChatDraft, setPendingN
                 <div className="flex gap-2 pt-1">
                   {installedIds.has(item.id) ? (
                     <Button size="sm" variant="outline" disabled={installingId === item.id}
-                      className="text-xs" onClick={() => handleUninstall(item.id, item.kind)}>
-                      {installingId === item.id ? "卸载中..." : "卸载"}
+                      className="text-xs" onClick={() => handleUninstall(item.id, item.kind, item.name, item.nativeName, item.source)}>
+                      {installingId === item.id ? (installStatus === "installing" ? "正在卸载..." : installStatus === "refreshing" ? "更新中..." : "卸载中...") : "卸载"}
                     </Button>
                   ) : (
                     <Button size="sm" disabled={installingId === item.id}
                       className="text-xs" onClick={() => setInstallConfirm({ id:item.id, name:item.name, nativeName:item.nativeName, installCommand:item.installCommand, kind:item.kind, risk:item.risk, perms:item.perms, source:item.source })}>
-                      {installingId === item.id ? "安装中..." : "安装"}
+                      {installingId === item.id ? (installStatus === "installing" ? "正在安装..." : installStatus === "refreshing" ? "更新中..." : "安装中...") : "安装"}
                     </Button>
                   )}
                 </div>
