@@ -1399,7 +1399,7 @@ function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelCo
                   <p className="font-medium">本地服务未运行</p>
                   {!ocConfig.httpChatCompletionsEnabled && <p>本地服务未连接。</p>}
                   {!ocConfig.gatewayTokenPresent && <p>请先保存模型访问密钥。</p>}
-                  {!ocReady && <p>请在终端运行 openclaw gateway start 启动本地服务，完成后重新检查。</p>}
+                  {!ocReady && <p>请点击下方按钮启动本地服务，完成后重新检查。</p>}
                 </>
               ) : (
                 <><p className="font-medium">需要检查</p><p>未找到本地配置文件。请确认 AI 助手已安装并初始化。</p></>
@@ -1520,7 +1520,7 @@ function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelCo
           )}
           {ocApplyResult?.ok && (
             <div className="rounded-lg bg-muted/50 p-2 font-mono text-xs text-muted-foreground">
-              如未立即生效，请在终端执行：openclaw gateway restart
+              如未生效，请点击重新检查本地服务状态。
             </div>
           )}
         </CardContent>
