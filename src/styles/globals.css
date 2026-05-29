@@ -78,3 +78,10 @@ body {
 .animate-toast-in {
   animation: toastIn 0.2s ease-out;
 }
+@keyframes messageIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-message-in {
+  animation: messageIn 0.18s ease-out;
+}

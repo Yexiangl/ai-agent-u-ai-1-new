@@ -3040,14 +3040,14 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
                 <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10">
                   <Sparkles className="h-8 w-8 text-primary" />
                 </div>
-                <h3 className="text-xl font-semibold">今天想让 AI Agent 帮你做什么？</h3>
-                <p className="mt-2 max-w-md text-sm text-muted-foreground">输入问题或上传文件，Agent 会在这里回复。支持 Markdown、代码块和文件分析。</p>
+                <h3 className="text-xl font-semibold">开始一次 AI 对话</h3>
+                <p className="mt-2 max-w-md text-sm text-muted-foreground">直接提问或从能力中心、摸鱼中心带入提示词。</p>
                 <div className="mt-8 grid w-full max-w-lg gap-2 sm:grid-cols-2">
                   {[
-                    { text: "总结这个文件", fill: "请总结这个文件的核心内容：" },
-                    { text: "分析这个表格", fill: "请分析以下表格数据，提炼关键结论：" },
-                    { text: "写一段说明", fill: "请帮我写一段说明：" },
-                    { text: "制定一个计划", fill: "请帮我制定一个执行计划：" },
+                    { text: "帮我总结一段内容", fill: "请帮我总结以下内容的核心要点：" },
+                    { text: "帮我整理任务计划", fill: "请帮我整理今天的任务计划：" },
+                    { text: "解释这个报错", fill: "请解释这个报错是什么意思，可能的原因和修复方案：" },
+                    { text: "给我一个轻量方案", fill: "请帮我设计一个轻量方案，不引入复杂依赖：" },
                   ].map((card) => (
                     <button key={card.text} onClick={() => { setInput(card.fill); requestAnimationFrame(() => { inputRef.current?.focus(); autoResize(inputRef.current); }); }}
                       className="rounded-xl border bg-card p-3.5 text-left text-sm transition hover:border-primary/40 hover:bg-primary/5">
@@ -3075,7 +3075,7 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
               const isFailed = Boolean(message.role === "assistant" && message.content?.trim().startsWith("请求失败："));
               const compactElapsed = message.elapsedMs == null ? null : message.elapsedMs < 1000 ? "<1s" : `${Math.round(message.elapsedMs / 1000)}s`;
               return (
-                <div key={message.requestId || index} className={cn("group flex", message.role === "user" ? "justify-end" : "justify-start")}>
+                <div key={message.requestId || index} className={cn("group flex animate-message-in", message.role === "user" ? "justify-end" : "justify-start")}>
                   <div className={cn("flex flex-col", message.role === "user" ? "max-w-[65%] items-end" : "max-w-[720px] items-start")}>
                     <div className={cn(
                       "rounded-2xl px-4 py-3 text-[15px] leading-7",
