@@ -1372,7 +1372,7 @@ function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelCo
           <div className="flex items-center justify-between gap-3">
             <CardTitle>AI 助手</CardTitle>
             <Badge tone={ocReady ? "success" : ocChecked ? "warning" : "muted"}>
-              {ocReady ? "已准备好" : ocChecked ? "需要检查" : "检测中"}
+              {ocReady ? "已连接" : ocChecked ? "需要检查" : "检测中"}
             </Badge>
           </div>
         </CardHeader>
@@ -1382,14 +1382,21 @@ function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelCo
             <span>{ocReady ? "当前使用" : "当前模型"}</span>
             <span className="font-medium">{displayModel}</span>
           </div>
-          {ocReady && (
-            <p className="text-xs text-muted-foreground">可以用于对话、文件整理和任务处理。</p>
+          {ocReady && ocConfig?.gatewayTokenPresent && (
+            <p className="text-xs text-emerald-700 dark:text-emerald-400">AI 助手已连接，可以开始对话。</p>
           )}
-          {ocChecked && !ocReady && ocConfig?.configExists && (
+          {ocChecked && !ocReady && (
             <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-600 dark:text-amber-400 space-y-1">
-              <p className="font-medium">需要检查</p>
-              {!ocConfig.httpChatCompletionsEnabled && <p>本地服务未连接。</p>}
-              {!ocConfig.gatewayTokenPresent && <p>密钥未配置。</p>}
+              {ocConfig?.configExists ? (
+                <>
+                  <p className="font-medium">本地服务未运行</p>
+                  {!ocConfig.httpChatCompletionsEnabled && <p>本地服务未连接。</p>}
+                  {!ocConfig.gatewayTokenPresent && <p>请先保存模型访问密钥。</p>}
+                  {!ocReady && <p>请在终端运行 openclaw gateway start 启动本地服务，完成后重新检查。</p>}
+                </>
+              ) : (
+                <><p className="font-medium">需要检查</p><p>未找到配置文件。请确认 OpenClaw 已安装并初始化。</p></>
+              )}
             </div>
           )}
       <div className="flex flex-wrap items-center gap-2 overflow-x-auto">
@@ -1405,7 +1412,7 @@ function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelCo
       <Card>
         <CardHeader className="pb-3">
           <CardTitle>模型配置</CardTitle>
-          <CardDescription>填写密钥并选择模型档位，保存后 AI 助手将使用该配置。</CardDescription>
+          <CardDescription>填写模型访问密钥并选择档位，保存后 AI 助手将使用该配置进行对话和任务处理。</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           {/* Current preset indicator */}
@@ -1443,7 +1450,7 @@ function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelCo
             <Button onClick={applyOcProvider} disabled={!tokenDraft.trim() || ocApplying}>
               {ocApplying && <Loader2 className="h-4 w-4 animate-spin" />}保存配置
             </Button>
-            <p className="self-center text-[11px] text-muted-foreground">保存后可能需要重启本地服务以生效。</p>
+            <p className="self-center text-[11px] text-muted-foreground">保存后可能需要重新检查本地服务以生效。</p>
           </div>
           {ocApplyResult && (
             <div className={cn("rounded-xl border p-3 text-sm",
