@@ -4063,7 +4063,7 @@ function MoyuCenterPage({ setActive, setChatDraft }: { setActive: (id: RouteId) 
           { title:"随机冷知识", desc:"30 秒看完一个反常识小知识。", btn:"换一个", prompt:"请给我一个 30 秒内能看完的有趣冷知识。要求：\n1. 有一点反常识\n2. 不要太长\n3. 适合工作间隙看一眼\n\n请输出：\n- 标题\n- 冷知识内容\n- 为什么有趣\n- 一句轻松吐槽" },
           { title:"今日成就", desc:"把今天的小进展变成一枚成就徽章。", btn:"生成徽章", prompt:"请根据我今天完成的事情，帮我生成 3 个有趣的成就徽章。请先让我补充\"今天完成了什么\"，如果我已经提供内容，请直接生成。\n\n每个徽章请包含：\n1. 徽章名\n2. 稀有度\n3. 获得条件\n4. 吐槽说明\n\n风格轻松幽默，不要太夸张。" },
         ].map(card => (
-          <div key={card.title} className="rounded-lg border p-2.5 space-y-1.5">
+          <div key={card.title} className="rounded-lg border p-2.5 space-y-1.5 transition-colors hover:border-primary/20 hover:bg-primary/5">
             <div>
               <div className="text-sm font-medium">{card.title}</div>
               <div className="text-[11px] text-muted-foreground leading-tight">{card.desc}</div>
