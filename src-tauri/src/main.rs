@@ -2796,9 +2796,20 @@ fn read_install_records(app: tauri::AppHandle) -> Result<serde_json::Value, Stri
     Ok(serde_json::json!(load_skill_records(&app)))
 }
 
+#[tauri::command]
+fn open_url(url: String) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    { std::process::Command::new("open").arg(&url).spawn().map_err(|e| format!("打开链接失败: {}", e))?; }
+    #[cfg(target_os = "linux")]
+    { std::process::Command::new("xdg-open").arg(&url).spawn().map_err(|e| format!("打开链接失败: {}", e))?; }
+    #[cfg(target_os = "windows")]
+    { std::process::Command::new("cmd").args(["/c", "start", "", &url]).spawn().map_err(|e| format!("打开链接失败: {}", e))?; }
+    Ok(())
+}
+
 fn main() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![read_config, write_config, clear_config, read_chat_sessions, write_chat_sessions, clear_chat_sessions, read_chat_projects, write_chat_projects, portable_data_status, portable_runtime_status, read_installed_capabilities, install_capability, uninstall_capability, read_install_records, check_hermes_installed, get_hermes_version, get_hermes_paths, get_hermes_help, check_hermes_api_server, hermes_chat_completion, cancel_hermes_chat_completion, read_hermes_model_config, read_hermes_native_memory, read_openclaw_workspace_memory, apply_hermes_model_config, apply_hermes_reasoning_config, read_hermes_cron_overview, read_hermes_cron_cli_status, ensure_ai_files_dirs, list_ai_files, delete_ai_file, open_ai_file_location, pick_and_upload_file, extract_ai_file_text, save_generated_file, read_openclaw_gateway_auth_for_local_use, get_or_create_openclaw_device_identity, openclaw_http_chat_completion, openclaw_http_status, read_openclaw_config_summary, read_openclaw_model_provider_summary, apply_openclaw_model_provider_config])
+        .invoke_handler(tauri::generate_handler![read_config, write_config, clear_config, read_chat_sessions, write_chat_sessions, clear_chat_sessions, read_chat_projects, write_chat_projects, portable_data_status, portable_runtime_status, read_installed_capabilities, install_capability, uninstall_capability, read_install_records, check_hermes_installed, get_hermes_version, get_hermes_paths, get_hermes_help, check_hermes_api_server, hermes_chat_completion, cancel_hermes_chat_completion, read_hermes_model_config, read_hermes_native_memory, read_openclaw_workspace_memory, apply_hermes_model_config, apply_hermes_reasoning_config, read_hermes_cron_overview, read_hermes_cron_cli_status, ensure_ai_files_dirs, list_ai_files, delete_ai_file, open_ai_file_location, pick_and_upload_file, extract_ai_file_text, save_generated_file, read_openclaw_gateway_auth_for_local_use, get_or_create_openclaw_device_identity, open_url, openclaw_http_chat_completion, openclaw_http_status, read_openclaw_config_summary, read_openclaw_model_provider_summary, apply_openclaw_model_provider_config])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

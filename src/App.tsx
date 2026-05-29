@@ -1591,7 +1591,7 @@ function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelCo
           )}
 
           <div className="flex flex-wrap gap-2">
-            <Button variant="outline" size="sm" onClick={() => window.open("http://127.0.0.1:18789/", "_blank")}>
+            <Button variant="outline" size="sm" onClick={() => { invoke("open_url", { url: "http://127.0.0.1:18789/" }).catch(() => { /* ignore */ }); }}>
               <ExternalLink className="h-4 w-4" />打开 OpenClaw 控制台
             </Button>
             <button onClick={() => setShowAdvanced(true)} className="text-xs text-muted-foreground underline-offset-2 hover:underline">高级诊断</button>
@@ -3363,18 +3363,29 @@ function SkillsPage({ config, updateConfig, setActive, setChatDraft, setPendingN
 
   const handleInstall = async () => {
     if (!installConfirm) return;
+    const confirm = installConfirm;
     setInstallStatus("installing");
-    setInstallingId(installConfirm.id);
+    setInstallingId(confirm.id);
     try {
       await invoke("install_capability", {
-        catalogId: installConfirm.id,
-        name: installConfirm.name,
-        kind: installConfirm.kind,
-        riskLevel: installConfirm.risk,
+        catalogId: confirm.id,
+        name: confirm.name,
+        kind: confirm.kind,
+        riskLevel: confirm.risk,
       });
-      setInstalledIds(prev => new Set([...prev, installConfirm.id]));
-      setInstallStatus("refreshing");
-      try { await refreshInstallRecords(); } catch { /* ignore */ }
+      setInstalledIds(prev => new Set([...prev, confirm.id]));
+      const catItem = catalogItems.find(item => item.id === confirm.id);
+      setInstallRecords(prev => {
+        const filtered = prev.filter(r => r.catalogId !== confirm.id);
+        return [...filtered, {
+          catalogId: confirm.id,
+          name: confirm.name,
+          kind: confirm.kind,
+          riskLevel: confirm.risk,
+          installRef: catItem?.nativeName,
+          installedAt: Date.now(),
+        }];
+      });
     } catch (err) {
       setInstallError(`安装失败：${getErrorMessage(err)}`);
     }
@@ -3386,14 +3397,14 @@ function SkillsPage({ config, updateConfig, setActive, setChatDraft, setPendingN
 
   const handleUninstallConfirm = async () => {
     if (!uninstallConfirm) return;
+    const confirm = uninstallConfirm;
     setInstallStatus("installing");
-    setInstallingId(uninstallConfirm.id);
+    setInstallingId(confirm.id);
     setUninstallConfirm(null);
     try {
-      await invoke("uninstall_capability", { catalogId: uninstallConfirm.id, kind: uninstallConfirm.kind });
-      setInstalledIds(prev => { const next = new Set(prev); next.delete(uninstallConfirm.id); return next; });
-      setInstallStatus("refreshing");
-      try { await refreshInstallRecords(); } catch { /* ignore */ }
+      await invoke("uninstall_capability", { catalogId: confirm.id, kind: confirm.kind });
+      setInstalledIds(prev => { const next = new Set(prev); next.delete(confirm.id); return next; });
+      setInstallRecords(prev => prev.filter(r => r.catalogId !== confirm.id));
     } catch (err) {
       setInstallError(`卸载失败：${getErrorMessage(err)}`);
     }
