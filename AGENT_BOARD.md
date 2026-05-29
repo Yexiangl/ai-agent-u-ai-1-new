@@ -264,6 +264,8 @@ OpenClaw 将成为主体 Agent 后端。Hermes 不再作为普通用户主路径
 | TASK-038E | 已完成 | P1 | 写入后自动 start + probe | 已审查通过：一键启用 3 阶段（保存→启动→检查），启动失败不阻断（可能已运行），成功"AI 助手已启用可以开始对话"，失败脱敏可重试。 |
 | TASK-038F | 已完成 | P2 | 初始化回归测试 | 已审查通过：6/6 检查项通过（UI/状态流/安全链路/schema/自动启动/安全边界），无 P0/P1。未执行真实 token 测试（可接受）。 |
 | TASK-038G | 已完成 | P2 | dummy token 冒烟测试 | 已审查通过：真实执行 write→validate→rollback 链路，发现并修复 P0（models 需 name 字段）。原配置已恢复。npm run build 补跑通过。 |
+| TASK-039 | 进行中 | P2 | v0.3.0 发布准备 | 发布说明整理 + 阶段收口。 |
+| TASK-039A | ✅ 待验收 | P2 | v0.3.0 发布说明与阶段整理 | 输出 docs/v0.3.0-internal-test-release.md（用户版+技术版）、更新 stage-release-notes.md。 |
 | TASK-028 | 进行中（阶段性完成） | P2 | Portable / U 盘 A+B 模式可行性审计 | A+B 可行性、data mode、runtime 探针、Windows/macOS 启动方案和安全策略文档均已完成；仍等待实现类子任务。 |
 | TASK-028A | 已完成 | P2 | Portable / U 盘 A+B 模式可行性审计 | 已审查通过：A 模式优先，chatProjects localStorage 为 P0 portable 风险，B runtime 后置。 |
 | TASK-028B | 已完成 | P0 | Portable data 目录设计与路径检测 | 已审查通过：目录结构、system/portable mode、portable.json 触发和 chatProjects 迁移前置设计合格。 |
