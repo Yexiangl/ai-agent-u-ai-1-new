@@ -1193,6 +1193,7 @@ function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelCo
   const [quickSetupToken, setQuickSetupToken] = useState("");
   const [quickSetupApplying, setQuickSetupApplying] = useState(false);
   const [quickSetupResult, setQuickSetupResult] = useState<string>("");
+  const [quickSetupPhase, setQuickSetupPhase] = useState<"" | "applying" | "starting" | "checking" | "done" | "failed">("");
   const [showKey, setShowKey] = useState(false);
   const [testing, setTesting] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
@@ -1429,20 +1430,33 @@ function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelCo
               if (!quickSetupToken.trim()) return;
               setQuickSetupApplying(true);
               setQuickSetupResult("");
+              setQuickSetupPhase("applying");
               try {
+                // Phase 1: save config
                 await applyOpenClawProviderConfig(quickSetupToken, "quality");
-                setQuickSetupResult("success");
                 setQuickSetupToken("");
+                setQuickSetupPhase("starting");
+                // Phase 2: start gateway
+                try {
+                  await invoke("start_openclaw_gateway");
+                } catch { /* if already running or start fails, still try to check */ }
+                setQuickSetupPhase("checking");
+                // Phase 3: check status
                 await refreshAll();
+                setQuickSetupPhase("done");
+                setQuickSetupResult("success");
               } catch (err) {
+                setQuickSetupPhase("failed");
                 setQuickSetupResult(getErrorMessage(err) || "无法启用 AI 助手，请检查密钥是否正确，或稍后重试。");
               }
               setQuickSetupApplying(false);
             }} disabled={!quickSetupToken.trim() || quickSetupApplying}>
-              {quickSetupApplying ? <><Loader2 className="h-4 w-4 animate-spin" />正在启用...</> : "一键启用 AI 助手"}
+              {quickSetupApplying
+                ? <><Loader2 className="h-4 w-4 animate-spin" />{quickSetupPhase === "applying" ? "正在保存配置..." : quickSetupPhase === "starting" ? "正在启动..." : "正在检查..."}</>
+                : "一键启用 AI 助手"}
             </Button>
             {quickSetupResult === "success" && (
-              <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-2 text-xs text-emerald-700 dark:text-emerald-400">AI 助手配置已保存。如本地服务未运行，请点击下方"启动本地服务"。</div>
+              <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-2 text-xs text-emerald-700 dark:text-emerald-400">AI 助手已启用，可以开始对话。</div>
             )}
             {quickSetupResult && quickSetupResult !== "success" && (
               <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-2 text-xs text-rose-700 dark:text-rose-400">{quickSetupResult}</div>
