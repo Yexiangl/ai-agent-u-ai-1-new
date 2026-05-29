@@ -264,8 +264,17 @@ OpenClaw 将成为主体 Agent 后端。Hermes 不再作为普通用户主路径
 | TASK-038E | 已完成 | P1 | 写入后自动 start + probe | 已审查通过：一键启用 3 阶段（保存→启动→检查），启动失败不阻断（可能已运行），成功"AI 助手已启用可以开始对话"，失败脱敏可重试。 |
 | TASK-038F | 已完成 | P2 | 初始化回归测试 | 已审查通过：6/6 检查项通过（UI/状态流/安全链路/schema/自动启动/安全边界），无 P0/P1。未执行真实 token 测试（可接受）。 |
 | TASK-038G | 已完成 | P2 | dummy token 冒烟测试 | 已审查通过：真实执行 write→validate→rollback 链路，发现并修复 P0（models 需 name 字段）。原配置已恢复。npm run build 补跑通过。 |
-| TASK-039 | 进行中 | P2 | v0.3.0 发布准备 | 发布说明整理 + 阶段收口。 |
-| TASK-039A | ✅ 待验收 | P2 | v0.3.0 发布说明与阶段整理 | 输出 docs/v0.3.0-internal-test-release.md（用户版+技术版）、更新 stage-release-notes.md。 |
+| TASK-039 | 已完成 | P2 | v0.3.0 发布准备 | 已审查通过：发布说明（用户版+技术版）+ 已知限制 + 测试状态 + 下一步建议。无 token 残留。 |
+| TASK-039A | 已完成 | P2 | v0.3.0 发布说明与阶段整理 | 已审查通过：docs/v0.3.0-internal-test-release.md 适合内测分发，用户版少技术词，突出一键启用，技术版覆盖 TASK-031~038，已知限制清楚。 |
+| TASK-040 | 进行中 | P0 | 产品完整性审计与内测准备 | 父任务：技术词清理+真实冒烟+打包验证，目标"简单易用易看懂"。 |
+| TASK-040A | 待验收 | P0 | 全项目产品完整性审计 | 已完成：docs/product-readiness-audit-v0.3.0.md。结论：有条件可内测，需先修 3 个 P0（技术词/消息来源/错误提示）。TOP 10 风险+10 页面易用性评分+最小内测任务包。 |
+| TASK-040B | 已完成 | P0 | 普通视图技术词替换 | 已审查通过：消息来源→AI Agent，诊断描述去 OpenClaw，教程重写，关于页改，终端命令全部移除。普通 UI 无 openclaw gateway start/restart。P1 残留（助手记忆"OpenClaw 工作区"）归入 040F。 |
+| TASK-040C | 已完成（合并入 040B） | P0 | AI 回复来源改为"AI 助手" | 已在 040B 中完成：显示为"AI Agent"（与产品名一致）。 |
+| TASK-040D | 已完成（合并入 040B-P0） | P0 | 错误提示去终端命令 | 已在 040B-P0 中完成：改为"请点击下方按钮启动"/"请点击重新检查"。 |
+| TASK-040E | 待规划 | P0 | 真实客户 token 冒烟 | 用真实 token 走完主路径。阻塞内测。 |
+| TASK-040F | 已完成 | P1 | 助手记忆/用量/能力中心技术词清理 | 已审查通过：助手记忆"OpenClaw 工作区"→"本地助手记忆"，用量页加余额免责，能力 badge "OpenClaw"→"官方"/"精选目录"。P2 残留：记忆页"记忆记忆"重复词、关于页"OpenClaw Agent"、排行 Curated 未中文化。 |
+| TASK-040G | 待规划 | P1 | Windows 打包验证 | tauri build --target windows。 |
+| TASK-040H | 待规划 | P2 | 内测交付清单 | 安装说明+版本号+回滚方案。 |
 | TASK-028 | 进行中（阶段性完成） | P2 | Portable / U 盘 A+B 模式可行性审计 | A+B 可行性、data mode、runtime 探针、Windows/macOS 启动方案和安全策略文档均已完成；仍等待实现类子任务。 |
 | TASK-028A | 已完成 | P2 | Portable / U 盘 A+B 模式可行性审计 | 已审查通过：A 模式优先，chatProjects localStorage 为 P0 portable 风险，B runtime 后置。 |
 | TASK-028B | 已完成 | P0 | Portable data 目录设计与路径检测 | 已审查通过：目录结构、system/portable mode、portable.json 触发和 chatProjects 迁移前置设计合格。 |
@@ -395,6 +404,11 @@ OpenClaw 将成为主体 Agent 后端。Hermes 不再作为普通用户主路径
 - TASK-038E 终审通过（2026-05-29）：一键启用后自动 start + probe 合格。完整流程：(1) applying→applyOpenClawProviderConfig(token,"quality")→清空 token；(2) starting→invoke("start_openclaw_gateway")→失败静默（可能已运行）；(3) checking→refreshAll()。成功："AI 助手已启用，可以开始对话"。失败：脱敏错误+可重试。阶段文案面向普通用户（正在保存配置/正在启动/正在检查），无技术词。只有用户点击才触发，非自动。原"启动本地服务"按钮保留。未执行 restart/stop/doctor/config set/update。TASK-038 主线 A-E 全部完成，仅剩 F 回归。
 - TASK-038F 终审通过（2026-05-29）：初始化回归测试合格，6/6 通过。TASK-038 阶段性收口确认：(1) UI 符合无技术客户定位（粘贴密钥+一键启用，无技术词）；(2) 状态流完整（applying→starting→checking→done/failed）；(3) 安全链路保持（backup/chmod 0o600/validate/rollback）；(4) schema 修复保持（models 对象数组+reader 兼容）；(5) 自动启动+检查保持（start_openclaw_gateway+refreshAll）；(6) 无 token/provider/baseUrl 暴露。未执行真实 token 测试可接受（代码路径已验证）。建议后续可补 TASK-038G dummy token 冒烟测试。
 - TASK-038G 终审通过（2026-05-29）：dummy token 冒烟测试合格。真实执行 write→chmod→validate 链路，发现 P0：OpenClaw schema 要求 models 对象同时包含 id 和 name 字段（只有 id 会 validate FAIL）。已修复 writer：[{"id":"deepseek-v4-flash","name":"DeepSeek V4 Flash"},{"id":"deepseek-v4-pro","name":"DeepSeek V4 Pro"}]。Reader 兼容保持（id/name/string/unknown）。原配置已恢复，dummy token 未入 docs/AGENT_BOARD。npm run build 补跑通过。TASK-038 最终收口。
+- TASK-039A 终审通过（2026-05-29）：v0.3.0 内部测试版发布说明合格。(1) 用户版 7 大模块清楚（一键启用/状态/能力中心/用量/记忆/摸鱼/体验），少技术词，普通客户能看懂。(2) 突出"一键启用 AI 助手"商业入口。(3) 技术变更覆盖 TASK-031~038。(4) 已知限制 7 项清楚（Windows/大规模测试/能力冒烟/restart/诊断导出/外部能力/高级诊断）。(5) 测试状态准确（build/check/probe/redaction/冒烟）。(6) 无 token/dummy/baseUrl 残留。(7) stage-release-notes.md 同步。TASK-039 收口。
+- TASK-040A 已完成（2026-05-29）：全项目产品完整性审计。输出 docs/product-readiness-audit-v0.3.0.md。总体结论：有条件可内测，需先修 3 个 P0。TOP 10 风险：(1) OpenClaw 普通视图暴露 20+ 处；(2) AI 回复来源"OpenClaw Agent"；(3) 错误提示含终端命令。10 页面易用性评分：首页 5/摸鱼 5/对话 4/能力 4/文件 4/初始化 4/用量 3/教程 3/关于 3/AI 助手 2/记忆 2。内测前最小任务包：040B 技术词替换 + 040C 消息来源 + 040D 错误提示 + 040E 真实冒烟，合计 3.5h。本轮未修改业务代码。
+- TASK-040B 复审（2026-05-29）：大部分技术词替换完成，但有 P0/P1 残留。已完成：消息来源"OpenClaw Agent"→显示为"AI Agent"；诊断卡描述去 OpenClaw；教程重写为客户工作流；关于页改为"AI 助手服务"；错误提示部分改善。残留 P0：(1) 状态卡仍有"请在终端运行 openclaw gateway start"（line 1402）；(2) 保存配置后仍有"openclaw gateway restart"（line 1523）。残留 P1：(3) 助手记忆页"OpenClaw 工作区"6 处；(4) 能力中心 badge 显示"OpenClaw"。建议：040B 需要补丁修复 P0 残留后才能标记完成。
+- TASK-040B-P0 终审通过（2026-05-30）：终端命令暴露修复合格。L1402 改为"请点击下方按钮启动本地服务"，L1523 改为"请点击重新检查本地服务状态"。普通 UI 中 rg "openclaw gateway" → 0 hits。文案与现有启动按钮衔接清楚。TASK-040B 标记完成。TASK-040C（消息来源）和 040D（错误提示）已合并入 040B/040B-P0 完成。P0 内测阻塞项全部解除。P1 残留（助手记忆"OpenClaw 工作区"、能力中心 badge "OpenClaw"）归入 TASK-040F。
+- TASK-040F 终审通过（2026-05-30）：P1 技术词清理合格。(1) 助手记忆：10 处"OpenClaw 工作区"→"本地助手记忆"，说明改为"本地 AI 助手保存的只读记忆信息，已做脱敏处理"。(2) 用量概览：加余额免责"实际额度和续费状态以服务后台为准"+"不代表剩余额度"。(3) 能力中心：openclaw badge→"官方"，curated→"精选目录"（已安装区），ClawHub 保留。未改读取/只读/脱敏/usage/install 逻辑。P2 残留：(a) L4217"本地助手记忆记忆"重复词；(b) 关于页"OpenClaw Agent"；(c) 排行区 Curated 未中文化。均不阻塞内测。
 - TASK-036C 终审通过（2026-05-29）：能力中心视觉 polish 合格。排行卡片 nativeName/installCommand 折叠到 <details className="text-[10px]"><summary>安装详情</summary>，主视觉优先展示名称/简介/badges/按钮。已安装卡片安装命令弱化（text-muted-foreground/70）。信息保留完整未删除。安装确认弹窗仍展示完整 nativeName/installCommand。排行免责"排行仅用于浏览参考"保留。高风险项辨识度不变。Toast 未接入本任务可接受（inline error 仍有效）。未改 install/uninstall/allowlist/风险逻辑。下一步建议 TASK-036D AI 对话页交互 polish。
 - TASK-036D 终审通过（2026-05-29）：AI 对话页交互 polish 合格。(1) 消息动画：animate-message-in 0.18s ease-out translateY(6px)，key=requestId 保证流式输出不重新触发动画。(2) 空状态："开始一次 AI 对话" + 4 chip 引导（总结/任务/报错/方案），点击填入输入框不自动发送。(3) 回执说"18ms"实为 0.18s=180ms，合理。未改 send/retry/regen/stop/session/usage/backend 逻辑。下一步建议 TASK-036E AI 助手页 polish 或跳到 TASK-036G 回归。
 - TASK-036E 终审通过（2026-05-29）：AI 助手页诊断/配置 polish 合格。(1) 状态 badge："已准备好"→"已连接"更准确。(2) 正常文案："AI 助手已连接，可以开始对话"。(3) 异常分层：本地服务未运行/密钥未配置/需要检查，各有明确提示。(4) openclaw gateway start 仅为文本提示非自动执行。(5) 模型配置说明更适合普通用户。(6) "重新检查本地服务"比"重启"更准确。(7) 普通视图无 provider/baseUrl/API URL/Token 明文。npm run build 补跑通过。未改 Token/config 写入/对话/install。下一步建议 TASK-036F 或 TASK-036G 回归。
