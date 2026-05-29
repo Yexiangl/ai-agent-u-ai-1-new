@@ -1190,6 +1190,9 @@ function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelCo
   const [refreshing, setRefreshing] = useState(false);
   const [startingGateway, setStartingGateway] = useState(false);
   const [gatewayStartError, setGatewayStartError] = useState("");
+  const [quickSetupToken, setQuickSetupToken] = useState("");
+  const [quickSetupApplying, setQuickSetupApplying] = useState(false);
+  const [quickSetupResult, setQuickSetupResult] = useState<string>("");
   const [showKey, setShowKey] = useState(false);
   const [testing, setTesting] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
@@ -1410,6 +1413,43 @@ function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelCo
           </div>
         </CardContent>
       </Card>
+
+      {/* TASK-038C: One-click AI assistant setup */}
+      {ocChecked && (!ocConfig?.gatewayTokenPresent || !ocReady) && (
+        <Card className="border-primary/20 bg-primary/5">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">启用 AI 助手</CardTitle>
+            <CardDescription className="text-xs">请输入购买后获得的模型访问密钥。系统会自动完成本地 AI 助手配置。</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div>
+              <Input type="password" value={quickSetupToken} onChange={(e) => setQuickSetupToken(e.target.value)} placeholder="模型访问密钥" />
+            </div>
+            <Button onClick={async () => {
+              if (!quickSetupToken.trim()) return;
+              setQuickSetupApplying(true);
+              setQuickSetupResult("");
+              try {
+                await applyOpenClawProviderConfig(quickSetupToken, "quality");
+                setQuickSetupResult("success");
+                setQuickSetupToken("");
+                await refreshAll();
+              } catch (err) {
+                setQuickSetupResult(getErrorMessage(err) || "无法启用 AI 助手，请检查密钥是否正确，或稍后重试。");
+              }
+              setQuickSetupApplying(false);
+            }} disabled={!quickSetupToken.trim() || quickSetupApplying}>
+              {quickSetupApplying ? <><Loader2 className="h-4 w-4 animate-spin" />正在启用...</> : "一键启用 AI 助手"}
+            </Button>
+            {quickSetupResult === "success" && (
+              <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-2 text-xs text-emerald-700 dark:text-emerald-400">AI 助手配置已保存。如本地服务未运行，请点击下方"启动本地服务"。</div>
+            )}
+            {quickSetupResult && quickSetupResult !== "success" && (
+              <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-2 text-xs text-rose-700 dark:text-rose-400">{quickSetupResult}</div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* 2. Model Config */}
       <Card>
