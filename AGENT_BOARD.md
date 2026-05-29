@@ -232,8 +232,8 @@ OpenClaw 将成为主体 Agent 后端。Hermes 不再作为普通用户主路径
 | TASK-033E | 已完成 | P2 | 记忆模块回归测试 | 已审查通过：15/15 检查项通过，无 P0/P1 缺陷，主数据源/只读/脱敏/路径/兼容性全部合格。 |
 | TASK-034 | 方案中 | P1 | OpenClaw 本地服务自助诊断 | 设计 App 内诊断能力：状态检测 + 修复建议 + 控制台入口。 |
 | TASK-034A | 已完成 | P1 | 诊断方案设计 | 已审查通过：AI 助手页诊断面板方案合格。9 项检测 + 6 种状态 + 修复建议 + 安全分级（只读可执行/写入禁止）+ 脱敏规则 + 5 子任务拆分。 |
-| TASK-034B | ✅ 待验收 | P1 | 诊断面板 UI | AI 助手页新增本地服务诊断卡片：6 检测项 + 状态消息 + 修复建议 + 重新检查。 |
-| TASK-034C | ✅ 待验收 | P1 | 打开 OpenClaw 控制台按钮 | `window.open` 打开本机 127.0.0.1:18789，无 token 暴露。 |
+| TASK-034B | 已完成 | P1 | 诊断面板 UI | 已审查通过：6 检测项（本地服务/密钥/模型接口/当前模型/对话接口/最近检查）+ 修复建议（文本提示非自动执行）+ 重新检查按钮。 |
+| TASK-034C | 已完成 | P1 | 打开 OpenClaw 控制台按钮 | 已审查通过：window.open 本机 127.0.0.1:18789，无 token 拼接，安全提示"请勿暴露到公网"。 |
 | TASK-034D | 待规划 | P1 | Rust 只读 CLI 诊断命令 | gateway_status / config_validate。 |
 | TASK-034E | 待规划 | P2 | 复制脱敏诊断摘要 | 格式化 + 脱敏。 |
 | TASK-034F | 待规划 | P2 | 诊断模块回归测试 | 验证各状态检测正确。 |
@@ -343,6 +343,7 @@ OpenClaw 将成为主体 Agent 后端。Hermes 不再作为普通用户主路径
 - TASK-033E 已执行（2026-05-29）：助手记忆模块回归测试完成。15 项检查全部通过：页面标题/数据源/6 文件/kind badge 中文化/只读/脱敏/不显绝对路径/缺失 warning/目录不存在不崩溃/Hermes 不混入主列表/不读 .env/不输出 Token/不改 config/不改对话/不改 skill。`npm run build` ✅ `cargo check` ✅ `test-redaction` 21/21 ✅。无 P0/P1 缺陷。建议 TASK-033 阶段收口。
 - TASK-034A 已执行（2026-05-29）：OpenClaw 本地服务自助诊断方案设计完成。输出 `docs/openclaw-self-diagnostics-design.md`，共 8 章节。设计要点：(1) 诊断面板位置在 AI 助手页，取代当前"高级诊断"小字链接；(2) 6 种状态枚举 + 9 项检测项；(3) 普通视图显示用户化状态卡片 + 修复建议，高级诊断折叠保留技术细节；(4) 安全分级：只读命令可执行（gateway_status/config_validate/probe），写入命令禁止执行（doctor --fix/gateway restart/config set）；(5) 错误原因映射表：网关未运行/密钥未配置/接口未启用/请求异常；(6) 5 个子任务 034B-F。本轮未修改业务代码。
 - TASK-034B/C 已执行（2026-05-29）：AI 助手页本地服务诊断面板 + 控制台按钮完成。修改：`App.tsx`（新增诊断卡片 + ExternalLink 图标导入）。UI：(1) 卡片标题"本地服务诊断"，说明"检查 AI 对话所需的 OpenClaw 本地服务状态"；(2) 6 检测项：本地服务（运行中/未运行）、密钥状态（已配置/未配置）、模型接口（正常/异常）、当前模型、对话接口（正常/异常）、最近检查；(3) 异常时显示修复建议（gateway start / 保存密钥等）；(4) "打开 OpenClaw 控制台"按钮（window.open 本机地址）；(5) 安全提示"控制台仅打开本机地址"；(6) 高级诊断链接保留。未执行 doctor --fix / gateway restart / config set 等写入命令。`npm run build` ✅ `cargo check` ✅ `probe.mjs` ✅ `test-redaction` 21/21 ✅。下一步建议 TASK-034D 或 TASK-034F。
+- TASK-034B/C 终审通过（2026-05-29）：诊断面板 + 控制台按钮合格。6 项检测覆盖常见问题（本地服务/密钥/模型接口/当前模型/对话接口/最近检查）。修复建议为文本提示（"请在终端运行 openclaw gateway start"），非自动执行。控制台按钮 window.open 本机地址，无 token 拼接，安全提示"请勿暴露到公网"。高级诊断中 config set 命令仅为参考文本。未执行 doctor --fix/restart/stop/config set。未改对话/install/config/Token 写入。P2 观察项：window.open 在 Tauri 中可能需后续改为 shell.open 以获得更好的桌面体验。下一步建议 TASK-034E 复制脱敏诊断摘要或 TASK-034F 回归测试。
 - TASK-034A 终审通过（2026-05-29）：诊断方案设计合格。入口在 AI 助手页合理（用户遇到问题时自然去 AI 助手页）。普通视图卡片+高级诊断折叠结构合理。状态枚举覆盖 6 种常见场景。9 项检测项合理（不过多，核心覆盖）。优先使用已有能力（openclaw_http_status/read_openclaw_config_summary）。明确禁止 doctor --fix/gateway restart/stop/config set。修复建议为"提示用户操作"非自动执行。脱敏规则明确（不显示 Token/Authorization/Bearer/baseUrl/API URL）。子任务拆分合理。建议先做 034B+C 合并（诊断面板 UI + 打开控制台按钮）。
 - TASK-033E 终审通过（2026-05-29）：回归测试 15/15 合格。TASK-033 阶段性收口确认：主数据源已切换 OpenClaw workspace，只读+脱敏+不暴露绝对路径+缺失优雅处理。Hermes 仅底部 legacy 提示不混入主列表。033C（双源折叠）和 033D（详情 polish）为 P1/P2 后置，不阻塞当前版本。建议暂不做 033C，当前 Hermes 底部提示已足够。
 - TASK-033B 终审通过（2026-05-29）：OpenClaw workspace memory 只读接入合格。Rust command 只读 6 个硬编码文件（SOUL/USER/AGENTS/HEARTBEAT/IDENTITY/TOOLS.md），复用 collect_memory_file + redact_sensitive_content 脱敏，返回 relativePath 不暴露绝对路径。目录/文件缺失时优雅 warning。MemoryPage 主数据源已切换，Hermes 仅底部 legacy 提示。Kind badge 中文化（人格/用户/代理/心跳/身份/工具）。详情页显示"只读"badge。未改 config/Token/对话/install/portable。下一步建议 TASK-033C Hermes legacy 折叠或直接 TASK-033E 回归测试。
