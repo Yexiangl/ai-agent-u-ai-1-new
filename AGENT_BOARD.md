@@ -245,14 +245,14 @@ OpenClaw 将成为主体 Agent 后端。Hermes 不再作为普通用户主路径
 | TASK-035D | 已完成 | P1 | 安装/卸载 loading 与反馈优化 | 已审查通过：安装分阶段（installing→refreshing），卸载确认弹窗（含"不删除对话数据"），错误可关闭，按钮 disabled 防重复，未改执行逻辑。 |
 | TASK-035E | 已完成 | P1 | 已安装能力中心 | 已审查通过：已安装能力区域位于排行之前，卡片展示完整（名称/badge/原生名称/安装时间/来源/类型/风险/命令/卸载），缺失字段"信息待同步"兜底，卸载复用 035D 确认流。 |
 | TASK-035F | 已完成 | P2 | 能力中心回归测试 | 已审查通过：7/7 代码级检查通过，无 skillhub/甩锅残留，状态流/弹窗/安全边界合格。未执行真实安装（可接受，留待冒烟测试）。 |
-| TASK-036 | 进行中 | P1 | 前端 UI 动效与交互体验 polish | 父任务：页面 fade + toast + 能力中心视觉 + 对话页 + 助手页 + 摸鱼中心。 |
+| TASK-036 | 已完成 | P1 | 前端 UI 动效与交互体验 polish | 已审查通过：A-G 全量完成。页面 fade-in + toast + 导航 hover + 能力中心折叠 + 对话消息动画 + 助手页文案 + 摸鱼 hover + 回归 11/11。 |
 | TASK-036A | 待验收 | P1 | UI 动效与交互体验审计 | 已完成：docs/ui-animation-interaction-polish-audit.md。无动画库，纯 Tailwind + CSS keyframe 方案。P1：页面 fade + toast + 能力中心信息密度。 |
 | TASK-036B | 已完成 | P1 | 全局交互基础 | 已审查通过：10 页面 animate-fade-in（key 切换触发），导航 hover 改语义 token（无 hex 残留），toast 组件（4 类型，3s 自动消失，底部右侧不挡操作）。未引入动画库。 |
 | TASK-036C | 已完成 | P1 | 能力中心视觉 polish | 已审查通过：排行卡片 nativeName/installCommand 折叠到 <details>，主视觉优先名称/简介/badges/按钮。已安装卡片安装命令弱化。信息保留完整，层级更清楚。 |
 | TASK-036D | 已完成 | P2 | AI 对话页交互 polish | 已审查通过：消息 animate-message-in（180ms, 6px slide-up，不闪烁），空状态"开始一次 AI 对话"+4 chip 引导（填入不发送）。未改 send/retry/regen/stop/session 逻辑。 |
 | TASK-036E | 已完成 | P2 | AI 助手页 polish | 已审查通过：状态 badge"已连接"，正常/异常分层文案，模型配置说明更完整，"重新检查本地服务"替代"重启"。未新增 gateway start 按钮，未改 Token/config 写入。 |
 | TASK-036F | 已完成 | P2 | 摸鱼中心/首页 polish | 已审查通过：摸鱼中心底部三卡补齐 hover（transition-colors hover:border-primary/20 hover:bg-primary/5），与全局风格统一。首页已从 TASK-025 完成 polish，本轮验证通过。安全提示条保留。 |
-| TASK-036G | 待规划 | P2 | UI 动效回归测试 | 验证动画不影响功能。 |
+| TASK-036G | 已完成 | P2 | UI 动效回归测试 | 已审查通过：11/11 检查项通过，无 P0/P1。页面 fade/toast/卡片 hover/消息动画/诊断文案/控制台/安全边界全部合格。 |
 | TASK-037 | 进行中 | P1 | OpenClaw 本地服务交互优化 | 父任务：控制台打开方式 + 一键启动 + 诊断增强。 |
 | TASK-037B | 已完成 | P1 | 控制台按钮改为 openclaw dashboard | 已审查通过：从 open_url(127.0.0.1:18789) 改为 Command::new("openclaw").arg("dashboard")，CLI 自动处理认证，不暴露 URL/token，错误提示脱敏。 |
 | TASK-028 | 进行中（阶段性完成） | P2 | Portable / U 盘 A+B 模式可行性审计 | A+B 可行性、data mode、runtime 探针、Windows/macOS 启动方案和安全策略文档均已完成；仍等待实现类子任务。 |
@@ -379,6 +379,7 @@ OpenClaw 将成为主体 Agent 后端。Hermes 不再作为普通用户主路径
 - TASK-036D 终审通过（2026-05-29）：AI 对话页交互 polish 合格。(1) 消息动画：animate-message-in 0.18s ease-out translateY(6px)，key=requestId 保证流式输出不重新触发动画。(2) 空状态："开始一次 AI 对话" + 4 chip 引导（总结/任务/报错/方案），点击填入输入框不自动发送。(3) 回执说"18ms"实为 0.18s=180ms，合理。未改 send/retry/regen/stop/session/usage/backend 逻辑。下一步建议 TASK-036E AI 助手页 polish 或跳到 TASK-036G 回归。
 - TASK-036E 终审通过（2026-05-29）：AI 助手页诊断/配置 polish 合格。(1) 状态 badge："已准备好"→"已连接"更准确。(2) 正常文案："AI 助手已连接，可以开始对话"。(3) 异常分层：本地服务未运行/密钥未配置/需要检查，各有明确提示。(4) openclaw gateway start 仅为文本提示非自动执行。(5) 模型配置说明更适合普通用户。(6) "重新检查本地服务"比"重启"更准确。(7) 普通视图无 provider/baseUrl/API URL/Token 明文。npm run build 补跑通过。未改 Token/config 写入/对话/install。下一步建议 TASK-036F 或 TASK-036G 回归。
 - TASK-036F 终审通过（2026-05-29）：首页/摸鱼中心视觉 polish 合格。摸鱼中心底部三卡补齐 hover（transition-colors hover:border-primary/20 hover:bg-primary/5），与全局交互卡片风格统一。首页已从 TASK-025 完成主要 polish，本轮验证通过不大改可接受。安全提示条"不是医学或心理诊断，不会自动发送，不会读取文件"保留完整。setChatDraft+setActive("chat") 行为未变。未新增后台任务/通知/计时器。未改对话/install/config/Token。TASK-036 主线 A-F 全部完成，仅剩 G 回归测试。
+- TASK-036G 终审通过（2026-05-29）：全局 UI polish 回归测试合格，11/11 检查项通过。页面 fade-in 不造成状态丢失（chatState 在父组件）。Toast 轻量就绪未替代 inline error。能力中心 details 折叠保留透明信息。消息动画不影响流式输出（key=requestId）。助手页文案更清楚。控制台 openclaw dashboard 正常。摸鱼 hover+安全提示正常。助手记忆/用量概览未被破坏。未改 backend/install/config/Token。无 P0/P1。TASK-036 全线完成（A-G），标记为阶段性收口。
 - TASK-034A 终审通过（2026-05-29）：诊断方案设计合格。入口在 AI 助手页合理（用户遇到问题时自然去 AI 助手页）。普通视图卡片+高级诊断折叠结构合理。状态枚举覆盖 6 种常见场景。9 项检测项合理（不过多，核心覆盖）。优先使用已有能力（openclaw_http_status/read_openclaw_config_summary）。明确禁止 doctor --fix/gateway restart/stop/config set。修复建议为"提示用户操作"非自动执行。脱敏规则明确（不显示 Token/Authorization/Bearer/baseUrl/API URL）。子任务拆分合理。建议先做 034B+C 合并（诊断面板 UI + 打开控制台按钮）。
 - TASK-033E 终审通过（2026-05-29）：回归测试 15/15 合格。TASK-033 阶段性收口确认：主数据源已切换 OpenClaw workspace，只读+脱敏+不暴露绝对路径+缺失优雅处理。Hermes 仅底部 legacy 提示不混入主列表。033C（双源折叠）和 033D（详情 polish）为 P1/P2 后置，不阻塞当前版本。建议暂不做 033C，当前 Hermes 底部提示已足够。
 - TASK-033B 终审通过（2026-05-29）：OpenClaw workspace memory 只读接入合格。Rust command 只读 6 个硬编码文件（SOUL/USER/AGENTS/HEARTBEAT/IDENTITY/TOOLS.md），复用 collect_memory_file + redact_sensitive_content 脱敏，返回 relativePath 不暴露绝对路径。目录/文件缺失时优雅 warning。MemoryPage 主数据源已切换，Hermes 仅底部 legacy 提示。Kind badge 中文化（人格/用户/代理/心跳/身份/工具）。详情页显示"只读"badge。未改 config/Token/对话/install/portable。下一步建议 TASK-033C Hermes legacy 折叠或直接 TASK-033E 回归测试。
