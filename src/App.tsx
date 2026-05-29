@@ -647,6 +647,16 @@ function App() {
   const [openclawChecked, setOpenclawChecked] = useState(false);
   const [ocPrimaryModel, setOcPrimaryModel] = useState("");
 
+  // TASK-036B: Toast
+  const [toasts, setToasts] = useState<Array<{ id: number; message: string; type: "success" | "error" | "warning" | "info" }>>([]);
+  const toastId = useRef(0);
+  const showToast = useCallback((msg: string, type: "success" | "error" | "warning" | "info" = "info") => {
+    const id = ++toastId.current;
+    setToasts(prev => [...prev, { id, message: msg, type }]);
+    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 3000);
+  }, []);
+  const dismissToast = (id: number) => setToasts(prev => prev.filter(t => t.id !== id));
+
   const chatState = {
     messages: chatMessages, setMessages: setChatMessages, messagesRef: chatMessagesRef,
     chatSessions, setChatSessions, chatSessionsRef, latestSessionsRef,
@@ -819,7 +829,7 @@ function App() {
                 onClick={() => setActive(item.id)}
                 className={cn(
                   "flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm transition-colors",
-                  selected ? "bg-[#EEF2FF] font-medium text-[#4F46E5] dark:bg-indigo-500/16 dark:text-indigo-300" : "text-muted-foreground hover:bg-[#F1F5F9] hover:text-foreground dark:hover:bg-slate-800"
+                  selected ? "bg-primary/10 font-medium text-primary dark:bg-primary/15" : "text-muted-foreground hover:bg-muted hover:text-foreground"
                 )}
               >
                 <Icon className="h-4 w-4" />
@@ -870,6 +880,17 @@ function App() {
             <Page active={active} setActive={setActive} chatDraft={chatDraft} setChatDraft={setChatDraft} pendingNewSessionTitle={pendingNewSessionTitle} setPendingNewSessionTitle={setPendingNewSessionTitle} pendingChatAttachment={pendingChatAttachment} setPendingChatAttachment={setPendingChatAttachment} config={config} updateConfig={updateConfig} hermesCli={hermesCli} hermesApi={hermesApi} hermesModelConfig={hermesModelConfig} setHermesModelConfig={setHermesModelConfig} refreshHermesCli={refreshHermesCli} refreshHermesApi={refreshHermesApi} chatState={chatState} />
           )}
         </main>
+      </div>
+      {/* TASK-036B: Toast */}
+      <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2 pointer-events-none">
+        {toasts.map(t => (
+          <div key={t.id} className={cn("pointer-events-auto animate-toast-in flex items-start gap-2 rounded-lg border px-4 py-3 text-sm shadow-lg max-w-sm",
+            t.type === "success" && "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
+            t.type === "error" && "border-rose-500/30 bg-rose-500/10 text-rose-700 dark:text-rose-400",
+            t.type === "warning" && "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400",
+            t.type === "info" && "border-primary/30 bg-primary/5 text-primary"
+          )}><span>{t.message}</span><button className="shrink-0 opacity-60 hover:opacity-100" onClick={() => dismissToast(t.id)}>×</button></div>
+        ))}
       </div>
     </div>
   );
@@ -976,16 +997,16 @@ function Page({ active, setActive, chatDraft, setChatDraft, pendingNewSessionTit
   refreshHermesCli: () => Promise<HermesStatus>; refreshHermesApi: () => Promise<HermesApiServerStatus>;
   chatState: ChatPageState;
 }) {
-  if (active === "home") return <HomePage config={config} updateConfig={updateConfig} setActive={setActive} hermesCli={hermesCli} hermesApi={hermesApi} hermesModelConfig={hermesModelConfig} chatState={chatState} />;
-  if (active === "chat") return <ChatPage config={config} hermesCli={hermesCli} hermesApi={hermesApi} refreshHermesApi={refreshHermesApi} setActive={setActive} initialDraft={chatDraft} onDraftConsumed={() => setChatDraft("")} pendingNewSessionTitle={pendingNewSessionTitle} onNewSessionCreated={() => setPendingNewSessionTitle("")} pendingAttachment={pendingChatAttachment} onAttachmentConsumed={() => setPendingChatAttachment(null)} chatState={chatState} />;
-  if (active === "engines") return <EnginesPage config={config} updateConfig={updateConfig} hermesCli={hermesCli} hermesApi={hermesApi} hermesModelConfig={hermesModelConfig} setHermesModelConfig={setHermesModelConfig} refreshHermesCli={refreshHermesCli} refreshHermesApi={refreshHermesApi} setActive={setActive} chatState={chatState} />;
-  if (active === "skills") return <SkillsPage config={config} updateConfig={updateConfig} setActive={setActive} setChatDraft={setChatDraft} setPendingNewSessionTitle={setPendingNewSessionTitle} />;
-  if (active === "moyu") return <MoyuCenterPage setActive={setActive} setChatDraft={setChatDraft} />;
-  if (active === "memory") return <MemoryPage />;
-  if (active === "usage") return <UsagePage />;
-  if (active === "files") return <AiFilesPage setActive={setActive} setPendingChatAttachment={setPendingChatAttachment} />;
-  if (active === "tutorials") return <TutorialsPage config={config} />;
-  return <AboutPage config={config} updateConfig={updateConfig} />;
+  if (active === "home") return <div key="home" className="animate-fade-in"><HomePage config={config} updateConfig={updateConfig} setActive={setActive} hermesCli={hermesCli} hermesApi={hermesApi} hermesModelConfig={hermesModelConfig} chatState={chatState} /></div>;
+  if (active === "chat") return <div key="chat" className="animate-fade-in"><ChatPage config={config} hermesCli={hermesCli} hermesApi={hermesApi} refreshHermesApi={refreshHermesApi} setActive={setActive} initialDraft={chatDraft} onDraftConsumed={() => setChatDraft("")} pendingNewSessionTitle={pendingNewSessionTitle} onNewSessionCreated={() => setPendingNewSessionTitle("")} pendingAttachment={pendingChatAttachment} onAttachmentConsumed={() => setPendingChatAttachment(null)} chatState={chatState} /></div>;
+  if (active === "engines") return <div key="engines" className="animate-fade-in"><EnginesPage config={config} updateConfig={updateConfig} hermesCli={hermesCli} hermesApi={hermesApi} hermesModelConfig={hermesModelConfig} setHermesModelConfig={setHermesModelConfig} refreshHermesCli={refreshHermesCli} refreshHermesApi={refreshHermesApi} setActive={setActive} chatState={chatState} /></div>;
+  if (active === "skills") return <div key="skills" className="animate-fade-in"><SkillsPage config={config} updateConfig={updateConfig} setActive={setActive} setChatDraft={setChatDraft} setPendingNewSessionTitle={setPendingNewSessionTitle} /></div>;
+  if (active === "moyu") return <div key="moyu" className="animate-fade-in"><MoyuCenterPage setActive={setActive} setChatDraft={setChatDraft} /></div>;
+  if (active === "memory") return <div key="memory" className="animate-fade-in"><MemoryPage /></div>;
+  if (active === "usage") return <div key="usage" className="animate-fade-in"><UsagePage /></div>;
+  if (active === "files") return <div key="files" className="animate-fade-in"><AiFilesPage setActive={setActive} setPendingChatAttachment={setPendingChatAttachment} /></div>;
+  if (active === "tutorials") return <div key="tutorials" className="animate-fade-in"><TutorialsPage config={config} /></div>;
+  return <div key="about" className="animate-fade-in"><AboutPage config={config} updateConfig={updateConfig} /></div>;
 }
 
 // TASK-025B/TASK-032D: Format model name for display (de-internalize routing IDs)
