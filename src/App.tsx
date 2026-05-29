@@ -1189,6 +1189,7 @@ function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelCo
   const displayModel = formatDisplayModel(chatState.ocPrimaryModel) || "需要检查";
   const [refreshing, setRefreshing] = useState(false);
   const [startingGateway, setStartingGateway] = useState(false);
+  const [gatewayStartError, setGatewayStartError] = useState("");
   const [showKey, setShowKey] = useState(false);
   const [testing, setTesting] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
@@ -1608,17 +1609,26 @@ function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelCo
                   <p className="text-amber-600 dark:text-amber-400">本地服务未运行。请在终端运行 <code className="rounded bg-muted px-1 font-mono text-[11px]">openclaw gateway start</code>，或点击下方按钮启动。</p>
                   <Button size="sm" disabled={startingGateway} onClick={async () => {
                     setStartingGateway(true);
+                    setGatewayStartError("");
                     try {
                       await invoke("start_openclaw_gateway");
                       await refreshAll();
-                    } catch { /* fall through */ }
+                    } catch {
+                      setGatewayStartError("无法启动本地服务，请确认 OpenClaw 已安装，或在终端运行 openclaw gateway start。");
+                    }
                     setStartingGateway(false);
                   }}>
                     {startingGateway ? <><Loader2 className="h-3.5 w-3.5 animate-spin" />正在启动...</> : <><Play className="h-3.5 w-3.5" />启动本地服务</>}
                   </Button>
-                  <p className="text-[10px] text-muted-foreground">启动后会自动重新检查本地服务状态。</p>
-                </div>
-              )}
+<p className="text-[10px] text-muted-foreground">启动后会自动重新检查本地服务状态。</p>
+                  </div>
+                )}
+                {gatewayStartError && (
+                  <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-2 text-xs text-rose-700 dark:text-rose-400">
+                    {gatewayStartError}
+                    <button className="ml-2 text-rose-400 hover:text-rose-600" onClick={() => setGatewayStartError("")}>×</button>
+                  </div>
+                )}
               {ocConfig?.configExists && !ocConfig.gatewayTokenPresent && (
                 <p className="text-amber-600 dark:text-amber-400">密钥未配置。请在模型配置中保存模型访问密钥。</p>
               )}
