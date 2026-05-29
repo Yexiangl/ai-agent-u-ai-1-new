@@ -3325,8 +3325,9 @@ function SkillsPage({ config, updateConfig, setActive, setChatDraft, setPendingN
     return map[p] || p;
   };
 
-  // TASK-027C-D/E + TASK-035D: Install/uninstall state
+  // TASK-027C-D/E + TASK-035D/E: Install/uninstall state
   const [installedIds, setInstalledIds] = useState<Set<string>>(new Set());
+  const [installRecords, setInstallRecords] = useState<Array<{ catalogId?: string; installRef?: string; installedAt?: number; name?: string; kind?: string; riskLevel?: string }>>([]);
   const [installingId, setInstallingId] = useState<string | null>(null);
   const [installStatus, setInstallStatus] = useState<"installing" | "refreshing" | null>(null);
   const [installConfirm, setInstallConfirm] = useState<{ id: string; name: string; nativeName?: string; installCommand?: string; kind: string; risk: string; perms: string[]; source: string } | null>(null);
@@ -3334,11 +3335,26 @@ function SkillsPage({ config, updateConfig, setActive, setChatDraft, setPendingN
   const [uninstallConfirm, setUninstallConfirm] = useState<{ id: string; name: string; nativeName?: string; kind: string; source: string } | null>(null);
   const [installError, setInstallError] = useState("");
 
+  // TASK-035B: Catalog items with nativeName/installCommand
+  const catalogItems = useMemo(() => [
+    { id:"ext-file-summary", name:"文件总结", nativeName:"clawhub:file-summary", installCommand:"openclaw skills install clawhub:file-summary", desc:"自动总结文档/PDF/文本核心内容", source:"clawhub" as const, kind:"skill" as const, category:"文件处理", risk:"medium" as const, perms:["file_read"], publisher:"ClawHub", rank:1, rankGroup:"hot" as const },
+    { id:"ext-table-analyze", name:"表格分析", nativeName:"clawhub:table-analyze", installCommand:"openclaw skills install clawhub:table-analyze", desc:"CSV/Excel 数据清洗和洞察提取", source:"clawhub" as const, kind:"skill" as const, category:"数据处理", risk:"medium" as const, perms:["file_read"], publisher:"ClawHub", rank:2, rankGroup:"trending" as const },
+    { id:"ext-web-research", name:"网页资料整理", nativeName:"clawhub:web-research", installCommand:"openclaw skills install clawhub:web-research", desc:"搜索并汇总网页资料为结构化笔记", source:"clawhub" as const, kind:"skill" as const, category:"文件处理", risk:"medium" as const, perms:["file_read","network"], publisher:"ClawHub", rank:3, rankGroup:"hot" as const },
+    { id:"ext-github-helper", name:"GitHub 辅助", nativeName:"clawhub:github-helper", installCommand:"openclaw plugins install clawhub:github-helper", desc:"管理 Issue、PR 和代码审查摘要", source:"clawhub" as const, kind:"plugin" as const, category:"开发调试", risk:"high" as const, perms:["network","shell"], publisher:"ClawHub", rank:4, rankGroup:"high_risk" as const },
+    { id:"ext-browser-auto", name:"浏览器自动化", nativeName:"clawhub:browser-auto", installCommand:"openclaw plugins install clawhub:browser-auto", desc:"Playwright 网页操作和截图", source:"clawhub" as const, kind:"plugin" as const, category:"开发调试", risk:"high" as const, perms:["network","shell"], publisher:"ClawHub", rank:5, rankGroup:"high_risk" as const },
+    { id:"ext-memory-kb", name:"知识库记忆", nativeName:"openclaw:memory-kb", installCommand:"openclaw plugins install openclaw:memory-kb", desc:"本地向量检索和长期记忆", source:"openclaw" as const, kind:"plugin" as const, category:"文件处理", risk:"medium" as const, perms:["file_read","file_write"], publisher:"OpenClaw", rank:6, rankGroup:"trending" as const },
+    { id:"ext-data-api", name:"数据 API 查询", nativeName:"clawhub:data-api", installCommand:"openclaw skills install clawhub:data-api", desc:"连接 REST/GraphQL API 获取数据", source:"clawhub" as const, kind:"skill" as const, category:"数据处理", risk:"medium" as const, perms:["network"], publisher:"ClawHub", rank:7, rankGroup:"new" as const },
+    { id:"ext-fun-fact", name:"随机冷知识", nativeName:"clawhub:fun-fact", installCommand:"openclaw skills install clawhub:fun-fact", desc:"每天一条有趣的冷知识", source:"curated" as const, kind:"skill" as const, category:"娱乐摸鱼", risk:"low" as const, perms:[], publisher:"Curated", rank:8, rankGroup:"new" as const },
+    { id:"ext-countdown", name:"下班倒计时", nativeName:"clawhub:countdown", installCommand:"openclaw skills install clawhub:countdown", desc:"显示距离下班的剩余时间", source:"curated" as const, kind:"skill" as const, category:"娱乐摸鱼", risk:"low" as const, perms:[], publisher:"Curated", rank:9, rankGroup:"trending" as const },
+  ], []);
+
   const refreshInstallRecords = useCallback(async () => {
-    const r = await invoke<Array<{ catalogId?: string }>>("read_install_records");
+    const r = await invoke<Array<{ catalogId?: string; installRef?: string; installedAt?: number; name?: string; kind?: string; riskLevel?: string }>>("read_install_records");
     const ids = new Set<string>();
-    (Array.isArray(r) ? r : []).forEach(rec => { if (rec.catalogId) ids.add(rec.catalogId); });
+    const arr = Array.isArray(r) ? r : [];
+    arr.forEach(rec => { if (rec.catalogId) ids.add(rec.catalogId); });
     setInstalledIds(ids);
+    setInstallRecords(arr);
   }, []);
 
   useEffect(() => {
@@ -3550,6 +3566,59 @@ function SkillsPage({ config, updateConfig, setActive, setChatDraft, setPendingN
         </div>
       )}
 
+      {/* TASK-035E: Installed capabilities section */}
+      <div className="space-y-3 pt-4 border-t">
+        <div>
+          <h3 className="text-sm font-medium">已安装能力</h3>
+          <p className="text-xs text-muted-foreground mt-0.5">这里显示通过本应用安装的能力。从能力排行中选择能力安装后，会显示在这里。</p>
+        </div>
+        {installRecords.length === 0 ? (
+          <div className="rounded-xl border bg-muted/30 p-6 text-center">
+            <div className="text-sm font-medium">暂未安装能力</div>
+            <div className="mt-1 text-xs text-muted-foreground">从能力排行或外部能力目录中选择能力安装后，会显示在这里。</div>
+          </div>
+        ) : (
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {installRecords.map(rec => {
+              const catItem = catalogItems.find(item => item.id === rec.catalogId);
+              const displayName = rec.name || catItem?.name || rec.catalogId || "未知";
+              const nativeName = catItem?.nativeName || rec.installRef || "信息待同步";
+              const installCmd = catItem?.installCommand || (rec.installRef ? `openclaw ${rec.kind === "plugin" ? "plugins" : "skills"} install ${rec.installRef}` : "信息待同步");
+              const source = catItem?.source || "未知";
+              const kind = rec.kind || catItem?.kind || "unknown";
+              const risk = rec.riskLevel || catItem?.risk || "unknown";
+              const installedAt = rec.installedAt ? new Date(rec.installedAt).toLocaleString() : "";
+              return (
+                <Card key={rec.catalogId} className="group flex flex-col transition-colors hover:border-primary/20">
+                  <CardHeader className="pb-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <CardTitle className="text-sm">{displayName}</CardTitle>
+                      <Badge tone="success">已安装</Badge>
+                    </div>
+                    <CardDescription className="text-xs text-muted-foreground">原生名称：<code className="rounded bg-muted/50 px-1 font-mono text-[10px]">{nativeName}</code></CardDescription>
+                    {installedAt && <div className="text-[10px] text-muted-foreground/70">安装时间：{installedAt}</div>}
+                  </CardHeader>
+                  <CardContent className="flex-1 space-y-2 pt-0">
+                    <div className="flex flex-wrap gap-1.5">
+                      <Badge tone="info">{source}</Badge>
+                      <Badge tone={kind === "skill" ? "info" : "warning"}>{kind === "skill" ? "工作流" : "插件"}</Badge>
+                      {risk !== "unknown" && <Badge tone={riskTone(risk)}>{riskLabel(risk)}</Badge>}
+                    </div>
+                    {installCmd && <div className="text-[10px] text-muted-foreground truncate">安装命令：<code className="rounded bg-muted/50 px-1 font-mono text-[10px]">{installCmd}</code></div>}
+                    <div className="pt-1">
+                      <Button size="sm" variant="outline" disabled={installingId === rec.catalogId}
+                        className="text-xs" onClick={() => handleUninstall(rec.catalogId!, kind, displayName, nativeName, source)}>
+                        {installingId === rec.catalogId ? (installStatus === "installing" ? "正在卸载..." : installStatus === "refreshing" ? "更新中..." : "卸载中...") : "卸载"}
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
       {/* TASK-027C-G: Ranked external capability catalog */}
       <div className="space-y-3 pt-4 border-t">
         <div>
@@ -3567,17 +3636,7 @@ function SkillsPage({ config, updateConfig, setActive, setChatDraft, setPendingN
           ))}
         </div>
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {[
-            { id:"ext-file-summary", name:"文件总结", nativeName:"clawhub:file-summary", installCommand:"openclaw skills install clawhub:file-summary", desc:"自动总结文档/PDF/文本核心内容", source:"clawhub" as const, kind:"skill" as const, category:"文件处理", risk:"medium" as const, perms:["file_read"], publisher:"ClawHub", rank:1, rankGroup:"hot" as const },
-            { id:"ext-table-analyze", name:"表格分析", nativeName:"clawhub:table-analyze", installCommand:"openclaw skills install clawhub:table-analyze", desc:"CSV/Excel 数据清洗和洞察提取", source:"clawhub" as const, kind:"skill" as const, category:"数据处理", risk:"medium" as const, perms:["file_read"], publisher:"ClawHub", rank:2, rankGroup:"trending" as const },
-            { id:"ext-web-research", name:"网页资料整理", nativeName:"clawhub:web-research", installCommand:"openclaw skills install clawhub:web-research", desc:"搜索并汇总网页资料为结构化笔记", source:"clawhub" as const, kind:"skill" as const, category:"文件处理", risk:"medium" as const, perms:["file_read","network"], publisher:"ClawHub", rank:3, rankGroup:"hot" as const },
-            { id:"ext-github-helper", name:"GitHub 辅助", nativeName:"clawhub:github-helper", installCommand:"openclaw plugins install clawhub:github-helper", desc:"管理 Issue、PR 和代码审查摘要", source:"clawhub" as const, kind:"plugin" as const, category:"开发调试", risk:"high" as const, perms:["network","shell"], publisher:"ClawHub", rank:4, rankGroup:"high_risk" as const },
-            { id:"ext-browser-auto", name:"浏览器自动化", nativeName:"clawhub:browser-auto", installCommand:"openclaw plugins install clawhub:browser-auto", desc:"Playwright 网页操作和截图", source:"clawhub" as const, kind:"plugin" as const, category:"开发调试", risk:"high" as const, perms:["network","shell"], publisher:"ClawHub", rank:5, rankGroup:"high_risk" as const },
-            { id:"ext-memory-kb", name:"知识库记忆", nativeName:"openclaw:memory-kb", installCommand:"openclaw plugins install openclaw:memory-kb", desc:"本地向量检索和长期记忆", source:"openclaw" as const, kind:"plugin" as const, category:"文件处理", risk:"medium" as const, perms:["file_read","file_write"], publisher:"OpenClaw", rank:6, rankGroup:"trending" as const },
-            { id:"ext-data-api", name:"数据 API 查询", nativeName:"clawhub:data-api", installCommand:"openclaw skills install clawhub:data-api", desc:"连接 REST/GraphQL API 获取数据", source:"clawhub" as const, kind:"skill" as const, category:"数据处理", risk:"medium" as const, perms:["network"], publisher:"ClawHub", rank:7, rankGroup:"new" as const },
-            { id:"ext-fun-fact", name:"随机冷知识", nativeName:"clawhub:fun-fact", installCommand:"openclaw skills install clawhub:fun-fact", desc:"每天一条有趣的冷知识", source:"curated" as const, kind:"skill" as const, category:"娱乐摸鱼", risk:"low" as const, perms:[], publisher:"Curated", rank:8, rankGroup:"new" as const },
-            { id:"ext-countdown", name:"下班倒计时", nativeName:"clawhub:countdown", installCommand:"openclaw skills install clawhub:countdown", desc:"显示距离下班的剩余时间", source:"curated" as const, kind:"skill" as const, category:"娱乐摸鱼", risk:"low" as const, perms:[], publisher:"Curated", rank:9, rankGroup:"trending" as const },
-          ].filter(item => rankTab === "全部" || (rankTab === "热门" && item.rankGroup === "hot") || (rankTab === "趋势" && item.rankGroup === "trending") || (rankTab === "新上架" && item.rankGroup === "new") || (rankTab === "高风险" && item.rankGroup === "high_risk"))
+          {catalogItems.filter(item => rankTab === "全部" || (rankTab === "热门" && item.rankGroup === "hot") || (rankTab === "趋势" && item.rankGroup === "trending") || (rankTab === "新上架" && item.rankGroup === "new") || (rankTab === "高风险" && item.rankGroup === "high_risk"))
           .map(item => (
             <Card key={item.id} className="group flex flex-col transition-colors hover:border-primary/20">
               <CardHeader className="pb-2">
