@@ -239,11 +239,10 @@ OpenClaw 将成为主体 Agent 后端。Hermes 不再作为普通用户主路径
 | TASK-034F | 待规划 | P2 | 诊断模块回归测试 | 验证各状态检测正确。 |
 | TASK-035 | 进行中 | P1 | 能力中心安装体验优化 | 父任务：卡片信息结构 + 安装确认 + 卸载确认。 |
 | TASK-035A | 已完成 | P1 | 能力中心安装体验审计 | 已审查通过：`docs/skill-center-install-ux-audit.md`，8 项问题/建议。 |
-| TASK-035B | ✅ 待验收 | P1 | 能力卡片信息结构优化 | 新增 nativeName/installCommand 字段，卡片展示原生名称+安装口令，弹窗同步。 |
+| TASK-035B | 已完成 | P0 | 能力卡片信息结构优化 | 已审查通过：9 条 catalog 加 nativeName/installCommand，卡片+弹窗展示原生名称和安装口令。P1 观察项：ext-github-helper/ext-browser-auto source=skillhub 但 nativeName=clawhub:*，需后续统一。 |
 | TASK-035 | 进行中 | P0 | 能力中心安装体验与排行可信度优化 | 父任务：卡片信息透明化 + 安装确认重构 + loading 优化 + 卸载确认 + 已安装状态。 |
 | TASK-035A | 待验收 | P0 | 安装体验审计方案 | 已完成：docs/skill-center-install-ux-audit.md。P0 问题：卡片无原生名称/安装口令，确认弹窗信息不完整。 |
-| TASK-035B | 待规划 | P0 | 能力卡片信息结构优化 | 加 nativeName/installCommand 字段。 |
-| TASK-035C | 待规划 | P1 | 安装确认弹窗重构 | 展示原生名称+安装命令+完整信息。 |
+| TASK-035C | ✅ 待验收 | P1 | 安装确认弹窗重构 | 弹窗改为清单式确认（6 字段 + 安装命令 + 类型 badge）。source 不一致已修复。安全说明去甩锅。 |
 | TASK-035D | 待规划 | P1 | 安装/卸载 loading 与反馈优化 | 状态机+分阶段文案+卸载确认。 |
 | TASK-035E | 待规划 | P2 | 已安装状态 polish | 安装时间/版本/来源。 |
 | TASK-035F | 待规划 | P2 | 能力中心安装体验回归测试 | 验证安装/卸载全流程。 |
@@ -355,6 +354,8 @@ OpenClaw 将成为主体 Agent 后端。Hermes 不再作为普通用户主路径
 - TASK-034B/C 已执行（2026-05-29）：AI 助手页本地服务诊断面板 + 控制台按钮完成。修改：`App.tsx`（新增诊断卡片 + ExternalLink 图标导入）。UI：(1) 卡片标题"本地服务诊断"，说明"检查 AI 对话所需的 OpenClaw 本地服务状态"；(2) 6 检测项：本地服务（运行中/未运行）、密钥状态（已配置/未配置）、模型接口（正常/异常）、当前模型、对话接口（正常/异常）、最近检查；(3) 异常时显示修复建议（gateway start / 保存密钥等）；(4) "打开 OpenClaw 控制台"按钮（window.open 本机地址）；(5) 安全提示"控制台仅打开本机地址"；(6) 高级诊断链接保留。未执行 doctor --fix / gateway restart / config set 等写入命令。`npm run build` ✅ `cargo check` ✅ `probe.mjs` ✅ `test-redaction` 21/21 ✅。下一步建议 TASK-034D 或 TASK-034F。
 - TASK-034B/C 终审通过（2026-05-29）：诊断面板 + 控制台按钮合格。6 项检测覆盖常见问题（本地服务/密钥/模型接口/当前模型/对话接口/最近检查）。修复建议为文本提示（"请在终端运行 openclaw gateway start"），非自动执行。控制台按钮 window.open 本机地址，无 token 拼接，安全提示"请勿暴露到公网"。高级诊断中 config set 命令仅为参考文本。未执行 doctor --fix/restart/stop/config set。未改对话/install/config/Token 写入。P2 观察项：window.open 在 Tauri 中可能需后续改为 shell.open 以获得更好的桌面体验。下一步建议 TASK-034E 复制脱敏诊断摘要或 TASK-034F 回归测试。
 - TASK-035A 已完成（2026-05-29）：能力中心安装体验审计。输出 docs/skill-center-install-ux-audit.md。P0 发现：(1) 卡片无原生名称/安装口令，用户不知道实际安装什么；(2) 确认弹窗缺安装命令。P1 发现：(3) 安装 loading 无分阶段文案；(4) 卸载无确认弹窗。方案：加 nativeName/installCommand 字段 + 确认弹窗重构 + 状态机 loading + 卸载确认。后续 5 子任务（035B-F）。本轮未修改业务代码。
+- TASK-035B 终审通过（2026-05-29）：能力卡片信息结构优化合格。9 条 catalog 均加 nativeName/installCommand，与 Rust allowlist 一致。卡片展示原生名称+安装口令（code 样式，只读）。安装确认弹窗同步显示。installCommand 只是展示文本，真正安装仍走 Rust allowlist。未改 install_capability/uninstall_capability 执行逻辑。P1 观察项：ext-github-helper 和 ext-browser-auto 的 source=skillhub 但 nativeName=clawhub:*，建议 035C 或后续统一为 source=clawhub（因为实际安装源是 ClawHub）。下一步建议 TASK-035C 安装确认弹窗重构。
+- TASK-035C 已执行（2026-05-29）：安装确认弹窗重构完成。修改：`App.tsx`（弹窗重写 + source 修复 + 死代码清理）。改动：(1) source 修复：ext-github-helper/ext-browser-auto 的 source→clawhub、publisher→ClawHub（与 Rust allowlist installRef 一致）；(2) 弹窗标题→"确认安装能力"，描述→"请确认以下信息后再安装"；(3) 信息区改为清单式：显示名称/原生名称/来源/类型/风险等级/权限/安装命令，每行 label-value 对齐；(4) 安装命令 block code 样式 + select-all；(5) 安全说明去甩锅："请确认来源、风险等级和权限说明后再安装"；(6) 二次确认/按钮逻辑保持。未改 install/uninstall 执行、未做 loading 状态机。`npm run build` ✅ `cargo check` ✅ `test-redaction` 21/21 ✅。下一步建议 TASK-035D。
 - TASK-034A 终审通过（2026-05-29）：诊断方案设计合格。入口在 AI 助手页合理（用户遇到问题时自然去 AI 助手页）。普通视图卡片+高级诊断折叠结构合理。状态枚举覆盖 6 种常见场景。9 项检测项合理（不过多，核心覆盖）。优先使用已有能力（openclaw_http_status/read_openclaw_config_summary）。明确禁止 doctor --fix/gateway restart/stop/config set。修复建议为"提示用户操作"非自动执行。脱敏规则明确（不显示 Token/Authorization/Bearer/baseUrl/API URL）。子任务拆分合理。建议先做 034B+C 合并（诊断面板 UI + 打开控制台按钮）。
 - TASK-033E 终审通过（2026-05-29）：回归测试 15/15 合格。TASK-033 阶段性收口确认：主数据源已切换 OpenClaw workspace，只读+脱敏+不暴露绝对路径+缺失优雅处理。Hermes 仅底部 legacy 提示不混入主列表。033C（双源折叠）和 033D（详情 polish）为 P1/P2 后置，不阻塞当前版本。建议暂不做 033C，当前 Hermes 底部提示已足够。
 - TASK-033B 终审通过（2026-05-29）：OpenClaw workspace memory 只读接入合格。Rust command 只读 6 个硬编码文件（SOUL/USER/AGENTS/HEARTBEAT/IDENTITY/TOOLS.md），复用 collect_memory_file + redact_sensitive_content 脱敏，返回 relativePath 不暴露绝对路径。目录/文件缺失时优雅 warning。MemoryPage 主数据源已切换，Hermes 仅底部 legacy 提示。Kind badge 中文化（人格/用户/代理/心跳/身份/工具）。详情页显示"只读"badge。未改 config/Token/对话/install/portable。下一步建议 TASK-033C Hermes legacy 折叠或直接 TASK-033E 回归测试。

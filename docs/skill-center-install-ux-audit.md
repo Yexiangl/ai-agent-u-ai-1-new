@@ -1,6 +1,6 @@
 # 能力中心安装体验与排行可信度审计
 
-TASK-035A | TASK-035B ✅ 已完成 | 日期：2026-05-29
+TASK-035A | TASK-035B | TASK-035C ✅ 已完成 | 日期：2026-05-29
 
 ---
 
@@ -237,8 +237,8 @@ idle → confirming → installing → refreshing → installed
 
 ### 推荐执行顺序
 
-1. TASK-035B — 数据结构先行，后续 UI 依赖
-2. TASK-035C — 安装确认弹窗（用户感知最强）
+1. TASK-035B ✅ — 数据结构先行，card + dialog 均显示 nativeName/installCommand
+2. TASK-035C ✅ — 安装确认弹窗重构，source 不一致修复
 3. TASK-035D — loading 与反馈
 4. TASK-035E — 已安装状态
 5. TASK-035F — 回归测试
