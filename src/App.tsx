@@ -3449,7 +3449,7 @@ function SkillsPage({ config, updateConfig, setActive, setChatDraft, setPendingN
     { id:"ext-web-research", name:"网页资料整理", nativeName:"clawhub:web-research", installCommand:"openclaw skills install clawhub:web-research", desc:"搜索并汇总网页资料为结构化笔记", source:"clawhub" as const, kind:"skill" as const, category:"文件处理", risk:"medium" as const, perms:["file_read","network"], publisher:"ClawHub", rank:3, rankGroup:"hot" as const },
     { id:"ext-github-helper", name:"GitHub 辅助", nativeName:"clawhub:github-helper", installCommand:"openclaw plugins install clawhub:github-helper", desc:"管理 Issue、PR 和代码审查摘要", source:"clawhub" as const, kind:"plugin" as const, category:"开发调试", risk:"high" as const, perms:["network","shell"], publisher:"ClawHub", rank:4, rankGroup:"high_risk" as const },
     { id:"ext-browser-auto", name:"浏览器自动化", nativeName:"clawhub:browser-auto", installCommand:"openclaw plugins install clawhub:browser-auto", desc:"Playwright 网页操作和截图", source:"clawhub" as const, kind:"plugin" as const, category:"开发调试", risk:"high" as const, perms:["network","shell"], publisher:"ClawHub", rank:5, rankGroup:"high_risk" as const },
-    { id:"ext-memory-kb", name:"知识库记忆", nativeName:"openclaw:memory-kb", installCommand:"openclaw plugins install openclaw:memory-kb", desc:"本地向量检索和长期记忆", source:"openclaw" as const, kind:"plugin" as const, category:"文件处理", risk:"medium" as const, perms:["file_read","file_write"], publisher:"OpenClaw", rank:6, rankGroup:"trending" as const },
+    { id:"ext-memory-kb", name:"知识库记忆", nativeName:"openclaw:memory-kb", installCommand:"openclaw plugins install openclaw:memory-kb", desc:"本地向量检索和长期记忆", source:"openclaw" as const, kind:"plugin" as const, category:"文件处理", risk:"medium" as const, perms:["file_read","file_write"], publisher:"OCatalog", rank:6, rankGroup:"trending" as const },
     { id:"ext-data-api", name:"数据 API 查询", nativeName:"clawhub:data-api", installCommand:"openclaw skills install clawhub:data-api", desc:"连接 REST/GraphQL API 获取数据", source:"clawhub" as const, kind:"skill" as const, category:"数据处理", risk:"medium" as const, perms:["network"], publisher:"ClawHub", rank:7, rankGroup:"new" as const },
     { id:"ext-fun-fact", name:"随机冷知识", nativeName:"clawhub:fun-fact", installCommand:"openclaw skills install clawhub:fun-fact", desc:"每天一条有趣的冷知识", source:"curated" as const, kind:"skill" as const, category:"娱乐摸鱼", risk:"low" as const, perms:[], publisher:"Curated", rank:8, rankGroup:"new" as const },
     { id:"ext-countdown", name:"下班倒计时", nativeName:"clawhub:countdown", installCommand:"openclaw skills install clawhub:countdown", desc:"显示距离下班的剩余时间", source:"curated" as const, kind:"skill" as const, category:"娱乐摸鱼", risk:"low" as const, perms:[], publisher:"Curated", rank:9, rankGroup:"trending" as const },
@@ -3600,7 +3600,7 @@ function SkillsPage({ config, updateConfig, setActive, setChatDraft, setPendingN
                 )}
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">来源</span>
-                  <Badge tone="info">{installConfirm.source}</Badge>
+                  <Badge tone="info">{installConfirm.source === "clawhub" ? "ClawHub" : installConfirm.source === "openclaw" ? "官方" : installConfirm.source === "curated" ? "精选目录" : installConfirm.source}</Badge>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">类型</span>
@@ -3666,7 +3666,7 @@ function SkillsPage({ config, updateConfig, setActive, setChatDraft, setPendingN
                 )}
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">来源</span>
-                  <span className="font-medium">{uninstallConfirm.source}</span>
+                  <span className="font-medium">{uninstallConfirm.source === "clawhub" ? "ClawHub" : uninstallConfirm.source === "openclaw" ? "官方" : uninstallConfirm.source === "curated" ? "精选目录" : uninstallConfirm.source}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">类型</span>
@@ -3720,7 +3720,7 @@ function SkillsPage({ config, updateConfig, setActive, setChatDraft, setPendingN
                   </CardHeader>
                   <CardContent className="flex-1 space-y-2 pt-0">
                     <div className="flex flex-wrap gap-1.5">
-                      <Badge tone="info">{source}</Badge>
+                      <Badge tone="info">{source === "clawhub" ? "ClawHub" : source === "openclaw" ? "官方" : source === "curated" ? "精选目录" : source}</Badge>
                       <Badge tone={kind === "skill" ? "info" : "warning"}>{kind === "skill" ? "工作流" : "插件"}</Badge>
                       {risk !== "unknown" && <Badge tone={riskTone(risk)}>{riskLabel(risk)}</Badge>}
                     </div>
@@ -3772,7 +3772,7 @@ function SkillsPage({ config, updateConfig, setActive, setChatDraft, setPendingN
                 <div className="flex flex-wrap gap-1.5">
                   <Badge tone="info">{item.category}</Badge>
                   <Badge tone={item.source === "clawhub" ? "info" : item.source === "openclaw" ? "info" : "muted"}>
-                    {item.source === "clawhub" ? "ClawHub" : item.source === "openclaw" ? "OpenClaw" : "Curated"}
+                    {item.source === "clawhub" ? "ClawHub" : item.source === "openclaw" ? "官方" : "Curated"}
                   </Badge>
                   <Badge tone={item.kind === "skill" ? "info" : "warning"}>{item.kind === "skill" ? "工作流" : "插件"}</Badge>
                   <Badge tone={riskTone(item.risk)}>{riskLabel(item.risk)}</Badge>
@@ -4192,13 +4192,13 @@ function MemoryPage() {
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <CardTitle>助手记忆</CardTitle>
-              <CardDescription>这里显示 OpenClaw 工作区记忆文件。当前页面仅支持查看，不会修改记忆内容。</CardDescription>
+              <CardDescription>这里是本地 AI 助手保存的只读记忆信息，内容已做脱敏处理。</CardDescription>
             </div>
             <Button variant="outline" onClick={loadMemory} disabled={loadingMemory}><RefreshCcw className={cn("h-4 w-4", loadingMemory && "animate-spin")} />重新扫描</Button>
           </div>
         </CardHeader>
         <CardContent className="grid gap-3 md:grid-cols-3">
-          <Metric label="数据源" value={memory?.source ?? "OpenClaw 工作区"} tone="info" />
+          <Metric label="数据源" value={memory?.source ?? "本地助手记忆"} tone="info" />
           <Metric label="记忆文件数" value={String(memory?.files.length ?? 0)} tone={(memory?.files.length ?? 0) > 0 ? "success" : "muted"} />
           <Metric label="最近扫描" value={checkedAt} tone="info" />
           {memoryError && <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-rose-700 dark:text-rose-400 md:col-span-3">{memoryError}</div>}
@@ -4212,11 +4212,11 @@ function MemoryPage() {
 
       <div className="grid gap-4 xl:grid-cols-[380px_1fr]">
         <Card>
-          <CardHeader><CardTitle>文件列表</CardTitle><CardDescription>OpenClaw 工作区下的记忆文件。</CardDescription></CardHeader>
+          <CardHeader><CardTitle>文件列表</CardTitle><CardDescription>本地助手记忆下的记忆文件。</CardDescription></CardHeader>
           <CardContent className="space-y-2">
-            {loadingMemory && <div className="text-sm text-muted-foreground"><Loader2 className="mr-2 inline h-4 w-4 animate-spin" />正在扫描 OpenClaw 工作区记忆…</div>}
-            {!loadingMemory && memory?.available !== false && memory?.files.length === 0 && <div className="rounded-xl border bg-muted/30 p-3 text-sm text-muted-foreground">未发现记忆文件。OpenClaw 工作区可能尚未初始化。</div>}
-            {!loadingMemory && memory?.available === false && <div className="rounded-xl border bg-muted/30 p-3 text-sm text-muted-foreground">{memory?.warnings?.[0] ?? "OpenClaw 工作区不可用"}</div>}
+            {loadingMemory && <div className="text-sm text-muted-foreground"><Loader2 className="mr-2 inline h-4 w-4 animate-spin" />正在扫描 本地助手记忆记忆…</div>}
+            {!loadingMemory && memory?.available !== false && memory?.files.length === 0 && <div className="rounded-xl border bg-muted/30 p-3 text-sm text-muted-foreground">未发现记忆文件。本地助手记忆可能尚未初始化。</div>}
+            {!loadingMemory && memory?.available === false && <div className="rounded-xl border bg-muted/30 p-3 text-sm text-muted-foreground">{memory?.warnings?.[0] ?? "本地助手记忆不可用"}</div>}
             {memory?.files.map((file) => (
               <button key={file.id} onClick={() => setSelectedId(file.id)} className={cn("w-full rounded-xl border p-3 text-left transition", selected?.id === file.id ? "border-primary/40 bg-primary/5" : "bg-card hover:bg-muted/40")}>
                 <div className="flex items-center justify-between gap-3">
@@ -4264,7 +4264,7 @@ function MemoryPage() {
             ) : (
               <div className="rounded-xl border bg-muted/30 p-4 text-sm text-muted-foreground">
                 {memory && memory.available === false
-                  ? "OpenClaw 工作区不可用。请确认已安装并初始化 AI 助手。"
+                  ? "本地助手记忆不可用。请确认已安装并初始化 AI 助手。"
                   : "选择左侧文件查看详细内容。"}
               </div>
             )}
@@ -4483,7 +4483,7 @@ function UsagePage() {
       <Card>
         <CardHeader>
           <CardTitle>本地用量概览</CardTitle>
-          <CardDescription>本页根据本机历史会话统计，用于了解本地使用情况。Token 数据来自模型接口返回的 usage 字段；如果服务未返回 usage，则显示为暂未提供。实际额度以模型服务后台为准。</CardDescription>
+          <CardDescription>这里显示的是本机对话返回的用量统计，仅供查看使用情况。实际额度和续费状态以服务后台为准。真实统计表示模型返回了用量数据，不代表剩余额度。部分模型或请求可能不会返回用量数据，此时显示为暂未提供。</CardDescription>
         </CardHeader>
       </Card>
 
@@ -4509,7 +4509,7 @@ function UsagePage() {
 
           {hasTokenUsage && (
             <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 px-3 py-2 text-xs text-emerald-700 dark:text-emerald-400">
-              真实统计 · 基于 {usageMessageCount} 条回复的 usage 字段
+              真实统计 · 基于 {usageMessageCount} 条回复的用量数据，不代表剩余额度
             </div>
           )}
 

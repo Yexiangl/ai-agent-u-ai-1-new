@@ -1478,7 +1478,7 @@ fn read_openclaw_workspace_memory() -> Result<serde_json::Value, String> {
     let Some(home) = home_dir() else {
         return Ok(serde_json::json!({
             "available": false,
-            "source": "OpenClaw 工作区",
+            "source": "本地助手记忆",
             "files": [],
             "checkedAt": checked_at(),
             "warnings": vec!["无法定位用户主目录"]
@@ -1488,7 +1488,7 @@ fn read_openclaw_workspace_memory() -> Result<serde_json::Value, String> {
     if !workspace_root.exists() || !workspace_root.is_dir() {
         return Ok(serde_json::json!({
             "available": false,
-            "source": "OpenClaw 工作区",
+            "source": "本地助手记忆",
             "files": [],
             "checkedAt": checked_at(),
             "warnings": vec!["OpenClaw 工作区目录不存在"]
@@ -1515,7 +1515,7 @@ fn read_openclaw_workspace_memory() -> Result<serde_json::Value, String> {
 
     Ok(serde_json::json!({
         "available": true,
-        "source": "OpenClaw 工作区",
+        "source": "本地助手记忆",
         "files": files,
         "checkedAt": checked_at(),
         "warnings": warnings
