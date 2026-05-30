@@ -1376,47 +1376,31 @@ function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelCo
 
   return (
     <div className="space-y-4">
-      {/* 1. AI 助手状态 */}
-      <Card>
-        <CardHeader className="pb-3">
-          <div className="flex items-center justify-between gap-3">
-            <CardTitle>AI 助手</CardTitle>
-            <Badge tone={ocReady ? "success" : ocChecked ? "warning" : "muted"}>
-              {ocReady ? "已连接" : ocChecked ? "需要检查" : "检测中"}
-            </Badge>
+      {/* 1. AI 助手状态 — TASK-042B: StatusHero */}
+      <StatusHero
+        title="AI 助手"
+        subtitle={ocReady ? "已连接，可以开始对话" : ocChecked ? "需要检查本地服务状态" : "正在检测..."}
+        statusLabel={ocReady ? "已连接" : ocChecked ? "需要检查" : "检测中"}
+        statusTone={ocReady ? "success" : ocChecked ? "warning" : "muted"}
+        modelLabel={displayModel}
+        primaryAction={<Button disabled={refreshing} onClick={refreshAll} variant="outline" size="sm">{refreshing && <Loader2 className="h-4 w-4 animate-spin" />}<RefreshCcw className="h-4 w-4" />重新检查</Button>}
+        secondaryAction={<button onClick={() => setShowAdvanced(true)} className="text-xs text-muted-foreground underline-offset-2 hover:underline">高级诊断</button>}
+      >
+        {ocChecked && !ocReady && (
+          <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-600 dark:text-amber-400 space-y-1">
+            {ocConfig?.configExists ? (
+              <>
+                <p className="font-medium">本地服务未运行</p>
+                {!ocConfig.httpChatCompletionsEnabled && <p>本地服务未连接。</p>}
+                {!ocConfig.gatewayTokenPresent && <p>请先保存模型访问密钥。</p>}
+                {!ocReady && <p>请点击下方按钮启动本地服务，完成后重新检查。</p>}
+              </>
+            ) : (
+              <><p className="font-medium">需要检查</p><p>未找到本地配置文件。请确认 AI 助手已安装并初始化。</p></>
+            )}
           </div>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="flex items-center gap-2 text-sm">
-            <span className={cn("h-2 w-2 rounded-full", ocReady ? "bg-emerald-500" : "bg-amber-500")} />
-            <span>{ocReady ? "当前使用" : "当前模型"}</span>
-            <span className="font-medium">{displayModel}</span>
-          </div>
-          {ocReady && ocConfig?.gatewayTokenPresent && (
-            <p className="text-xs text-emerald-700 dark:text-emerald-400">AI 助手已连接，可以开始对话。</p>
-          )}
-          {ocChecked && !ocReady && (
-            <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-600 dark:text-amber-400 space-y-1">
-              {ocConfig?.configExists ? (
-                <>
-                  <p className="font-medium">本地服务未运行</p>
-                  {!ocConfig.httpChatCompletionsEnabled && <p>本地服务未连接。</p>}
-                  {!ocConfig.gatewayTokenPresent && <p>请先保存模型访问密钥。</p>}
-                  {!ocReady && <p>请点击下方按钮启动本地服务，完成后重新检查。</p>}
-                </>
-              ) : (
-                <><p className="font-medium">需要检查</p><p>未找到本地配置文件。请确认 AI 助手已安装并初始化。</p></>
-              )}
-            </div>
-          )}
-      <div className="flex flex-wrap items-center gap-2 overflow-x-auto">
-            <Button disabled={refreshing} onClick={refreshAll} variant="outline" size="sm">
-              {refreshing && <Loader2 className="h-4 w-4 animate-spin" />}<RefreshCcw className="h-4 w-4" />重新检查
-            </Button>
-            <button onClick={() => setShowAdvanced(true)} className="text-xs text-muted-foreground underline-offset-2 hover:underline">高级诊断</button>
-          </div>
-        </CardContent>
-      </Card>
+        )}
+      </StatusHero>
 
       {/* TASK-038C: One-click AI assistant setup */}
       {ocChecked && (!ocConfig?.gatewayTokenPresent || !ocReady) && (
@@ -4714,6 +4698,73 @@ function StreamDiagnosticsPanel({ diagnostics }: { diagnostics: FrontStreamDiagn
       <StreamDebugRow label="doneReceived" value={String(diagnostics.doneReceived)} />
     </div>
   );
+}
+
+// ── TASK-042B: AI Assistant page reusable components ──
+
+function StatusHero({ title, subtitle, statusLabel, statusTone, modelLabel, primaryAction, secondaryAction, children }: {
+  title: string; subtitle?: string; statusLabel: string; statusTone: "success" | "warning" | "danger" | "muted";
+  modelLabel?: string; primaryAction?: React.ReactNode; secondaryAction?: React.ReactNode; children?: React.ReactNode;
+}) {
+  const dot = statusTone === "success" ? "bg-emerald-500" : statusTone === "warning" ? "bg-amber-500" : statusTone === "danger" ? "bg-rose-500" : "bg-slate-400";
+  return (
+    <div className="rounded-3xl border border-border/60 bg-gradient-to-br from-card via-card to-muted/30 p-5 space-y-3">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h3 className="text-lg font-bold">{title}</h3>
+          {subtitle && <p className="mt-0.5 text-xs text-muted-foreground">{subtitle}</p>}
+        </div>
+        <span className={cn("inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium",
+          statusTone === "success" && "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
+          statusTone === "warning" && "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400",
+          statusTone === "danger" && "border-rose-500/30 bg-rose-500/10 text-rose-700 dark:text-rose-400",
+          statusTone === "muted" && "border-border bg-muted/40 text-muted-foreground")}>
+          <span className={cn("h-1.5 w-1.5 rounded-full", dot)} />{statusLabel}</span>
+      </div>
+      {modelLabel && <div className="text-sm text-muted-foreground">当前模型：<span className="font-medium text-foreground">{modelLabel}</span></div>}
+      {(primaryAction || secondaryAction) && (
+        <div className="flex flex-wrap gap-2">{primaryAction}{secondaryAction}</div>
+      )}
+      {children}
+    </div>
+  );
+}
+
+function SettingGroup({ title, description, action, children }: { title: string; description?: string; action?: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <div className="rounded-2xl border border-border/60 bg-card p-4 space-y-3">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h4 className="text-sm font-semibold">{title}</h4>
+          {description && <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>}
+        </div>
+        {action}
+      </div>
+      <div className="divide-y divide-border/50">{children}</div>
+    </div>
+  );
+}
+
+function SettingRow({ label, description, value, action, tone = "default" }: {
+  label: string; description?: string; value?: React.ReactNode; action?: React.ReactNode; tone?: "default" | "success" | "warning" | "danger" | "muted";
+}) {
+  const dot = tone === "success" ? "bg-emerald-500" : tone === "warning" ? "bg-amber-500" : tone === "danger" ? "bg-rose-500" : tone === "muted" ? "bg-slate-400" : "";
+  return (
+    <div className="flex items-center justify-between gap-3 py-2.5 first:pt-0 last:pb-0">
+      <div className="min-w-0">
+        <div className="flex items-center gap-1.5 text-sm">
+          {dot && <span className={cn("h-1.5 w-1.5 rounded-full shrink-0", dot)} />}
+          <span>{label}</span>
+        </div>
+        {description && <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>}
+      </div>
+      <div className="flex items-center gap-2 shrink-0 text-sm">{value}{action}</div>
+    </div>
+  );
+}
+
+function ActionCluster({ children, align = "left" }: { children: React.ReactNode; align?: "left" | "right" }) {
+  return <div className={cn("flex flex-wrap gap-2", align === "right" ? "justify-end" : "")}>{children}</div>;
 }
 
 function Metric({ label, value, tone }: { label: string; value: string; tone: "success" | "info" | "warning" | "danger" | "muted" }) {
