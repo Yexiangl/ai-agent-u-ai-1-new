@@ -4523,7 +4523,40 @@ function TutorialsPage({ config }: { config: AppConfig }) {
 
 function AboutPage({ config, updateConfig }: { config: AppConfig; updateConfig: (next: AppConfig) => Promise<void> }) {
   const [confirm, setConfirm] = useState(false);
-  return <div className="space-y-4"><Card><CardHeader><CardTitle>AI Agent 工作台 U盘版</CardTitle><CardDescription>AI Agent Workspace v0.1.1</CardDescription></CardHeader><CardContent className="grid gap-3 text-sm"><Metric label="本地服务" value="AI 助手服务" tone="info" /><Metric label="对话模型" value="OpenClaw Agent" tone="success" /></CardContent></Card><Card><CardHeader><CardTitle>使用步骤</CardTitle><CardDescription>购买 U盘会赠送初始额度，用完后可联系续费。</CardDescription></CardHeader><CardContent className="space-y-3 text-sm text-muted-foreground">{["插入 U盘", "打开 AI Agent Workspace", "在 AI 助手页配置密钥和模型", "确认本地服务运行中", "开始和 AI Agent 对话"].map((step, index) => <div key={step} className="flex gap-3"><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-primary text-xs text-primary-foreground">{index + 1}</span>{step}</div>)}</CardContent></Card><Card><CardContent className="pt-4"><button onClick={() => setConfirm(true)} className="text-[11px] text-muted-foreground underline-offset-2 hover:underline">清除本地配置（重置密钥和设置）</button></CardContent></Card><ConfirmDialog open={confirm} onClose={() => setConfirm(false)} title="确认清除" description="此操作会清除本地保存的密钥和配置，不会影响助手记忆文件。" confirmLabel="确认清除" onConfirm={() => clearConfig().then(updateConfig)} /></div>;
+  return (
+    <div className="space-y-4 max-w-2xl">
+      <div className="rounded-3xl border border-border/60 bg-gradient-to-br from-card via-card to-muted/20 shadow-sm p-6 space-y-3">
+        <h2 className="text-2xl font-bold tracking-tight">AI Agent 工作台</h2>
+        <p className="text-sm text-muted-foreground">面向普通用户的本地 AI 助手入口。可用于 AI 对话、能力扩展、本地用量查看和助手记忆管理。</p>
+        <div className="flex flex-wrap gap-2 pt-1">
+          <span className="rounded-full border border-border bg-muted/40 px-3 py-1 text-xs text-muted-foreground">v0.3.0 内部测试版</span>
+        </div>
+      </div>
+
+      <SettingGroup title="AI 助手">
+        <SettingRow label="对话模型" value={<span className="font-medium">AI 助手</span>} />
+        <SettingRow label="本地服务" value={<span className="font-medium">本机运行</span>} />
+      </SettingGroup>
+
+      <SettingGroup title="使用步骤">
+        <SettingRow label="1" value={<span className="text-sm">在 AI 助手页粘贴模型访问密钥</span>} />
+        <SettingRow label="2" value={<span className="text-sm">点击"一键启用 AI 助手"</span>} />
+        <SettingRow label="3" value={<span className="text-sm">进入 AI 对话页开始对话</span>} />
+        <SettingRow label="4" value={<span className="text-sm">遇到问题前往 AI 助手页检查状态</span>} />
+      </SettingGroup>
+
+      <SettingGroup title="数据与安全">
+        <SettingRow label="密钥保护" value={<span className="text-sm text-muted-foreground">密钥仅用于本机配置，不在页面明文显示</span>} />
+        <SettingRow label="本地存储" value={<span className="text-sm text-muted-foreground">配置和会话保存在本机，不上传到云端</span>} />
+        <SettingRow label="记忆脱敏" value={<span className="text-sm text-muted-foreground">助手记忆内容经过脱敏处理后再显示</span>} />
+      </SettingGroup>
+
+      <div className="rounded-2xl border border-border/60 bg-card p-4">
+        <button onClick={() => setConfirm(true)} className="text-xs text-muted-foreground underline-offset-2 hover:underline">清除本地配置（重置密钥和设置）</button>
+      </div>
+      {confirm && <ConfirmDialog open={confirm} onClose={() => setConfirm(false)} title="确认清除" description="此操作会清除本地保存的密钥和配置，不会影响助手记忆文件。" confirmLabel="确认清除" onConfirm={() => clearConfig().then(updateConfig)} />}
+    </div>
+  );
 }
 
 function PhaseBadge({ phase }: { phase: ChatPhase }) {
