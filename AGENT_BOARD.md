@@ -291,7 +291,7 @@ OpenClaw 将成为主体 Agent 后端。Hermes 不再作为普通用户主路径
 | TASK-042F | 已完成 | P2 | 状态自适应 + 启动按钮上提 | 已审查通过：Hero 四态（已连接/需要启动/需要检查/检测中），handleStartGateway 提取共享，Hero+诊断卡复用同一 handler+条件（configExists&&!ready&&token）。"上方按钮"文案仅在按钮存在时显示。逻辑未改。已知局限：ocReady 综合状态下"需要启动"对 endpoint 异常略不精确，但与原诊断卡条件一致+可恢复，非新增 bug。 |
 | TASK-042G | 待验收 | P2 | 全项目视觉规范推广审计 | 已完成：docs/global-visual-system-rollout-audit.md。9 页面适配评分。建议先 042H 回归再推广。最适合：关于/用量/记忆/首页(P1)。不强行统一：对话/摸鱼。后续 043A-G。 |
 | TASK-042H | 已完成 | P1 | 视觉升级回归测试 | 已审查通过：复审独立验证 build/cargo check/redaction 21/21 全过，StatusHero 4 态+SettingGroup×2+handleStartGateway×3+applyOcProvider+setTokenDraft("") intact，高级诊断保留 endpoint 明细，无 token 泄露。未发现 P0/P1。P2/P3 残留归 043D/E。 |
-| TASK-043A | 待规划 | P1 | 视觉规范文档化 | 组件用法+令牌。 |
+| TASK-043A | ✅ 待验收 | P2 | 全局视觉规范文档化 | 输出 docs/global-visual-system-guidelines.md（15 章节），含组件规范/使用模板/升级顺序。推荐第一步 043E 关于页试点。 |
 | TASK-043B | 待规划 | P1 | 首页 Hero + 状态卡优化 | 保留入口卡。 |
 | TASK-043C | 待规划 | P1 | 本地用量概览视觉升级 | Hero+统计 SettingRow，不碰 usage 逻辑。 |
 | TASK-043D | 待规划 | P1 | 助手记忆视觉升级 | Hero+SettingGroup，修复"记忆记忆"重复词。 |
