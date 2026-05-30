@@ -1579,109 +1579,52 @@ function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelCo
         </div>
       )}
 
-      {/* 4. Local service diagnostics (TASK-034B) */}
-      <Card>
-        <CardHeader className="pb-3">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <CardTitle>本地服务诊断</CardTitle>
-              <CardDescription>检查 AI 对话所需的本地服务状态。</CardDescription>
-            </div>
-            <Button variant="outline" size="sm" disabled={refreshing} onClick={refreshAll}>
-              {refreshing && <Loader2 className="h-4 w-4 animate-spin" />}<RefreshCcw className="h-4 w-4" />重新检查
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <div className={cn("grid gap-3 sm:grid-cols-2", "text-sm")}>
-            <div className="flex items-center gap-2">
-              <span className={cn("h-2 w-2 rounded-full", ocReady ? "bg-emerald-500" : ocChecked ? "bg-amber-500" : "bg-slate-400")} />
-              <span className="text-muted-foreground">本地服务</span>
-              <span className="font-medium">{ocReady ? "运行中" : ocChecked ? "未运行" : "检测中"}</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-muted-foreground">密钥状态</span>
-              <span className={cn("font-medium", ocConfig?.gatewayTokenPresent ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400")}>
-                {ocConfig?.gatewayTokenPresent ? "已配置" : "未配置"}
-              </span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-muted-foreground">模型接口</span>
-              <span className="font-medium">{ocModels.length > 0 ? "正常" : "异常"}</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-muted-foreground">当前模型</span>
-              <span className="font-medium">{displayModel}</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-muted-foreground">对话接口</span>
-              <span className={cn("font-medium", ocReady ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground")}>
-                {ocReady ? "正常" : ocChecked ? "异常" : "待检测"}
-              </span>
-            </div>
-            {ocChecked && (
-              <div className="flex items-center gap-2">
-                <span className="text-muted-foreground">最近检查</span>
-                <span className="font-medium text-muted-foreground">{timeAgo(Date.now() / 1000 - 1) || "刚刚"}</span>
-              </div>
-            )}
-          </div>
-
-          {/* Status message / fix suggestion */}
-          {ocChecked && !ocReady && (
-            <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-3 text-xs space-y-1">
-              {!ocConfig?.configExists && (
-                <p className="text-amber-600 dark:text-amber-400">未找到本地配置文件。请点击下方"启动本地服务"按钮初始化。</p>
-              )}
-              {ocConfig?.configExists && !ocReady && (
-                <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-3 text-xs space-y-2">
-                  <p className="text-amber-600 dark:text-amber-400">本地服务未运行。请点击下方按钮启动，或稍后重新检查。</p>
-                  <Button size="sm" disabled={startingGateway} onClick={async () => {
-                    setStartingGateway(true);
-                    setGatewayStartError("");
-                    try {
-                      await invoke("start_openclaw_gateway");
-                      showToast("本地服务已启动", "success");
-                      await refreshAll();
-                    } catch {
-                      setGatewayStartError("无法启动本地服务，请确认 AI 助手已安装，或点击重试。");
-                    }
-                    setStartingGateway(false);
-                  }}>
-                    {startingGateway ? <><Loader2 className="h-3.5 w-3.5 animate-spin" />正在启动...</> : <><Play className="h-3.5 w-3.5" />启动本地服务</>}
-                  </Button>
-<p className="text-[10px] text-muted-foreground">启动后会自动重新检查本地服务状态。</p>
-                  </div>
-                )}
-                {gatewayStartError && (
-                  <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-2 text-xs text-rose-700 dark:text-rose-400">
-                    {gatewayStartError}
-                    <button className="ml-2 text-rose-400 hover:text-rose-600" onClick={() => setGatewayStartError("")}>×</button>
-                  </div>
-                )}
-              {ocConfig?.configExists && !ocConfig.gatewayTokenPresent && (
-                <p className="text-amber-600 dark:text-amber-400">密钥未配置。请在模型配置中保存模型访问密钥。</p>
-              )}
-              {ocConfig?.configExists && ocReady && !ocConfig.httpChatCompletionsEnabled && (
-                <p className="text-amber-600 dark:text-amber-400">本地连接未启用。请打开控制台检查配置。</p>
-              )}
-            </div>
-          )}
-          {ocReady && ocConfig?.gatewayTokenPresent && (
-            <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-2 text-xs text-emerald-700 dark:text-emerald-400">
-              本地服务已连接，AI 对话可用。
-            </div>
-          )}
-
-          <div className="flex flex-wrap gap-2">
+      {/* 4. Local service diagnostics — TASK-042E: SettingGroup/SettingRow */}
+      <SettingGroup
+        title="本地服务"
+        description="检查 AI 助手运行所需的本地服务和连接状态。"
+        action={<Button disabled={refreshing} onClick={refreshAll} variant="outline" size="sm">{refreshing && <Loader2 className="h-4 w-4 animate-spin" />}<RefreshCcw className="h-4 w-4" />重新检查</Button>}
+      >
+        <SettingRow label="本地服务" value={<span className={cn("font-medium", ocReady ? "text-emerald-600 dark:text-emerald-400" : ocChecked ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground")}>{ocReady ? "运行中" : ocChecked ? "未运行" : "检测中"}</span>} tone={ocReady ? "success" : ocChecked ? "warning" : "muted"} />
+        <SettingRow label="密钥状态" value={<span className={cn("font-medium", ocConfig?.gatewayTokenPresent ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400")}>{ocConfig?.gatewayTokenPresent ? "已配置" : "未配置"}</span>} tone={ocConfig?.gatewayTokenPresent ? "success" : "warning"} />
+        <SettingRow label="当前模型" value={<span className="font-medium">{displayModel}</span>} />
+        <SettingRow label="近次检查" value={<span className="text-muted-foreground">{ocChecked ? (timeAgo(Date.now() / 1000 - 1) || "刚刚") : "尚未检查"}</span>} tone="muted" />
+        {ocChecked && !ocReady && (
+          <SettingRow label="" tone="warning"
+            description={
+              !ocConfig?.configExists ? "未找到本地配置文件。请点击下方按钮初始化。"
+              : !ocConfig.gatewayTokenPresent ? "密钥未配置。请在模型配置中保存模型访问密钥。"
+              : "本地服务未运行。请点击下方按钮启动，或稍后重新检查。"
+            }
+            action={
+              ocConfig?.configExists && !ocReady && !ocConfig.gatewayTokenPresent ? undefined : ocConfig?.configExists && !ocReady ? (
+                <Button size="sm" disabled={startingGateway} onClick={async () => {
+                  setStartingGateway(true); setGatewayStartError("");
+                  try { await invoke("start_openclaw_gateway"); showToast("本地服务已启动", "success"); await refreshAll(); }
+                  catch { setGatewayStartError("无法启动本地服务，请确认 AI 助手已安装，或点击重试。"); }
+                  setStartingGateway(false);
+                }}>
+                  {startingGateway ? <><Loader2 className="h-3.5 w-3.5 animate-spin" />正在启动...</> : <><Play className="h-3.5 w-3.5" />启动本地服务</>}
+                </Button>
+              ) : undefined
+            }
+          />
+        )}
+        {gatewayStartError && (
+          <SettingRow label="" tone="danger" description={gatewayStartError} action={<button className="text-rose-400 hover:text-rose-600 text-xs" onClick={() => setGatewayStartError("")}>×</button>} />
+        )}
+        {ocReady && ocConfig?.gatewayTokenPresent && (
+          <SettingRow label="" tone="success" description="本地服务已连接，AI 对话可用。" />
+        )}
+        <SettingRow label="" action={
+          <ActionCluster>
             <Button variant="outline" size="sm" onClick={() => { invoke("open_openclaw_dashboard").catch(() => { showToast("无法打开控制台，请稍后重试", "error"); }); }}>
-              <ExternalLink className="h-4 w-4" />打开 OpenClaw 控制台
+              <ExternalLink className="h-4 w-4" />打开控制台
             </Button>
             <button onClick={() => setShowAdvanced(true)} className="text-xs text-muted-foreground underline-offset-2 hover:underline">高级诊断</button>
-          </div>
-          <p className="text-[10px] text-muted-foreground">打开本机控制台，可查看和管理本地服务状态。</p>
-        </CardContent>
-      </Card>
+          </ActionCluster>
+        } />
+      </SettingGroup>
 
       {/* Diagnostic popup */}
       {showAdvanced && (
