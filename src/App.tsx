@@ -3733,7 +3733,7 @@ function SkillsPage({ config, updateConfig, setActive, setChatDraft, setPendingN
                     <div className="pt-1">
                       <Button size="sm" variant="outline" disabled={installingId === rec.catalogId}
                         className="text-xs" onClick={() => handleUninstall(rec.catalogId!, kind, displayName, nativeName, source)}>
-                        {installingId === rec.catalogId ? (installStatus === "installing" ? "正在卸载..." : installStatus === "refreshing" ? "更新中..." : "卸载中...") : "卸载"}
+                        {installingId === rec.catalogId ? (installStatus === "installing" ? <><Loader2 className="h-4 w-4 animate-spin" />正在卸载...</> : installStatus === "refreshing" ? <><Loader2 className="h-4 w-4 animate-spin" />更新中...</> : <><Loader2 className="h-4 w-4 animate-spin" />卸载中...</>) : "卸载"}
                       </Button>
                     </div>
                   </CardContent>
@@ -3798,12 +3798,12 @@ function SkillsPage({ config, updateConfig, setActive, setChatDraft, setPendingN
                   {installedIds.has(item.id) ? (
                     <Button size="sm" variant="outline" disabled={installingId === item.id}
                       className="text-xs" onClick={() => handleUninstall(item.id, item.kind, item.name, item.nativeName, item.source)}>
-                      {installingId === item.id ? (installStatus === "installing" ? "正在卸载..." : installStatus === "refreshing" ? "更新中..." : "卸载中...") : "卸载"}
+                      {installingId === item.id ? (installStatus === "installing" ? <><Loader2 className="h-4 w-4 animate-spin" />正在卸载...</> : installStatus === "refreshing" ? <><Loader2 className="h-4 w-4 animate-spin" />更新中...</> : <><Loader2 className="h-4 w-4 animate-spin" />卸载中...</>) : "卸载"}
                     </Button>
                   ) : (
                     <Button size="sm" disabled={installingId === item.id}
                       className="text-xs" onClick={() => setInstallConfirm({ id:item.id, name:item.name, nativeName:item.nativeName, installCommand:item.installCommand, kind:item.kind, risk:item.risk, perms:item.perms, source:item.source })}>
-                      {installingId === item.id ? (installStatus === "installing" ? "正在安装..." : installStatus === "refreshing" ? "更新中..." : "安装中...") : "安装"}
+                      {installingId === item.id ? (installStatus === "installing" ? <><Loader2 className="h-4 w-4 animate-spin" />正在安装...</> : installStatus === "refreshing" ? <><Loader2 className="h-4 w-4 animate-spin" />更新中...</> : <><Loader2 className="h-4 w-4 animate-spin" />安装中...</>) : "安装"}
                     </Button>
                   )}
                 </div>
