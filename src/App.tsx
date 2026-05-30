@@ -878,7 +878,7 @@ function App() {
           {!ready ? (
             <div className="flex h-[60vh] items-center justify-center text-muted-foreground"><Loader2 className="mr-2 h-4 w-4 animate-spin" /> 正在加载本地配置</div>
           ) : (
-            <Page active={active} setActive={setActive} chatDraft={chatDraft} setChatDraft={setChatDraft} pendingNewSessionTitle={pendingNewSessionTitle} setPendingNewSessionTitle={setPendingNewSessionTitle} pendingChatAttachment={pendingChatAttachment} setPendingChatAttachment={setPendingChatAttachment} config={config} updateConfig={updateConfig} hermesCli={hermesCli} hermesApi={hermesApi} hermesModelConfig={hermesModelConfig} setHermesModelConfig={setHermesModelConfig} refreshHermesCli={refreshHermesCli} refreshHermesApi={refreshHermesApi} chatState={chatState} />
+            <Page active={active} setActive={setActive} chatDraft={chatDraft} setChatDraft={setChatDraft} pendingNewSessionTitle={pendingNewSessionTitle} setPendingNewSessionTitle={setPendingNewSessionTitle} pendingChatAttachment={pendingChatAttachment} setPendingChatAttachment={setPendingChatAttachment} config={config} updateConfig={updateConfig} hermesCli={hermesCli} hermesApi={hermesApi} hermesModelConfig={hermesModelConfig} setHermesModelConfig={setHermesModelConfig} refreshHermesCli={refreshHermesCli} refreshHermesApi={refreshHermesApi} chatState={chatState} showToast={showToast} />
           )}
         </main>
       </div>
@@ -987,7 +987,7 @@ function Onboarding({ config, updateConfig }: { config: AppConfig; updateConfig:
   );
 }
 
-function Page({ active, setActive, chatDraft, setChatDraft, pendingNewSessionTitle, setPendingNewSessionTitle, pendingChatAttachment, setPendingChatAttachment, config, updateConfig, hermesCli, hermesApi, hermesModelConfig, setHermesModelConfig, refreshHermesCli, refreshHermesApi, chatState }: {
+function Page({ active, setActive, chatDraft, setChatDraft, pendingNewSessionTitle, setPendingNewSessionTitle, pendingChatAttachment, setPendingChatAttachment, config, updateConfig, hermesCli, hermesApi, hermesModelConfig, setHermesModelConfig, refreshHermesCli, refreshHermesApi, chatState, showToast }: {
   active: RouteId; setActive: (id: RouteId) => void;
   chatDraft: string; setChatDraft: (value: string) => void;
   pendingNewSessionTitle: string; setPendingNewSessionTitle: (v: string) => void;
@@ -997,10 +997,11 @@ function Page({ active, setActive, chatDraft, setChatDraft, pendingNewSessionTit
   hermesModelConfig: HermesModelConfig | null; setHermesModelConfig: (value: HermesModelConfig | null) => void;
   refreshHermesCli: () => Promise<HermesStatus>; refreshHermesApi: () => Promise<HermesApiServerStatus>;
   chatState: ChatPageState;
+  showToast: (msg: string, type: "success" | "error" | "warning" | "info") => void;
 }) {
   if (active === "home") return <div key="home" className="animate-fade-in"><HomePage config={config} updateConfig={updateConfig} setActive={setActive} hermesCli={hermesCli} hermesApi={hermesApi} hermesModelConfig={hermesModelConfig} chatState={chatState} /></div>;
   if (active === "chat") return <div key="chat" className="animate-fade-in"><ChatPage config={config} hermesCli={hermesCli} hermesApi={hermesApi} refreshHermesApi={refreshHermesApi} setActive={setActive} initialDraft={chatDraft} onDraftConsumed={() => setChatDraft("")} pendingNewSessionTitle={pendingNewSessionTitle} onNewSessionCreated={() => setPendingNewSessionTitle("")} pendingAttachment={pendingChatAttachment} onAttachmentConsumed={() => setPendingChatAttachment(null)} chatState={chatState} /></div>;
-  if (active === "engines") return <div key="engines" className="animate-fade-in"><EnginesPage config={config} updateConfig={updateConfig} hermesCli={hermesCli} hermesApi={hermesApi} hermesModelConfig={hermesModelConfig} setHermesModelConfig={setHermesModelConfig} refreshHermesCli={refreshHermesCli} refreshHermesApi={refreshHermesApi} setActive={setActive} chatState={chatState} /></div>;
+  if (active === "engines") return <div key="engines" className="animate-fade-in"><EnginesPage config={config} updateConfig={updateConfig} hermesCli={hermesCli} hermesApi={hermesApi} hermesModelConfig={hermesModelConfig} setHermesModelConfig={setHermesModelConfig} refreshHermesCli={refreshHermesCli} refreshHermesApi={refreshHermesApi} setActive={setActive} chatState={chatState} showToast={showToast} /></div>;
   if (active === "skills") return <div key="skills" className="animate-fade-in"><SkillsPage config={config} updateConfig={updateConfig} setActive={setActive} setChatDraft={setChatDraft} setPendingNewSessionTitle={setPendingNewSessionTitle} /></div>;
   if (active === "moyu") return <div key="moyu" className="animate-fade-in"><MoyuCenterPage setActive={setActive} setChatDraft={setChatDraft} /></div>;
   if (active === "memory") return <div key="memory" className="animate-fade-in"><MemoryPage /></div>;
@@ -1185,7 +1186,7 @@ function ReasoningEffortControl({ hermesModelConfig, setHermesModelConfig, confi
   );
 }
 
-function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelConfig, setHermesModelConfig, refreshHermesCli, refreshHermesApi, setActive, chatState }: { config: AppConfig; updateConfig: (next: AppConfig) => Promise<void>; hermesCli: HermesStatus | null; hermesApi: HermesApiServerStatus | null; hermesModelConfig: HermesModelConfig | null; setHermesModelConfig: (value: HermesModelConfig | null) => void; refreshHermesCli: () => Promise<HermesStatus>; refreshHermesApi: () => Promise<HermesApiServerStatus>; setActive: (id: RouteId) => void; chatState: ChatPageState }) {
+function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelConfig, setHermesModelConfig, refreshHermesCli, refreshHermesApi, setActive, chatState, showToast }: { config: AppConfig; updateConfig: (next: AppConfig) => Promise<void>; hermesCli: HermesStatus | null; hermesApi: HermesApiServerStatus | null; hermesModelConfig: HermesModelConfig | null; setHermesModelConfig: (value: HermesModelConfig | null) => void; refreshHermesCli: () => Promise<HermesStatus>; refreshHermesApi: () => Promise<HermesApiServerStatus>; setActive: (id: RouteId) => void; chatState: ChatPageState; showToast: (msg: string, type: "success" | "error" | "warning" | "info") => void }) {
   const displayModel = formatDisplayModel(chatState.ocPrimaryModel) || "需要检查";
   const [refreshing, setRefreshing] = useState(false);
   const [startingGateway, setStartingGateway] = useState(false);
@@ -1226,11 +1227,13 @@ function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelCo
       await applyOpenClawProviderConfig(tokenDraft, ocModelPreset);
       const modelMap: Record<string, string> = { speed: "deepseek-v4-flash", quality: "deepseek-v4-pro" };
       setOcApplyResult({ ok: true, model: modelMap[ocModelPreset] || ocModelPreset });
+      showToast("配置已保存", "success");
       // Token is written to OpenClaw config by Rust command only.
       // Do NOT save to AppConfig.apiKey or localStorage.
       setTokenDraft("");
     } catch (err) {
       setOcApplyResult({ ok: false, error: getErrorMessage(err) });
+      showToast("保存失败，请稍后重试", "error");
     } finally { setOcApplying(false); }
   };
 
@@ -1666,6 +1669,7 @@ function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelCo
                     setGatewayStartError("");
                     try {
                       await invoke("start_openclaw_gateway");
+                      showToast("本地服务已启动", "success");
                       await refreshAll();
                     } catch {
                       setGatewayStartError("无法启动本地服务，请确认 AI 助手已安装，或点击重试。");
@@ -1698,7 +1702,7 @@ function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelCo
           )}
 
           <div className="flex flex-wrap gap-2">
-            <Button variant="outline" size="sm" onClick={() => { invoke("open_openclaw_dashboard").catch(() => { /* toast placeholder */ }); }}>
+            <Button variant="outline" size="sm" onClick={() => { invoke("open_openclaw_dashboard").catch(() => { showToast("无法打开控制台，请稍后重试", "error"); }); }}>
               <ExternalLink className="h-4 w-4" />打开 OpenClaw 控制台
             </Button>
             <button onClick={() => setShowAdvanced(true)} className="text-xs text-muted-foreground underline-offset-2 hover:underline">高级诊断</button>
