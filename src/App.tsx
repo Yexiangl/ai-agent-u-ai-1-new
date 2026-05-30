@@ -4433,85 +4433,87 @@ function UsagePage() {
 
   return (
     <div className="space-y-4">
-      <Card>
-        <CardHeader>
-          <CardTitle>本地用量概览</CardTitle>
-          <CardDescription>这里显示的是本机对话返回的用量统计，仅供查看使用情况。实际额度和续费状态以服务后台为准。真实统计表示模型返回了用量数据，不代表剩余额度。部分模型或请求可能不会返回用量数据，此时显示为暂未提供。</CardDescription>
-        </CardHeader>
-      </Card>
+      {/* TASK-043C: Visual upgrade — StatusHero + SettingGroup */}
+      <StatusHero
+        title="本地用量概览"
+        subtitle="查看本机对话返回的用量统计，实际额度和续费状态以服务后台为准。真实统计表示模型返回了用量数据，不代表剩余额度。"
+        statusLabel={hasTokenUsage ? "真实统计" : "暂无数据"}
+        statusTone={hasTokenUsage ? "success" : "muted"}
+        primaryAction={hasUsage ? undefined : undefined}
+      >
+        {hasUsage && (
+          <div className="grid gap-3 sm:grid-cols-4">
+            <div className="rounded-xl border border-border/60 bg-muted/20 p-3 text-center">
+              <div className="text-xl font-bold">{stats.sessions.length}</div>
+              <div className="text-xs text-muted-foreground">会话</div>
+            </div>
+            <div className="rounded-xl border border-border/60 bg-muted/20 p-3 text-center">
+              <div className="text-xl font-bold">{stats.allMessages.length}</div>
+              <div className="text-xs text-muted-foreground">消息</div>
+            </div>
+            <div className="rounded-xl border border-border/60 bg-muted/20 p-3 text-center">
+              <div className="text-xl font-bold">{hasTokenUsage ? fmtTokens(totalTokens) : "—"}</div>
+              <div className="text-xs text-muted-foreground">总 Token</div>
+            </div>
+            <div className="rounded-xl border border-border/60 bg-muted/20 p-3 text-center">
+              <div className="text-xl font-bold">{hasTokenUsage ? fmtTokens(weekTokens) : "—"}</div>
+              <div className="text-xs text-muted-foreground">近 7 天</div>
+            </div>
+          </div>
+        )}
+      </StatusHero>
 
       {!hasUsage ? (
-        <div className="rounded-xl border bg-muted/30 p-8 text-center text-sm text-muted-foreground">
-          暂无使用数据，开始一次 AI 对话后这里会自动统计会话数和消息数。Token 统计依赖模型接口返回的 usage 字段，首次对话后即可查看。
+        <div className="rounded-2xl border border-border/60 bg-card p-8 text-center">
+          <div className="text-sm font-medium">暂无使用数据</div>
+          <div className="mt-1 text-xs text-muted-foreground">开始一次 AI 对话后这里会自动统计会话数和消息数。部分模型或请求可能不会返回用量数据。</div>
         </div>
       ) : (
         <>
-          <div className="grid gap-4 md:grid-cols-4">
-            <Metric label="总会话数" value={String(stats.sessions.length)} tone="info" />
-            <Metric label="总消息数" value={String(stats.allMessages.length)} tone="info" />
-            <Metric label="总 Token" value={hasTokenUsage ? fmtTokens(totalTokens) : "暂未提供"} tone={hasTokenUsage ? "success" : "muted"} />
-            <Metric label="近 7 天" value={hasTokenUsage ? fmtTokens(weekTokens) : "暂未提供"} tone={hasTokenUsage ? "info" : "muted"} />
-          </div>
-
-          <div className="grid gap-4 md:grid-cols-4">
-            <Metric label="今日 Token" value={hasTokenUsage ? fmtTokens(todayTokens) : "暂未提供"} tone={hasTokenUsage ? "success" : "muted"} />
-            <Metric label="输入 Token" value={hasTokenUsage ? fmtTokens(promptTokens) : "暂未提供"} tone={hasTokenUsage ? "info" : "muted"} />
-            <Metric label="输出 Token" value={hasTokenUsage ? fmtTokens(completionTokens) : "暂未提供"} tone={hasTokenUsage ? "info" : "muted"} />
-            <Metric label="平均每次回复" value={hasTokenUsage ? fmtTokens(avgTokens) : "暂未提供"} tone={hasTokenUsage ? "info" : "muted"} />
-          </div>
+          <SettingGroup title="用量明细" description="近期用量统计与模型分布">
+            <SettingRow label="今日 Token" value={<span className="font-medium">{hasTokenUsage ? fmtTokens(todayTokens) : "暂未提供"}</span>} tone={hasTokenUsage ? "default" : "muted"} />
+            <SettingRow label="输入 / 输出" value={<span className="font-medium">{hasTokenUsage ? `${fmtTokens(promptTokens)} / ${fmtTokens(completionTokens)}` : "暂未提供"}</span>} tone={hasTokenUsage ? "default" : "muted"} />
+            <SettingRow label="平均每次回复" value={<span className="font-medium">{hasTokenUsage ? fmtTokens(avgTokens) : "暂未提供"}</span>} tone={hasTokenUsage ? "default" : "muted"} />
+            <SettingRow label="模型用量分布" value={
+              modelMap.size === 0 ? <span className="text-muted-foreground text-sm">暂无</span> :
+                <div className="flex flex-wrap gap-1.5">{[...modelMap.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([model, tokens]) => (
+                  <span key={model} className="rounded-full border border-border bg-muted/30 px-2.5 py-0.5 text-xs">{displayModelName(model)} {hasTokenUsage ? ` ${fmtTokens(tokens)}` : ""}</span>
+                ))}</div>
+            } />
+          </SettingGroup>
 
           {hasTokenUsage && (
             <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 px-3 py-2 text-xs text-emerald-700 dark:text-emerald-400">
-              真实统计 · 基于 {usageMessageCount} 条回复的用量数据，不代表剩余额度
+              基于 {usageMessageCount} 条回复的用量数据，不代表剩余额度。
             </div>
           )}
 
-          <Card>
-            <CardHeader><CardTitle>模型用量分布</CardTitle></CardHeader>
-            <CardContent>
-              {modelMap.size === 0 ? (
-                <div className="text-sm text-muted-foreground">暂无模型用量数据。</div>
-              ) : (
-                <div className="space-y-2">
-                  {[...modelMap.entries()].sort((a, b) => b[1] - a[1]).map(([model, tokens]) => (
-                    <div key={model} className="flex items-center justify-between rounded-xl border bg-muted/30 px-4 py-3">
-                      <span className="font-medium">{displayModelName(model)}</span>
-                      <span className="text-sm text-muted-foreground">{hasTokenUsage ? `${fmtTokens(tokens)} tokens` : "暂未提供"}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
+          <SettingGroup title="最近会话" description="最近对话的用量统计">
+            {topSessions.length === 0 ? (
+              <SettingRow label="" description="暂无会话记录。" tone="muted" />
+            ) : (
+              topSessions.map((session) => {
+                const sessionUsageMsgs = (session.messages || []).filter((m) => m.role === "assistant" && m.usage?.total_tokens != null);
+                const sessionHasUsage = sessionUsageMsgs.length > 0;
+                const sessionTokens = sessionUsageMsgs.reduce((sum, m) => sum + (m.usage?.total_tokens ?? 0), 0);
+                return (
+                  <SettingRow key={session.id} label={session.title || "新对话"} description={session.lastMessagePreview || ""}
+                    value={<span className="text-xs text-muted-foreground">{sessionHasUsage ? `${fmtTokens(sessionTokens)}` : "暂未提供"}</span>}
+                  />
+                );
+              })
+            )}
+          </SettingGroup>
 
-          <Card>
-            <CardHeader><CardTitle>最近会话</CardTitle></CardHeader>
-            <CardContent>
-              <div className="space-y-2">
-                {topSessions.map((session) => {
-                  const sessionUsageMsgs = (session.messages || []).filter((m) => m.role === "assistant" && m.usage?.total_tokens != null);
-                  const sessionHasUsage = sessionUsageMsgs.length > 0;
-                  const sessionTokens = sessionUsageMsgs.reduce((sum, m) => sum + (m.usage?.total_tokens ?? 0), 0);
-                  return (
-                    <div key={session.id} className="flex items-center justify-between rounded-xl border bg-muted/30 px-4 py-3">
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate text-sm font-medium">{session.title || "新对话"}</div>
-                        <div className="text-xs text-muted-foreground">{session.lastMessagePreview || ""} · {formatUnixTime(session.updatedAt)}</div>
-                      </div>
-                      <span className="ml-3 shrink-0 text-xs text-muted-foreground">{sessionHasUsage ? `${fmtTokens(sessionTokens)} tokens` : "暂未提供"}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            </CardContent>
-          </Card>
+          <SettingGroup title="说明">
+            <SettingRow label="数据来源" description="本机对话返回的用量统计，仅供查看使用情况。" tone="muted" />
+            <SettingRow label="额度说明" description="不代表剩余额度，实际额度和续费状态以服务后台为准。" tone="muted" />
+            <SettingRow label="无数据说明" description="部分模型或请求可能不会返回用量数据。" tone="muted" />
+          </SettingGroup>
         </>
       )}
 
-      {lastUse > 0 && (
-        <div className="text-xs text-muted-foreground">最近一次使用：{timeAgo(Math.floor(lastUse / 1000))}</div>
-      )}
-
+      {lastUse > 0 && <div className="text-xs text-muted-foreground text-right">最近使用：{timeAgo(Math.floor(lastUse / 1000))}</div>}
       <Button variant="outline" size="sm" onClick={load} disabled={loading}><RefreshCcw className={cn("h-4 w-4", loading && "animate-spin")} />刷新统计</Button>
     </div>
   );
