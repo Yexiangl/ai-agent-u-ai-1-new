@@ -1191,6 +1191,19 @@ function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelCo
   const [refreshing, setRefreshing] = useState(false);
   const [startingGateway, setStartingGateway] = useState(false);
   const [gatewayStartError, setGatewayStartError] = useState("");
+
+  const handleStartGateway = async () => {
+    setStartingGateway(true);
+    setGatewayStartError("");
+    try {
+      await invoke("start_openclaw_gateway");
+      showToast("本地服务已启动", "success");
+      await refreshAll();
+    } catch {
+      setGatewayStartError("无法启动本地服务，请确认 AI 助手已安装，或点击重试。");
+    }
+    setStartingGateway(false);
+  };
   const [quickSetupToken, setQuickSetupToken] = useState("");
   const [quickSetupApplying, setQuickSetupApplying] = useState(false);
   const [quickSetupResult, setQuickSetupResult] = useState<string>("");
@@ -1376,31 +1389,46 @@ function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelCo
 
   return (
     <div className="space-y-4">
-      {/* 1. AI 助手状态 — TASK-042B/C: StatusHero + ActionCluster */}
+      {/* 1. AI 助手状态 — TASK-042B/C/F: StatusHero + ActionCluster + adaptive */}
       <StatusHero
-        title={ocReady ? "AI 助手已连接" : ocChecked ? "AI 助手需要检查" : "正在检查 AI 助手"}
-        subtitle={ocReady ? "可以开始对话和处理任务。" : ocChecked ? "请先检查本地服务状态，完成后即可开始对话。" : "正在确认本地服务和模型连接状态。"}
+        title={ocReady ? "AI 助手已连接" : ocChecked && ocConfig?.configExists ? "AI 助手需要启动" : ocChecked ? "AI 助手需要检查" : "正在检查 AI 助手"}
+        subtitle={ocReady ? "可以开始对话和处理任务。" : ocChecked && ocConfig?.configExists ? "点击启动本地服务，完成后会自动重新检查。" : ocChecked ? "请检查配置或重新检查本地服务状态。" : "正在确认本地服务和模型连接状态。"}
         statusLabel={ocReady ? "已连接" : ocChecked ? "需要检查" : "检查中"}
         statusTone={ocReady ? "success" : ocChecked ? "warning" : "muted"}
         modelLabel={ocReady ? formatDisplayModel(chatState.ocPrimaryModel) || displayModel : displayModel}
         primaryAction={
           <ActionCluster>
             {ocReady && <Button size="sm" onClick={() => setActive("chat")}><MessageSquare className="h-4 w-4" />开始对话</Button>}
-            <Button disabled={refreshing} onClick={refreshAll} variant={ocReady ? "outline" : "default"} size="sm">
+            {ocChecked && !ocReady && ocConfig?.configExists && !ocConfig.gatewayTokenPresent ? undefined : ocChecked && !ocReady && ocConfig?.configExists ? (
+              <Button size="sm" disabled={startingGateway} onClick={handleStartGateway}>
+                {startingGateway ? <><Loader2 className="h-3.5 w-3.5 animate-spin" />正在启动...</> : <><Play className="h-3.5 w-3.5" />启动本地服务</>}
+              </Button>
+            ) : null}
+            <Button disabled={refreshing} onClick={refreshAll} variant={ocReady || (ocChecked && !ocReady && ocConfig?.configExists) ? "outline" : "default"} size="sm">
               {refreshing && <Loader2 className="h-4 w-4 animate-spin" />}<RefreshCcw className="h-4 w-4" />重新检查
             </Button>
             <button onClick={() => setShowAdvanced(true)} className="text-xs text-muted-foreground underline-offset-2 hover:underline">高级诊断</button>
           </ActionCluster>
         }
       >
+        {gatewayStartError && (
+          <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-2 text-xs text-rose-700 dark:text-rose-400">
+            {gatewayStartError}
+            <button className="ml-2 text-rose-400 hover:text-rose-600" onClick={() => setGatewayStartError("")}>×</button>
+          </div>
+        )}
         {ocChecked && !ocReady && (
           <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-600 dark:text-amber-400 space-y-1">
             {ocConfig?.configExists ? (
               <>
-                <p className="font-medium">本地服务未运行</p>
-                {!ocConfig.httpChatCompletionsEnabled && <p>本地服务未连接。</p>}
-                {!ocConfig.gatewayTokenPresent && <p>请先保存模型访问密钥。</p>}
-                {!ocReady && <p>请点击下方按钮启动本地服务，完成后重新检查。</p>}
+                {ocConfig.gatewayTokenPresent ? (
+                  <p className="font-medium">本地服务未运行。点击上方按钮启动后会自动重新检查。</p>
+                ) : (
+                  <>
+                    <p className="font-medium">密钥未配置</p>
+                    <p>请先保存模型访问密钥。</p>
+                  </>
+                )}
               </>
             ) : (
               <><p className="font-medium">需要检查</p><p>未找到本地配置文件。请确认 AI 助手已安装并初始化。</p></>
@@ -1598,12 +1626,7 @@ function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelCo
             }
             action={
               ocConfig?.configExists && !ocReady && !ocConfig.gatewayTokenPresent ? undefined : ocConfig?.configExists && !ocReady ? (
-                <Button size="sm" disabled={startingGateway} onClick={async () => {
-                  setStartingGateway(true); setGatewayStartError("");
-                  try { await invoke("start_openclaw_gateway"); showToast("本地服务已启动", "success"); await refreshAll(); }
-                  catch { setGatewayStartError("无法启动本地服务，请确认 AI 助手已安装，或点击重试。"); }
-                  setStartingGateway(false);
-                }}>
+                <Button size="sm" disabled={startingGateway} onClick={handleStartGateway}>
                   {startingGateway ? <><Loader2 className="h-3.5 w-3.5 animate-spin" />正在启动...</> : <><Play className="h-3.5 w-3.5" />启动本地服务</>}
                 </Button>
               ) : undefined
