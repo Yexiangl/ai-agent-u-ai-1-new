@@ -271,7 +271,7 @@ OpenClaw 将成为主体 Agent 后端。Hermes 不再作为普通用户主路径
 | TASK-040B | 已完成 | P0 | 普通视图技术词替换 | 已审查通过：消息来源→AI Agent，诊断描述去 OpenClaw，教程重写，关于页改，终端命令全部移除。普通 UI 无 openclaw gateway start/restart。P1 残留（助手记忆"OpenClaw 工作区"）归入 040F。 |
 | TASK-040C | 已完成（合并入 040B） | P0 | AI 回复来源改为"AI 助手" | 已在 040B 中完成：显示为"AI Agent"（与产品名一致）。 |
 | TASK-040D | 已完成（合并入 040B-P0） | P0 | 错误提示去终端命令 | 已在 040B-P0 中完成：改为"请点击下方按钮启动"/"请点击重新检查"。 |
-| TASK-040E | 待规划 | P0 | 真实客户 token 冒烟 | 用真实 token 走完主路径。阻塞内测。 |
+| TASK-040E | 待人工执行 | P0 | 真实客户 token 冒烟 | 代码路径已验证（build/cargo/probe/redaction/dummy 全通过）。需人工用真实 token 走 GUI 主路径。测试清单：docs/manual-smoke-test-real-token.md。Blocked by test token。 |
 | TASK-040F | 已完成 | P1 | 助手记忆/用量/能力中心技术词清理 | 已审查通过：助手记忆"OpenClaw 工作区"→"本地助手记忆"，用量页加余额免责，能力 badge "OpenClaw"→"官方"/"精选目录"。P2 残留：记忆页"记忆记忆"重复词、关于页"OpenClaw Agent"、排行 Curated 未中文化。 |
 | TASK-040G | 待规划 | P1 | Windows 打包验证 | tauri build --target windows。 |
 | TASK-040H | 待规划 | P2 | 内测交付清单 | 安装说明+版本号+回滚方案。 |
@@ -409,6 +409,7 @@ OpenClaw 将成为主体 Agent 后端。Hermes 不再作为普通用户主路径
 - TASK-040B 复审（2026-05-29）：大部分技术词替换完成，但有 P0/P1 残留。已完成：消息来源"OpenClaw Agent"→显示为"AI Agent"；诊断卡描述去 OpenClaw；教程重写为客户工作流；关于页改为"AI 助手服务"；错误提示部分改善。残留 P0：(1) 状态卡仍有"请在终端运行 openclaw gateway start"（line 1402）；(2) 保存配置后仍有"openclaw gateway restart"（line 1523）。残留 P1：(3) 助手记忆页"OpenClaw 工作区"6 处；(4) 能力中心 badge 显示"OpenClaw"。建议：040B 需要补丁修复 P0 残留后才能标记完成。
 - TASK-040B-P0 终审通过（2026-05-30）：终端命令暴露修复合格。L1402 改为"请点击下方按钮启动本地服务"，L1523 改为"请点击重新检查本地服务状态"。普通 UI 中 rg "openclaw gateway" → 0 hits。文案与现有启动按钮衔接清楚。TASK-040B 标记完成。TASK-040C（消息来源）和 040D（错误提示）已合并入 040B/040B-P0 完成。P0 内测阻塞项全部解除。P1 残留（助手记忆"OpenClaw 工作区"、能力中心 badge "OpenClaw"）归入 TASK-040F。
 - TASK-040F 终审通过（2026-05-30）：P1 技术词清理合格。(1) 助手记忆：10 处"OpenClaw 工作区"→"本地助手记忆"，说明改为"本地 AI 助手保存的只读记忆信息，已做脱敏处理"。(2) 用量概览：加余额免责"实际额度和续费状态以服务后台为准"+"不代表剩余额度"。(3) 能力中心：openclaw badge→"官方"，curated→"精选目录"（已安装区），ClawHub 保留。未改读取/只读/脱敏/usage/install 逻辑。P2 残留：(a) L4217"本地助手记忆记忆"重复词；(b) 关于页"OpenClaw Agent"；(c) 排行区 Curated 未中文化。均不阻塞内测。
+- TASK-040E-Prep 终审通过（2026-05-30）：真实 token 人工冒烟测试清单合格。docs/manual-smoke-test-real-token.md 覆盖 15 步操作+4 关键确认+6 通过标准+11 失败分类+10 安全要求+测试记录模板。明确区分：代码路径验证✅、dummy 等效链路✅、真实 token GUI 测试❌（blocked by test token）。TASK-040E 正确标记为"待人工执行"。无 token/dummy 残留。未修改业务代码。
 - TASK-036C 终审通过（2026-05-29）：能力中心视觉 polish 合格。排行卡片 nativeName/installCommand 折叠到 <details className="text-[10px]"><summary>安装详情</summary>，主视觉优先展示名称/简介/badges/按钮。已安装卡片安装命令弱化（text-muted-foreground/70）。信息保留完整未删除。安装确认弹窗仍展示完整 nativeName/installCommand。排行免责"排行仅用于浏览参考"保留。高风险项辨识度不变。Toast 未接入本任务可接受（inline error 仍有效）。未改 install/uninstall/allowlist/风险逻辑。下一步建议 TASK-036D AI 对话页交互 polish。
 - TASK-036D 终审通过（2026-05-29）：AI 对话页交互 polish 合格。(1) 消息动画：animate-message-in 0.18s ease-out translateY(6px)，key=requestId 保证流式输出不重新触发动画。(2) 空状态："开始一次 AI 对话" + 4 chip 引导（总结/任务/报错/方案），点击填入输入框不自动发送。(3) 回执说"18ms"实为 0.18s=180ms，合理。未改 send/retry/regen/stop/session/usage/backend 逻辑。下一步建议 TASK-036E AI 助手页 polish 或跳到 TASK-036G 回归。
 - TASK-036E 终审通过（2026-05-29）：AI 助手页诊断/配置 polish 合格。(1) 状态 badge："已准备好"→"已连接"更准确。(2) 正常文案："AI 助手已连接，可以开始对话"。(3) 异常分层：本地服务未运行/密钥未配置/需要检查，各有明确提示。(4) openclaw gateway start 仅为文本提示非自动执行。(5) 模型配置说明更适合普通用户。(6) "重新检查本地服务"比"重启"更准确。(7) 普通视图无 provider/baseUrl/API URL/Token 明文。npm run build 补跑通过。未改 Token/config 写入/对话/install。下一步建议 TASK-036F 或 TASK-036G 回归。
