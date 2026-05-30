@@ -4191,8 +4191,8 @@ function MemoryPage() {
                 label={file.title}
                 description={`${formatBytes(file.size)} · ${formatUnixTime(file.updatedAt) || "未知"}`}
                 value={<Badge tone="info">{memoryKindLabel(file)}</Badge>}
-                tone={selected?.id === file.id ? "default" : "muted"}
-                action={null}
+                onClick={() => setSelectedId(file.id)}
+                selected={selected?.id === file.id}
               />
             ))}
           </SettingGroup>
@@ -4726,22 +4726,32 @@ function SettingGroup({ title, description, action, children }: { title: string;
   );
 }
 
-function SettingRow({ label, description, value, action, tone = "default" }: {
+function SettingRow({ label, description, value, action, tone = "default", onClick, selected }: {
   label: string; description?: string; value?: React.ReactNode; action?: React.ReactNode; tone?: "default" | "success" | "warning" | "danger" | "muted";
+  onClick?: () => void; selected?: boolean;
 }) {
   const dot = tone === "success" ? "bg-emerald-500" : tone === "warning" ? "bg-amber-500" : tone === "danger" ? "bg-rose-500" : tone === "muted" ? "bg-slate-400" : "";
-  return (
-    <div className="flex items-center justify-between gap-3 py-2.5 first:pt-0 last:pb-0">
+  const inner = (
+    <>
       <div className="min-w-0">
         <div className="flex items-center gap-1.5 text-sm">
           {dot && <span className={cn("h-1.5 w-1.5 rounded-full shrink-0", dot)} />}
-          <span>{label}</span>
+          <span className="truncate">{label}</span>
         </div>
         {description && <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>}
       </div>
       <div className="flex items-center gap-2 shrink-0 text-sm">{value}{action}</div>
-    </div>
+    </>
   );
+  if (onClick) {
+    return (
+      <button type="button" onClick={onClick}
+        className={cn("flex w-full items-center justify-between gap-3 py-2.5 text-left transition-colors first:pt-0 last:pb-0 -mx-1 px-1 rounded-lg hover:bg-muted/50", selected && "bg-muted/40")}>
+        {inner}
+      </button>
+    );
+  }
+  return <div className="flex items-center justify-between gap-3 py-2.5 first:pt-0 last:pb-0">{inner}</div>;
 }
 
 function ActionCluster({ children, align = "left" }: { children: React.ReactNode; align?: "left" | "right" }) {
