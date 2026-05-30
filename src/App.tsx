@@ -4137,73 +4137,71 @@ function MemoryPage() {
 
   return (
     <div className="space-y-4">
-      <Card>
-        <CardHeader>
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <CardTitle>助手记忆</CardTitle>
-              <CardDescription>这里是本地 AI 助手保存的只读记忆信息，内容已做脱敏处理。</CardDescription>
-            </div>
-            <Button variant="outline" onClick={loadMemory} disabled={loadingMemory}><RefreshCcw className={cn("h-4 w-4", loadingMemory && "animate-spin")} />重新扫描</Button>
+      {/* TASK-043D: Visual upgrade — StatusHero + SettingGroup */}
+      <StatusHero
+        title="本地助手记忆"
+        subtitle="查看本地 AI 助手保存的只读记忆信息，内容已做脱敏处理。"
+        statusLabel={loadingMemory ? "正在读取" : memory?.available === false ? "不可用" : memory ? "已加载" : "正在读取"}
+        statusTone={memoryError ? "danger" : loadingMemory ? "muted" : memory?.available === false ? "warning" : "success"}
+        primaryAction={<Button variant="outline" size="sm" onClick={loadMemory} disabled={loadingMemory}><RefreshCcw className={cn("h-4 w-4", loadingMemory && "animate-spin")} />重新加载</Button>}
+      >
+        <div className="grid gap-3 sm:grid-cols-3">
+          <div className="rounded-xl border border-border/60 bg-muted/20 p-3 text-center">
+            <div className="text-lg font-bold">{memory?.files.length ?? 0}</div>
+            <div className="text-xs text-muted-foreground">记忆文件</div>
           </div>
-        </CardHeader>
-        <CardContent className="grid gap-3 md:grid-cols-3">
-          <Metric label="数据源" value={memory?.source ?? "本地助手记忆"} tone="info" />
-          <Metric label="记忆文件数" value={String(memory?.files.length ?? 0)} tone={(memory?.files.length ?? 0) > 0 ? "success" : "muted"} />
-          <Metric label="最近扫描" value={checkedAt} tone="info" />
-          {memoryError && <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-rose-700 dark:text-rose-400 md:col-span-3">{memoryError}</div>}
-          {memory?.warnings && memory.warnings.length > 0 && (
-            <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-3 text-xs text-amber-600 dark:text-amber-400 md:col-span-3 space-y-0.5">
-              {memory.warnings.map((w) => <div key={w}>{w}</div>)}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+          <div className="rounded-xl border border-border/60 bg-muted/20 p-3 text-center">
+            <div className="text-lg font-bold">{checkedAt || "—"}</div>
+            <div className="text-xs text-muted-foreground">最近扫描</div>
+          </div>
+          <div className="rounded-xl border border-border/60 bg-muted/20 p-3 text-center">
+            <div className="text-lg font-bold">只读</div>
+            <div className="text-xs text-muted-foreground">已脱敏</div>
+          </div>
+        </div>
+        {memoryError && <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-rose-700 dark:text-rose-400">{memoryError}</div>}
+        {memory?.warnings && memory.warnings.length > 0 && (
+          <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-3 text-xs text-amber-600 dark:text-amber-400 space-y-0.5">
+            {memory.warnings.map((w) => <div key={w}>{w}</div>)}
+          </div>
+        )}
+      </StatusHero>
 
-      <div className="grid gap-4 xl:grid-cols-[380px_1fr]">
-        <Card>
-          <CardHeader><CardTitle>文件列表</CardTitle><CardDescription>本地助手记忆下的记忆文件。</CardDescription></CardHeader>
-          <CardContent className="space-y-2">
-            {loadingMemory && <div className="text-sm text-muted-foreground"><Loader2 className="mr-2 inline h-4 w-4 animate-spin" />正在扫描 本地助手记忆记忆…</div>}
-            {!loadingMemory && memory?.available !== false && memory?.files.length === 0 && <div className="rounded-xl border bg-muted/30 p-3 text-sm text-muted-foreground">未发现记忆文件。本地助手记忆可能尚未初始化。</div>}
-            {!loadingMemory && memory?.available === false && <div className="rounded-xl border bg-muted/30 p-3 text-sm text-muted-foreground">{memory?.warnings?.[0] ?? "本地助手记忆不可用"}</div>}
-            {memory?.files.map((file) => (
-              <button key={file.id} onClick={() => setSelectedId(file.id)} className={cn("w-full rounded-xl border p-3 text-left transition", selected?.id === file.id ? "border-primary/40 bg-primary/5" : "bg-card hover:bg-muted/40")}>
-                <div className="flex items-center justify-between gap-3">
-                  <div className="font-medium">{file.title}</div>
-                  <Badge tone="info">{memoryKindLabel(file)}</Badge>
-                </div>
-                <div className="mt-1 truncate text-xs text-muted-foreground">{file.relativePath}</div>
-                <div className="mt-2 flex gap-3 text-[11px] text-muted-foreground">
-                  <span>{formatBytes(file.size)}</span>
-                  <span>{formatUnixTime(file.updatedAt)}</span>
-                </div>
-              </button>
+      {loadingMemory && <div className="flex items-center justify-center py-12"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /><span className="ml-2 text-sm text-muted-foreground">正在扫描本地助手记忆…</span></div>}
+
+      {!loadingMemory && memory?.available === false && (
+        <div className="rounded-2xl border border-border/60 bg-card p-8 text-center">
+          <div className="text-sm font-medium">暂无记忆</div>
+          <div className="mt-1 text-xs text-muted-foreground">{memory?.warnings?.[0] ?? "本地助手记忆不可用。请确认已安装并初始化 AI 助手。"}</div>
+        </div>
+      )}
+
+      {!loadingMemory && memory?.available !== false && memory?.files.length === 0 && (
+        <div className="rounded-2xl border border-border/60 bg-card p-8 text-center">
+          <div className="text-sm font-medium">暂无记忆</div>
+          <div className="mt-1 text-xs text-muted-foreground">未发现记忆文件。本地助手记忆可能尚未初始化。</div>
+        </div>
+      )}
+
+      {memory?.files && memory.files.length > 0 && (
+        <div className="grid gap-4 xl:grid-cols-[380px_1fr]">
+          <SettingGroup title="记忆文件" description="选择文件查看只读内容。">
+            {memory.files.map((file) => (
+              <SettingRow key={file.id}
+                label={file.title}
+                description={`${formatBytes(file.size)} · ${formatUnixTime(file.updatedAt) || "未知"}`}
+                value={<Badge tone="info">{memoryKindLabel(file)}</Badge>}
+                tone={selected?.id === file.id ? "default" : "muted"}
+                action={null}
+              />
             ))}
-          </CardContent>
-        </Card>
+          </SettingGroup>
 
-        <Card>
-          <CardHeader>
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <CardTitle>{selected?.title ?? "选择记忆文件"}</CardTitle>
-                <CardDescription>{selected ? selected.relativePath : "从左侧选择一个记忆文件查看。"}</CardDescription>
-              </div>
-              {selected && <Badge tone="warning">只读</Badge>}
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-4">
+          <SettingGroup title={selected?.title ?? "选择记忆文件"} description={selected ? selected.relativePath : "从左侧选择一个记忆文件查看"}>
             {selected ? (
               <>
-                <div className="rounded-xl border bg-muted/30 p-3 text-xs leading-6 text-muted-foreground">
-                  <div>文件：<span className="break-all text-foreground">{selected.relativePath || selected.title}</span></div>
-                  <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-muted-foreground">
-                    <span>大小：{formatBytes(selected.size)}</span>
-                    <span>更新：{formatUnixTime(selected.updatedAt)}</span>
-                  </div>
-                </div>
-                <div className="rounded-xl border bg-muted/30 p-4 text-sm leading-7 text-muted-foreground">
+                <SettingRow label="" description="只读内容，已脱敏。" tone="muted" />
+                <div className="rounded-lg border bg-muted/20 p-4 text-sm leading-7 text-muted-foreground">
                   {selected.content ? (
                     <pre className="whitespace-pre-wrap font-sans text-foreground/80 break-words">{selected.content}</pre>
                   ) : (
@@ -4212,24 +4210,19 @@ function MemoryPage() {
                 </div>
               </>
             ) : (
-              <div className="rounded-xl border bg-muted/30 p-4 text-sm text-muted-foreground">
-                {memory && memory.available === false
-                  ? "本地助手记忆不可用。请确认已安装并初始化 AI 助手。"
-                  : "选择左侧文件查看详细内容。"}
-              </div>
+              <SettingRow label="" description="选择左侧文件查看详细内容。" tone="muted" />
             )}
-          </CardContent>
-        </Card>
-      </div>
+          </SettingGroup>
+        </div>
+      )}
 
       {/* Legacy note */}
       <div className="rounded-lg border border-muted/60 bg-muted/20 px-3 py-2 text-center text-xs text-muted-foreground">
-        旧版 Hermes 记忆暂未接入本页主视图，后续可作为旧数据分区查看。
+        旧版记忆暂未接入本页主视图，后续可作为旧数据分区查看。
       </div>
     </div>
   );
 }
-
 function memoryKindLabel(file: HermesNativeMemoryFile) {
   if (file.relativePath.includes("memories/users/")) return "用户记忆";
   if (file.kind === "memory") return "记忆";
@@ -4439,7 +4432,6 @@ function UsagePage() {
         subtitle="查看本机对话返回的用量统计，实际额度和续费状态以服务后台为准。真实统计表示模型返回了用量数据，不代表剩余额度。"
         statusLabel={hasTokenUsage ? "真实统计" : "暂无数据"}
         statusTone={hasTokenUsage ? "success" : "muted"}
-        primaryAction={hasUsage ? undefined : undefined}
       >
         {hasUsage && (
           <div className="grid gap-3 sm:grid-cols-4">
@@ -4497,7 +4489,7 @@ function UsagePage() {
                 const sessionHasUsage = sessionUsageMsgs.length > 0;
                 const sessionTokens = sessionUsageMsgs.reduce((sum, m) => sum + (m.usage?.total_tokens ?? 0), 0);
                 return (
-                  <SettingRow key={session.id} label={session.title || "新对话"} description={session.lastMessagePreview || ""}
+                  <SettingRow key={session.id} label={session.title || "新对话"}
                     value={<span className="text-xs text-muted-foreground">{sessionHasUsage ? `${fmtTokens(sessionTokens)}` : "暂未提供"}</span>}
                   />
                 );
