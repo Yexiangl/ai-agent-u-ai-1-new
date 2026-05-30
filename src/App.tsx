@@ -1029,25 +1029,31 @@ function HomePage({ config, updateConfig, setActive, hermesCli, hermesApi, herme
 
   return (
     <div className="mx-auto w-full max-w-[1120px] min-w-0 space-y-6 px-4 py-4">
-      {/* Hero */}
-      <div className="space-y-2 text-center">
-        <h1 className="text-3xl font-bold tracking-tight">AI Agent 工作台</h1>
-        <p className="text-muted-foreground">让本地 AI Agent 帮你处理对话、文件和任务。</p>
-        <div className="flex items-center justify-center gap-3 pt-1">
-          <Button size="lg" onClick={() => setActive("chat")}><MessageSquare className="h-4 w-4" />开始对话</Button>
-          <Button variant="outline" size="lg" onClick={() => setActive("engines")}><Settings2 className="h-4 w-4" />配置 AI 助手</Button>
-        </div>
-      </div>
+      {/* TASK-043B: Visual upgrade — StatusHero + SettingGroup */}
+      <StatusHero
+        title="AI Agent 工作台"
+        subtitle="用于 AI 对话、能力扩展、本地用量和助手记忆的统一入口。"
+        statusLabel={agentConnected ? "已连接" : "需要检查"}
+        statusTone={agentConnected ? "success" : "warning"}
+        modelLabel={agentConnected ? displayModel : undefined}
+        primaryAction={
+          <ActionCluster>
+            <Button size="sm" onClick={() => setActive("chat")}><MessageSquare className="h-4 w-4" />开始对话</Button>
+            <Button size="sm" variant="outline" onClick={() => setActive("engines")}><Settings2 className="h-4 w-4" />AI 助手</Button>
+          </ActionCluster>
+        }
+      />
 
-      {/* Quick Start */}
+      {/* Core Entry Points */}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {[
-          { icon: MessageSquare, title: "开始对话", desc: "和 AI Agent 直接对话", route: "chat" as RouteId },
-          { icon: Upload, title: "分析文件", desc: "上传内容，让 Agent 帮你整理", route: "files" as RouteId },
-          { icon: PackageOpen, title: "能力中心", desc: "使用可复用的 Agent 能力", route: "skills" as RouteId },
-          { icon: FileText, title: "助手记忆", desc: "查看本地记忆和上下文", route: "memory" as RouteId },
+          { icon: MessageSquare, title: "AI 对话", desc: "开始一次 AI 对话", route: "chat" as RouteId },
+          { icon: Settings2, title: "AI 助手", desc: "检查状态与配置", route: "engines" as RouteId },
+          { icon: PackageOpen, title: "能力中心", desc: "使用和安装扩展能力", route: "skills" as RouteId },
+          { icon: Bot, title: "本地用量", desc: "查看使用统计", route: "usage" as RouteId, tone: "info" },
         ].map((item) => (
-          <button key={item.title} onClick={() => setActive(item.route)} className="flex flex-col items-start gap-1.5 rounded-xl border border-border/50 bg-card/80 p-4 text-left transition-colors hover:border-primary/30 hover:bg-primary/5">
+          <button key={item.title} onClick={() => setActive(item.route)}
+            className="flex flex-col items-start gap-1.5 rounded-xl border border-border/50 bg-card/80 p-4 text-left transition-colors hover:border-primary/30 hover:bg-primary/5">
             <item.icon className="h-5 w-5 text-primary" />
             <span className="text-sm font-medium">{item.title}</span>
             <span className="text-xs text-muted-foreground">{item.desc}</span>
@@ -1055,63 +1061,47 @@ function HomePage({ config, updateConfig, setActive, hermesCli, hermesApi, herme
         ))}
       </div>
 
+      {/* Secondary Entry Points */}
+      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+        {[
+          { title: "本地助手记忆", route: "memory" as RouteId },
+          { title: "文件库", route: "files" as RouteId },
+          { title: "摸鱼中心", route: "moyu" as RouteId },
+          { title: "教程", route: "tutorials" as RouteId },
+          { title: "关于", route: "about" as RouteId },
+        ].map((item) => (
+          <button key={item.title} onClick={() => setActive(item.route)}
+            className="rounded-lg border border-border/50 bg-card/60 px-3 py-2 text-sm text-muted-foreground text-center transition-colors hover:border-primary/30 hover:text-foreground">
+            {item.title}
+          </button>
+        ))}
+      </div>
+
       {/* Recent Sessions + Status */}
       <div className="grid min-w-0 gap-6 grid-cols-1 xl:grid-cols-[1fr_320px]">
-        {/* Recent Sessions */}
-        <div className="min-w-0 space-y-3">
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-medium text-muted-foreground">最近会话</h3>
-            {recentSessions.length > 0 && (
-              <button onClick={() => setActive("chat")} className="text-xs text-muted-foreground hover:text-foreground">查看全部</button>
-            )}
-          </div>
+        <SettingGroup title="最近会话">
           {recentSessions.length === 0 ? (
-            <p className="text-sm text-muted-foreground">还没有会话，先开始一次对话。</p>
+            <SettingRow label="" description="还没有会话，先开始一次对话。" tone="muted" />
           ) : (
-            <div className="space-y-0.5">
-              {recentSessions.map((session) => {
-                const sessionRunning = Array.from(runsRef.current.values()).some(r => r.status === "running" && r.sessionId === session.id);
-                return (
-                  <button key={session.id} onClick={() => setActive("chat")} className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors hover:bg-muted/60">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-1.5 text-sm font-medium">
-                        {session.title}
-                        {sessionRunning && <Loader2 className="h-3 w-3 shrink-0 animate-spin text-primary/70" />}
-                      </div>
-                      <div className="truncate text-xs text-muted-foreground/70">{session.lastMessagePreview || "暂无消息"}</div>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
+            recentSessions.map((session) => {
+              const sessionRunning = Array.from(runsRef.current.values()).some(r => r.status === "running" && r.sessionId === session.id);
+              return (
+                <SettingRow key={session.id} label={session.title}
+                  value={sessionRunning ? <Loader2 className="h-3 w-3 animate-spin text-primary/70" /> : undefined}
+                  description={session.lastMessagePreview || undefined}
+                  onClick={() => setActive("chat")}
+                />
+              );
+            })
           )}
-        </div>
+        </SettingGroup>
 
-        {/* Lightweight Agent Status */}
-        <div className="min-w-0 space-y-3">
-          <h3 className="text-sm font-medium text-muted-foreground">AI 助手</h3>
-          <div className="rounded-xl border border-border/50 bg-card/80 p-4 space-y-3 text-sm">
-            <div className="flex items-center gap-2">
-              <span className={cn("h-2 w-2 rounded-full", agentConnected ? "bg-emerald-500" : "bg-amber-500")} />
-              <span>{agentConnected ? "已准备好" : "需要配置"}</span>
-            </div>
-            <div className="text-muted-foreground text-xs">
-              <span>可以帮你</span>
-              <p className="mt-0.5 text-foreground">对话、整理文件、处理任务</p>
-            </div>
-            <button onClick={() => setShowTechInfo(!showTechInfo)} className="w-full text-xs text-muted-foreground/60 hover:text-muted-foreground">
-              {showTechInfo ? "收起技术信息" : "显示技术信息"}
-            </button>
-            {showTechInfo && (
-              <div className="flex items-center justify-between text-muted-foreground text-xs">
-                <span>当前模型</span>
-                <span className="text-foreground">{agentConnected ? displayModel : "需要检查"}</span>
-              </div>
-            )}
-            <Button variant="ghost" size="sm" className="w-full text-xs" onClick={() => setActive("engines")}>查看设置</Button>
-            <button onClick={() => updateConfig({ ...config, hasCompletedOnboarding: false })} className="w-full text-xs text-muted-foreground underline-offset-2 hover:underline mt-1">新手引导</button>
-          </div>
-        </div>
+        <SettingGroup title="AI 助手">
+          <SettingRow label="状态" value={<span className={cn("font-medium", agentConnected ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400")}>{agentConnected ? "已连接" : "需要检查"}</span>} tone={agentConnected ? "success" : "warning"} />
+          <SettingRow label="当前模型" value={<span className="font-medium">{displayModel}</span>} />
+          <SettingRow label="" action={<Button variant="outline" size="sm" className="w-full" onClick={() => setActive("engines")}>查看设置</Button>} />
+          <SettingRow label="" action={<button onClick={() => updateConfig({ ...config, hasCompletedOnboarding: false })} className="text-xs text-muted-foreground underline-offset-2 hover:underline">新手引导</button>} />
+        </SettingGroup>
       </div>
 
       {/* Conditional warnings */}
