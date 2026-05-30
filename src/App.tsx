@@ -1376,15 +1376,22 @@ function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelCo
 
   return (
     <div className="space-y-4">
-      {/* 1. AI 助手状态 — TASK-042B: StatusHero */}
+      {/* 1. AI 助手状态 — TASK-042B/C: StatusHero + ActionCluster */}
       <StatusHero
-        title="AI 助手"
-        subtitle={ocReady ? "已连接，可以开始对话" : ocChecked ? "需要检查本地服务状态" : "正在检测..."}
-        statusLabel={ocReady ? "已连接" : ocChecked ? "需要检查" : "检测中"}
+        title={ocReady ? "AI 助手已连接" : ocChecked ? "AI 助手需要检查" : "正在检查 AI 助手"}
+        subtitle={ocReady ? "可以开始对话和处理任务。" : ocChecked ? "请先检查本地服务状态，完成后即可开始对话。" : "正在确认本地服务和模型连接状态。"}
+        statusLabel={ocReady ? "已连接" : ocChecked ? "需要检查" : "检查中"}
         statusTone={ocReady ? "success" : ocChecked ? "warning" : "muted"}
-        modelLabel={displayModel}
-        primaryAction={<Button disabled={refreshing} onClick={refreshAll} variant="outline" size="sm">{refreshing && <Loader2 className="h-4 w-4 animate-spin" />}<RefreshCcw className="h-4 w-4" />重新检查</Button>}
-        secondaryAction={<button onClick={() => setShowAdvanced(true)} className="text-xs text-muted-foreground underline-offset-2 hover:underline">高级诊断</button>}
+        modelLabel={ocReady ? formatDisplayModel(chatState.ocPrimaryModel) || displayModel : displayModel}
+        primaryAction={
+          <ActionCluster>
+            {ocReady && <Button size="sm" onClick={() => setActive("chat")}><MessageSquare className="h-4 w-4" />开始对话</Button>}
+            <Button disabled={refreshing} onClick={refreshAll} variant={ocReady ? "outline" : "default"} size="sm">
+              {refreshing && <Loader2 className="h-4 w-4 animate-spin" />}<RefreshCcw className="h-4 w-4" />重新检查
+            </Button>
+            <button onClick={() => setShowAdvanced(true)} className="text-xs text-muted-foreground underline-offset-2 hover:underline">高级诊断</button>
+          </ActionCluster>
+        }
       >
         {ocChecked && !ocReady && (
           <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-600 dark:text-amber-400 space-y-1">
@@ -4708,22 +4715,22 @@ function StatusHero({ title, subtitle, statusLabel, statusTone, modelLabel, prim
 }) {
   const dot = statusTone === "success" ? "bg-emerald-500" : statusTone === "warning" ? "bg-amber-500" : statusTone === "danger" ? "bg-rose-500" : "bg-slate-400";
   return (
-    <div className="rounded-3xl border border-border/60 bg-gradient-to-br from-card via-card to-muted/30 p-5 space-y-3">
+    <div className="rounded-3xl border border-border/60 bg-gradient-to-br from-card via-card to-muted/20 shadow-sm p-6 space-y-4">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h3 className="text-lg font-bold">{title}</h3>
-          {subtitle && <p className="mt-0.5 text-xs text-muted-foreground">{subtitle}</p>}
+          <h3 className="text-2xl font-bold tracking-tight">{title}</h3>
+          {subtitle && <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>}
         </div>
-        <span className={cn("inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium",
+        <span className={cn("inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold shrink-0",
           statusTone === "success" && "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
           statusTone === "warning" && "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400",
           statusTone === "danger" && "border-rose-500/30 bg-rose-500/10 text-rose-700 dark:text-rose-400",
           statusTone === "muted" && "border-border bg-muted/40 text-muted-foreground")}>
-          <span className={cn("h-1.5 w-1.5 rounded-full", dot)} />{statusLabel}</span>
+          <span className={cn("h-2 w-2 rounded-full", dot)} />{statusLabel}</span>
       </div>
-      {modelLabel && <div className="text-sm text-muted-foreground">当前模型：<span className="font-medium text-foreground">{modelLabel}</span></div>}
+      {modelLabel && <div className="text-sm text-muted-foreground">当前模型 <span className="font-semibold text-foreground">{modelLabel}</span></div>}
       {(primaryAction || secondaryAction) && (
-        <div className="flex flex-wrap gap-2">{primaryAction}{secondaryAction}</div>
+        <div className="flex flex-wrap gap-2 pt-1">{primaryAction}{secondaryAction}</div>
       )}
       {children}
     </div>
