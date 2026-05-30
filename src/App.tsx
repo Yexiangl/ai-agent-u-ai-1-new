@@ -1767,6 +1767,7 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
   const displayModel = formatDisplayModel(ocPrimaryModel) || "模型信息待同步";
 
   const [input, setInput] = useState(initialDraft);
+  const [copiedMsgId, setCopiedMsgId] = useState("");
   const [attachments, setAttachments] = useState<PreparedAttachment[]>([]);
   const [attachBusy, setAttachBusy] = useState(false);
   const [sessionSearch, setSessionSearch] = useState("");
@@ -3196,7 +3197,9 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
                     {/* TASK-022A: User message actions */}
                     {message.role === "user" && (
                       <div className="mt-1.5 flex items-center gap-2 pr-1 text-[11px] text-muted-foreground opacity-40 transition-opacity group-hover:opacity-100">
-                        <Button variant="ghost" size="icon" className="h-7 w-7" title="复制" aria-label="复制" onClick={() => navigator.clipboard.writeText(message.content || "")}><Copy className="h-3.5 w-3.5" /></Button>
+                        <Button variant="ghost" size="icon" className="h-7 w-7" title="复制" aria-label="复制" onClick={async () => {
+  try { await navigator.clipboard.writeText(message.content || ""); setCopiedMsgId(message.requestId || ""); setTimeout(() => setCopiedMsgId(""), 1500); } catch { /* ignore */ }
+}}><Copy className="h-3.5 w-3.5" />{copiedMsgId === message.requestId && <span className="ml-1 text-[10px] text-emerald-500">已复制</span>}</Button>
                         <Button variant="ghost" size="icon" className="h-7 w-7" title="填入输入框" aria-label="填入输入框" onClick={() => { setInput(message.content); requestAnimationFrame(() => { inputRef.current?.focus(); autoResize(inputRef.current); }); }}><Pencil className="h-3.5 w-3.5" /></Button>
                       </div>
                     )}
@@ -3206,7 +3209,9 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
                         {message.modelName && <span>{formatDisplayModel(message.modelName)}</span>}
                         {compactElapsed && <span>{compactElapsed}</span>}
                         <div className="flex items-center gap-0.5 opacity-40 transition-opacity group-hover:opacity-100">
-                        <Button variant="ghost" size="icon" className="h-7 w-7" title="复制" aria-label="复制" onClick={() => navigator.clipboard.writeText(message.content || "")}><Copy className="h-3.5 w-3.5" /></Button>
+                        <Button variant="ghost" size="icon" className="h-7 w-7" title="复制" aria-label="复制" onClick={async () => {
+  try { await navigator.clipboard.writeText(message.content || ""); setCopiedMsgId(message.requestId || ""); setTimeout(() => setCopiedMsgId(""), 1500); } catch { /* ignore */ }
+}}><Copy className="h-3.5 w-3.5" />{copiedMsgId === message.requestId && <span className="ml-1 text-[10px] text-emerald-500">已复制</span>}</Button>
                         {!isFailed && message.content && !loading && <Button variant="ghost" size="icon" className="h-7 w-7" title="继续" aria-label="继续" onClick={() => { setInput("请继续。"); requestAnimationFrame(() => { inputRef.current?.focus(); autoResize(inputRef.current); }); }}><MessageSquare className="h-3.5 w-3.5" /></Button>}
                         {isFailed && <Button variant="ghost" size="icon" className="h-7 w-7" title={hasRunningRun ? "AI Agent 正在处理，稍后再试" : "重试"} aria-label="重试" disabled={hasRunningRun} onClick={() => retryRun(message.requestId!)}><RotateCcw className="h-3.5 w-3.5" /></Button>}
                         {message.content && !loading && (
@@ -3872,6 +3877,7 @@ function AiFilesPage({ setActive, setPendingChatAttachment }: { setActive: (id: 
   const [files, setFiles] = useState<AiFileEntry[]>([]);
   const [filter, setFilter] = useState("全部");
   const [loading, setLoading] = useState(true);
+  const [copiedPathId, setCopiedPathId] = useState("");
   const [error, setError] = useState("");
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [previewFile, setPreviewFile] = useState<AiFileEntry | null>(null);
@@ -3996,7 +4002,9 @@ function AiFilesPage({ setActive, setPendingChatAttachment }: { setActive: (id: 
                             finally { setPreviewLoading(false); }
                           }}>预览</Button>
                           <Button variant="ghost" size="sm" onClick={() => openAiFileLocation(file.path)}>打开位置</Button>
-                          <Button variant="ghost" size="sm" onClick={() => { navigator.clipboard.writeText(file.path); }}><Copy className="h-3 w-3" /></Button>
+                          <Button variant="ghost" size="sm" onClick={async () => {
+  try { await navigator.clipboard.writeText(file.path); setCopiedPathId(file.path); setTimeout(() => setCopiedPathId(""), 1500); } catch { /* ignore */ }
+}}><Copy className="h-3 w-3" />{copiedPathId === file.path ? " 已复制" : ""}</Button>
                           <Button variant="ghost" size="sm" className="text-rose-600" onClick={() => setConfirmDelete(file.path)}>删除</Button>
                         </div>
                       </Td>
@@ -4323,6 +4331,7 @@ function formatUnixTime(value: string | null) {
 
 function TasksPage({ cronOverview, setCronOverview, cronCliStatus, setCronCliStatus, cronLastLoadedAt, setCronLastLoadedAt }: { cronOverview: HermesCronOverview | null; setCronOverview: (v: HermesCronOverview | null) => void; cronCliStatus: HermesCronCliStatus | null; setCronCliStatus: (v: HermesCronCliStatus | null) => void; cronLastLoadedAt: number; setCronLastLoadedAt: (v: number) => void }) {
   const [loading, setLoading] = useState(false);
+  const [copiedCron, setCopiedCron] = useState(false);
   const [cliLoading, setCliLoading] = useState(false);
   const [error, setError] = useState("");
   const [showCreate, setShowCreate] = useState(false);
@@ -4410,7 +4419,9 @@ function TasksPage({ cronOverview, setCronOverview, cronCliStatus, setCronCliSta
               <div className="rounded-xl border bg-muted/30 p-3"><pre className="whitespace-pre-wrap text-xs text-muted-foreground">{`/cron add "${taskSchedule}" "${taskPrompt}"`}</pre></div>
             )}
             <div className="flex gap-2">
-              <Button variant="outline" disabled={!taskName || !taskPrompt} onClick={() => { navigator.clipboard.writeText(`/cron add "${taskSchedule}" "${taskPrompt}"`); }}><Copy className="h-4 w-4" />复制命令</Button>
+              <Button variant="outline" disabled={!taskName || !taskPrompt} onClick={async () => {
+  try { await navigator.clipboard.writeText(`/cron add "${taskSchedule}" "${taskPrompt}"`); setCopiedCron(true); setTimeout(() => setCopiedCron(false), 1500); } catch { /* ignore */ }
+}}><Copy className="h-4 w-4" />{copiedCron ? "已复制" : "复制命令"}</Button>
               <Button disabled>真正创建（后续开放）</Button>
             </div>
           </CardContent>
