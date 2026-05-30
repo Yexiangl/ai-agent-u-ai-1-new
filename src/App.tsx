@@ -1459,66 +1459,47 @@ function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelCo
         </Card>
       )}
 
-      {/* 2. Model Config */}
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle>模型配置</CardTitle>
-          <CardDescription>填写模型访问密钥并选择档位，保存后 AI 助手将使用该配置进行对话和任务处理。</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {/* Current preset indicator */}
-          {ocConfig?.gatewayTokenPresent && (
-            <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-2 text-xs text-emerald-700 dark:text-emerald-400">
-              模型已配置。如需切换档位或更新密钥，请重新填写并保存。
+      {/* 2. Model Config — TASK-042D: SettingGroup/SettingRow */}
+      <SettingGroup title="模型配置" description="填写模型访问密钥并选择档位，保存后 AI 助手将使用该配置进行对话和任务处理。">
+        {ocConfig?.gatewayTokenPresent && (
+          <SettingRow label="配置状态" value={<span className="font-medium text-emerald-600 dark:text-emerald-400">已配置</span>} tone="success" description="如需切换档位或更新密钥，请在下方重新填写并保存。" />
+        )}
+        <SettingRow label="模型访问密钥" description="请输入购买后获得的模型访问密钥。密钥写入后端后即从页面清除，不会保存到 App 本地存储。"
+          value={
+            <div className="flex gap-1.5">
+              <Input type={showKey ? "text" : "password"} value={tokenDraft} onChange={(e) => setTokenDraft(e.target.value)} placeholder="请输入密钥" className="w-44" />
+              <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => setShowKey(!showKey)}>{showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</Button>
             </div>
-          )}
-          <div className="space-y-1">
-            <label className="text-sm font-medium">模型访问密钥</label>
-            <div className="flex gap-2">
-              <Input type={showKey ? "text" : "password"} value={tokenDraft} onChange={(e) => setTokenDraft(e.target.value)} placeholder="请输入密钥" />
-              <Button variant="outline" size="icon" onClick={() => setShowKey(!showKey)}>{showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</Button>
-            </div>
-            <p className="text-xs text-muted-foreground">密钥写入后端配置后即从页面清除，不会保存到 App 本地存储。</p>
-          </div>
-          <div className="space-y-2">
-            <label className="text-sm font-medium">模型档位</label>
-            <div className="grid gap-2 sm:grid-cols-2">
-              {[
-                { preset: "speed" as const, title: "速度优先", subtitle: "响应更快，适合日常任务" },
-                { preset: "quality" as const, title: "质量优先", subtitle: "推理更强，适合复杂分析" },
-              ].map((card) => (
-                <button key={card.preset} onClick={() => setOcModelPreset(card.preset)}
-                  className={cn("relative flex flex-col gap-1 rounded-2xl border px-4 py-3 text-left transition-all duration-150",
-                    ocModelPreset === card.preset ? "border-primary bg-primary/5" : "border-border/60 hover:border-primary/30")}>
-                  {ocModelPreset === card.preset && <Check className="absolute right-2 top-2 h-4 w-4 text-primary" />}
-                  <div className="text-sm font-medium">{card.title}</div>
-                  <div className="text-xs text-muted-foreground">{card.subtitle}</div>
+          }
+        />
+        <SettingRow label="模型档位" description="推荐普通用户使用默认档位。"
+          value={
+            <div className="flex gap-1.5">
+              {[{ preset: "speed" as const, label: "速度优先" }, { preset: "quality" as const, label: "质量优先" }].map(({ preset, label }) => (
+                <button key={preset} onClick={() => setOcModelPreset(preset)}
+                  className={cn("rounded-full border px-3 py-1 text-xs transition-colors",
+                    ocModelPreset === preset ? "border-primary bg-primary/10 text-primary font-medium" : "border-border hover:border-primary/30 text-muted-foreground")}>
+                  {label}
                 </button>
               ))}
             </div>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Button onClick={applyOcProvider} disabled={!tokenDraft.trim() || ocApplying}>
-              {ocApplying && <Loader2 className="h-4 w-4 animate-spin" />}保存配置
-            </Button>
-            <p className="self-center text-[11px] text-muted-foreground">保存后可能需要重新检查本地服务以生效。</p>
-          </div>
-          {ocApplyResult && (
-            <div className={cn("rounded-xl border p-3 text-sm",
-              ocApplyResult.ok ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
-              : "border-rose-500/30 bg-rose-500/10 text-rose-700 dark:text-rose-400")}>
-              {ocApplyResult.ok
-                ? `配置已保存。当前档位：${ocModelPreset === "speed" ? "速度优先 (deepseek-v4-flash)" : "质量优先 (deepseek-v4-pro)"}。`
-                : ocApplyResult.error}
-            </div>
-          )}
-          {ocApplyResult?.ok && (
-            <div className="rounded-lg bg-muted/50 p-2 font-mono text-xs text-muted-foreground">
-              如未生效，请点击重新检查本地服务状态。
-            </div>
-          )}
-        </CardContent>
-      </Card>
+          }
+        />
+        <SettingRow label=""
+          action={
+            <ActionCluster>
+              <Button onClick={applyOcProvider} disabled={!tokenDraft.trim() || ocApplying} size="sm">
+                {ocApplying && <Loader2 className="h-4 w-4 animate-spin" />}保存配置
+              </Button>
+            </ActionCluster>
+          }
+        />
+        {ocApplyResult && (
+          <SettingRow label="" description={ocApplyResult.ok ? `配置已保存。当前档位：${ocModelPreset === "speed" ? "速度优先" : "质量优先"}。` : ocApplyResult.error}
+            tone={ocApplyResult.ok ? "success" : "danger"}
+          />
+        )}
+      </SettingGroup>
 
       {/* 3. Apply Progress / Result */}
       {showApplyPreview && (
