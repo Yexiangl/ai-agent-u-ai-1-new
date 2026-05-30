@@ -3464,13 +3464,14 @@ function SkillsPage({ config, updateConfig, setActive, setChatDraft, setPendingN
 
   return (
     <div className="space-y-4">
-      <Card>
-        <CardHeader>
-          <CardTitle>能力中心</CardTitle>
-          <CardDescription>把常用任务做成可复用能力，支持对话、文件、数据、写作和轻量娱乐。当前以内置工作流为主，外部插件暂未开放。</CardDescription>
-          <div className="mt-2 rounded-lg border border-blue-500/20 bg-blue-500/5 px-3 py-2 text-xs text-blue-700 dark:text-blue-300">内置工作流为本地 prompt 模板，不会执行系统命令。真实插件能力将在后续版本接入。</div>
-        </CardHeader>
-      </Card>
+      <StatusHero
+        title="能力中心"
+        subtitle="安装和管理 AI 助手可使用的扩展能力。安装前请确认来源、权限和风险等级。"
+        statusLabel={installRecords.length > 0 ? `已安装 ${installRecords.length} 项` : "暂未安装"}
+        statusTone={installRecords.length > 0 ? "success" : "muted"}
+      >
+        <div className="rounded-lg border border-blue-500/20 bg-blue-500/5 px-3 py-2 text-xs text-blue-700 dark:text-blue-300">内置工作流为本地 prompt 模板，不会执行系统命令。真实插件能力将在后续版本接入。</div>
+      </StatusHero>
       {installError && <div className="flex items-start gap-2 rounded-lg border border-rose-500/30 bg-rose-500/10 p-2 text-xs text-rose-700 dark:text-rose-400">{installError}<button className="ml-auto shrink-0 text-rose-400 hover:text-rose-600" onClick={() => setInstallError("")} aria-label="关闭">×</button></div>}
 
       <div className="flex flex-wrap items-center gap-2">
@@ -3621,16 +3622,16 @@ function SkillsPage({ config, updateConfig, setActive, setChatDraft, setPendingN
         </div>
       )}
 
-      {/* TASK-035E: Installed capabilities section */}
+{/* TASK-035E/043F: Installed capabilities section */}
       <div className="space-y-3 pt-4 border-t">
         <div>
           <h3 className="text-sm font-medium">已安装能力</h3>
-          <p className="text-xs text-muted-foreground mt-0.5">这里显示通过本应用安装的能力。从能力排行中选择能力安装后，会显示在这里。</p>
+          <p className="text-xs text-muted-foreground mt-0.5">通过本应用安装的能力。从能力排行中选择能力安装后，会显示在这里。</p>
         </div>
         {installRecords.length === 0 ? (
-          <div className="rounded-xl border bg-muted/30 p-6 text-center">
+          <div className="rounded-2xl border border-border/60 bg-card p-6 text-center">
             <div className="text-sm font-medium">暂未安装能力</div>
-            <div className="mt-1 text-xs text-muted-foreground">从能力排行或外部能力目录中选择能力安装后，会显示在这里。</div>
+            <div className="mt-1 text-xs text-muted-foreground">从能力排行中选择能力安装后，会显示在这里。</div>
           </div>
         ) : (
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
@@ -3676,11 +3677,11 @@ function SkillsPage({ config, updateConfig, setActive, setChatDraft, setPendingN
         )}
       </div>
 
-      {/* TASK-027C-G: Ranked external capability catalog */}
+      {/* TASK-027C-G/043F: Ranked external capability catalog */}
       <div className="space-y-3 pt-4 border-t">
         <div>
           <h3 className="text-sm font-medium">能力排行</h3>
-          <p className="text-xs text-muted-foreground mt-0.5">排行仅用于浏览参考，不代表安全性。安装前请查看风险等级和权限说明。当前为内置目录排序，后续将接入真实商店数据。</p>
+          <p className="text-xs text-muted-foreground mt-0.5">排行仅用于浏览参考，不代表安全性。安装前请查看风险等级和权限说明。</p>
         </div>
         <div className="flex flex-wrap gap-1.5">
           {["全部","热门","趋势","新上架","高风险"].map(tab => (
