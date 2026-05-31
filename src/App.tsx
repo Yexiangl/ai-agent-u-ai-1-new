@@ -4503,7 +4503,38 @@ function UsagePage() {
 }
 
 function TutorialsPage({ config }: { config: AppConfig }) {
-  return <div className="grid gap-4 xl:grid-cols-2">{tutorials.map((tutorial) => <Card key={tutorial.title}><CardHeader><CardTitle>{tutorial.title}</CardTitle></CardHeader><CardContent className="space-y-3 text-sm">{tutorial.steps.map((step, index) => <div key={step} className="flex gap-3"><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-primary text-xs text-primary-foreground">{index + 1}</span><p className="text-muted-foreground">{step}</p></div>)}</CardContent></Card>)}<Card><CardHeader><CardTitle>售后联系方式</CardTitle></CardHeader><CardContent className="text-sm text-muted-foreground">如有问题请联系售后 QQ：858070120</CardContent></Card></div>;
+  return (
+    <div className="space-y-4 max-w-3xl">
+      <StatusHero
+        title="快速上手"
+        subtitle="按步骤启用 AI 助手、开始对话，并了解能力中心和本地用量。"
+        statusLabel="新手指南"
+        statusTone="muted"
+      />
+
+      {tutorials.map((tutorial, ti) => (
+        <SettingGroup key={ti} title={tutorial.title} description={`共 ${tutorial.steps.length} 步`}>
+          {tutorial.steps.map((step, index) => (
+            <SettingRow key={index}
+              label={`${index + 1}. ${step.split("。")[0]}。`}
+              value={<span className="shrink-0 flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-xs font-medium text-primary">{index + 1}</span>}
+            />
+          ))}
+        </SettingGroup>
+      ))}
+
+      <SettingGroup title="常见问题">
+        <SettingRow label="模型访问密钥是什么" description="用于启用 AI 助手的连接凭证，由服务方提供。粘贴后即可使用。不需要理解技术细节。" />
+        <SettingRow label="本地服务未运行怎么办" description="前往 AI 助手页，点击「启动本地服务」按钮，系统会自动重新检查状态。" />
+        <SettingRow label="用量统计和额度有什么区别" description="用量统计是本机对话返回的数据展示，不代表剩余额度。实际额度以服务后台为准。" />
+        <SettingRow label="能力安装前要确认什么" description="确认来源、类型、风险等级和权限范围。高风险能力需要二次确认后才可安装。" />
+      </SettingGroup>
+
+      <SettingGroup title="售后联系方式" description="如有问题请联系售后获取帮助。">
+        <SettingRow label="QQ" value={<span className="font-mono text-sm">858070120</span>} />
+      </SettingGroup>
+    </div>
+  );
 }
 
 function AboutPage({ config, updateConfig }: { config: AppConfig; updateConfig: (next: AppConfig) => Promise<void> }) {
