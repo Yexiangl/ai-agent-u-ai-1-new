@@ -3699,32 +3699,34 @@ function SkillsPage({ config, updateConfig, setActive, setChatDraft, setPendingN
             <Card key={item.id} className="group flex flex-col transition-colors hover:border-primary/20">
               <CardHeader className="pb-2">
                 <div className="flex items-start justify-between gap-2">
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-[10px] font-bold text-muted-foreground/50">#{item.rank}</span>
-                    <CardTitle className="text-sm">{item.name}</CardTitle>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <CardTitle className="text-sm">{item.name}</CardTitle>
+                      {item.risk === "high" && <span className="shrink-0 rounded-full bg-rose-500/15 px-2 py-0.5 text-[10px] font-medium text-rose-600 dark:text-rose-400">高风险</span>}
+                    </div>
+                    <CardDescription className="line-clamp-2 text-xs mt-0.5">{item.desc}</CardDescription>
                   </div>
+                  <span className="shrink-0 text-[10px] font-bold text-muted-foreground/40">#{item.rank}</span>
                 </div>
-                <CardDescription className="line-clamp-2 text-xs">{item.desc}</CardDescription>
               </CardHeader>
               <CardContent className="flex-1 space-y-2 pt-0">
                 <div className="flex flex-wrap gap-1.5">
-                  <Badge tone="info">{item.category}</Badge>
-                  <Badge tone={item.source === "clawhub" ? "info" : item.source === "openclaw" ? "info" : "muted"}>
-                    {item.source === "clawhub" ? "ClawHub" : item.source === "openclaw" ? "官方" : "Curated"}
-                  </Badge>
                   <Badge tone={item.kind === "skill" ? "info" : "warning"}>{item.kind === "skill" ? "工作流" : "插件"}</Badge>
+                  <Badge tone={item.source === "clawhub" ? "info" : item.source === "openclaw" ? "info" : "muted"}>{item.source === "clawhub" ? "ClawHub" : item.source === "openclaw" ? "官方" : "精选"}</Badge>
                   <Badge tone={riskTone(item.risk)}>{riskLabel(item.risk)}</Badge>
-                  <Badge tone={item.rankGroup === "hot" ? "danger" : item.rankGroup === "trending" ? "warning" : item.rankGroup === "new" ? "info" : item.rankGroup === "high_risk" ? "danger" : "muted"}>
-                    {item.rankGroup === "hot" ? "热门" : item.rankGroup === "trending" ? "趋势" : item.rankGroup === "new" ? "新上架" : item.rankGroup === "high_risk" ? "需谨慎" : ""}
-                  </Badge>
+                  <Badge tone={item.rankGroup === "hot" ? "danger" : item.rankGroup === "trending" ? "warning" : item.rankGroup === "new" ? "info" : item.rankGroup === "high_risk" ? "danger" : "muted"}>{item.rankGroup === "hot" ? "热门" : item.rankGroup === "trending" ? "趋势" : item.rankGroup === "new" ? "新" : ""}</Badge>
                 </div>
-                {item.perms.length > 0 && <p className="text-[11px] text-muted-foreground">权限：{item.perms.map(permLabel).join("、")}</p>}
-                {item.risk === "high" && <p className="text-[10px] text-rose-600 dark:text-rose-400">安装前需二次确认</p>}
-                <details className="text-[10px] text-muted-foreground/70">
-                  <summary className="cursor-pointer hover:text-muted-foreground">安装详情</summary>
-                  <div className="mt-1 space-y-0.5 pl-1">
-                    <div>原生名称：<code className="rounded bg-muted/50 px-1 font-mono text-[10px]">{item.nativeName}</code></div>
-                    <div className="truncate">安装命令：<code className="rounded bg-muted/50 px-1 font-mono text-[10px]">{item.installCommand}</code></div>
+                {item.perms.length > 0 && (
+                  <div className="flex flex-wrap gap-1">
+                    {item.perms.map(p => <span key={p} className="rounded-full border border-border bg-muted/30 px-2 py-0.5 text-[10px] text-muted-foreground">{permLabel(p)}</span>)}
+                  </div>
+                )}
+                {item.risk === "high" && <p className="text-[10px] text-muted-foreground/70">安装需要二次确认</p>}
+                <details className="text-[10px] text-muted-foreground/60">
+                  <summary className="cursor-pointer hover:text-muted-foreground select-none">安装详情</summary>
+                  <div className="mt-1 space-y-1 rounded-lg border border-border/40 bg-muted/20 p-2">
+                    <div>原生名称：<code className="font-mono text-[10px]">{item.nativeName}</code></div>
+                    <div className="truncate">安装命令：<code className="font-mono text-[10px]">{item.installCommand}</code></div>
                   </div>
                 </details>
                 <div className="flex gap-2 pt-1">
