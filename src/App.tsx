@@ -3846,22 +3846,23 @@ function AiFilesPage({ setActive, setPendingChatAttachment }: { setActive: (id: 
 
   return (
     <div className="space-y-4">
-      <Card>
-        <CardHeader>
-          <CardTitle>文件库</CardTitle>
-          <CardDescription>统一管理 AI 生成、上传和导出的文件。文件保存在本机应用数据目录。</CardDescription>
-        </CardHeader>
-      </Card>
+      <StatusHero
+        title="文件库"
+        subtitle="管理本机可用于 AI 分析的文件。上传后可预览、复制路径或发送给 AI 助手处理。"
+        statusLabel={files.length > 0 ? `${files.length} 个文件` : "暂无文件"}
+        statusTone={files.length > 0 ? "success" : "muted"}
+      >
+        <div className="grid gap-3 sm:grid-cols-5">
+          {[{ label: "总文件", val: counts.total || 0, tone: "info" }, { label: "上传", val: counts.uploads || 0, tone: "info" }, { label: "生成", val: counts.generated || 0, tone: "success" }, { label: "视频", val: counts.videos || 0, tone: "warning" }, { label: "导出", val: counts.exports || 0, tone: "info" }].map(({ label, val, tone }) => (
+            <div key={label} className="rounded-xl border border-border/60 bg-muted/20 p-3 text-center">
+              <div className="text-lg font-bold">{val}</div>
+              <div className="text-xs text-muted-foreground">{label}</div>
+            </div>
+          ))}
+        </div>
+      </StatusHero>
 
-      {error && <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-rose-700 dark:text-rose-400">{error}</div>}
-
-      <div className="grid gap-4 md:grid-cols-5">
-        <Metric label="总文件数" value={String(counts.total || 0)} tone="info" />
-        <Metric label="上传" value={String(counts.uploads || 0)} tone="info" />
-        <Metric label="生成" value={String(counts.generated || 0)} tone="success" />
-        <Metric label="视频" value={String(counts.videos || 0)} tone="warning" />
-        <Metric label="导出" value={String(counts.exports || 0)} tone="info" />
-      </div>
+      {error && <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-rose-700 dark:text-rose-400">{error}</div>}
 
       <div className="flex flex-wrap items-center gap-2">
         {categories.map((cat) => (
@@ -3873,8 +3874,7 @@ function AiFilesPage({ setActive, setPendingChatAttachment }: { setActive: (id: 
         </div>
       </div>
 
-      <Card>
-        <CardContent className="p-0">
+      <div className="rounded-2xl border border-border/60 bg-card overflow-hidden">
           {loading ? (
             <div className="flex items-center justify-center py-16"><Loader2 className="h-6 w-6 animate-spin" /></div>
           ) : files.length === 0 ? (
@@ -3947,8 +3947,7 @@ function AiFilesPage({ setActive, setPendingChatAttachment }: { setActive: (id: 
               </Table>
             </div>
           )}
-        </CardContent>
-      </Card>
+        </div>
 
       {previewFile && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setPreviewFile(null)}>
