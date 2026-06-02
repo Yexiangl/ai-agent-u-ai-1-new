@@ -72,7 +72,7 @@ import { type AgentRun, type AgentRunStatus } from "@/lib/agentRunStore";
 import { type ChatProject, loadProjects, saveProjects, createProject, DEFAULT_PROJECT_ID, SYSTEM_PROJECTS } from "@/lib/chatProjects";
 import { cn, getErrorMessage } from "@/lib/utils";
 import { checkUpdate, downloadUpdate, applyUpdate, onDownloadProgress, type UpdateInfo } from "@/lib/updater";
-import { checkOpenClawInstalled, installOpenClaw, onInstallLog, onInstallDone } from "@/lib/openclawInstaller";
+import { checkOpenClawInstalled, startInstall, subscribeInstall, getInstallState } from "@/lib/openclawInstaller";
 import { invoke } from "@tauri-apps/api/core";  // TASK-027C-D: install/uninstall
 import { officialSkills, type OfficialSkill } from "@/data/skills";
 import { tutorials } from "@/data/tutorials";
@@ -5432,51 +5432,48 @@ function TutorialsPage({ config }: { config: AppConfig }) {
 // TASK-066: One-click installer for the openclaw local service. Shows only when
 // openclaw is not yet installed on this machine; streams install logs live.
 function OpenClawInstallCard({ onInstalled }: { onInstalled?: () => void }) {
-  type Phase = "checking" | "missing" | "installing" | "done" | "failed";
-  const [phase, setPhase] = useState<Phase>("checking");
-  const [logs, setLogs] = useState<string[]>([]);
+  // Detection state is local; install phase/logs come from the module store so
+  // they survive navigating away from this page mid-install.
+  const [detected, setDetected] = useState<"checking" | "missing" | "installed">("checking");
+  const [, forceRender] = useState(0);
   const logEndRef = useRef<HTMLDivElement | null>(null);
+  const prevPhaseRef = useRef(getInstallState().phase);
+
+  useEffect(() => {
+    const unsub = subscribeInstall(() => forceRender((n) => n + 1));
+    return unsub;
+  }, []);
 
   useEffect(() => {
     let alive = true;
     checkOpenClawInstalled()
-      .then((s) => { if (alive) setPhase(s.installed ? "done" : "missing"); })
-      .catch(() => { if (alive) setPhase("missing"); });
+      .then((s) => { if (alive) setDetected(s.installed ? "installed" : "missing"); })
+      .catch(() => { if (alive) setDetected("missing"); });
     return () => { alive = false; };
   }, []);
 
-  useEffect(() => { logEndRef.current?.scrollIntoView({ block: "end" }); }, [logs]);
+  const store = getInstallState();
 
-  const doInstall = async () => {
-    setPhase("installing");
-    setLogs([]);
-    let unlog: (() => void) | undefined;
-    let undone: (() => void) | undefined;
-    try {
-      unlog = await onInstallLog((line) => setLogs((prev) => [...prev.slice(-400), line]));
-      undone = await onInstallDone((success) => {
-        unlog?.();
-        if (success) {
-          setPhase("done");
-          checkOpenClawInstalled().then((s) => { if (s.installed) onInstalled?.(); });
-        } else {
-          setPhase("failed");
-        }
-        undone?.();
+  // When the install transitions to done, re-check and notify the parent.
+  useEffect(() => {
+    if (prevPhaseRef.current !== "done" && store.phase === "done") {
+      checkOpenClawInstalled().then((s) => {
+        if (s.installed) { setDetected("installed"); onInstalled?.(); }
       });
-      await installOpenClaw();
-    } catch (err) {
-      unlog?.(); undone?.();
-      setLogs((prev) => [...prev, getErrorMessage(err) || "安装启动失败"]);
-      setPhase("failed");
     }
-  };
+    prevPhaseRef.current = store.phase;
+  }, [store.phase, onInstalled]);
 
-  // Already installed (or still detecting): render nothing — the normal setup
-  // flow takes over.
-  if (phase === "checking" || phase === "done") return null;
+  useEffect(() => { logEndRef.current?.scrollIntoView({ block: "end" }); }, [store.logs.length]);
 
-  return <OpenClawInstallCardView phase={phase} logs={logs} logEndRef={logEndRef} onInstall={doInstall} />;
+  // Hide the card once openclaw is installed and the install isn't mid-flight.
+  if ((detected === "installed" || detected === "checking") && store.phase === "idle") return null;
+  if (store.phase === "done") return null;
+
+  const viewPhase: "missing" | "installing" | "failed" =
+    store.phase === "installing" ? "installing" : store.phase === "failed" ? "failed" : "missing";
+
+  return <OpenClawInstallCardView phase={viewPhase} logs={store.logs} logEndRef={logEndRef} onInstall={startInstall} />;
 }
 
 function OpenClawInstallCardView({ phase, logs, logEndRef, onInstall }: {
@@ -5500,6 +5497,11 @@ function OpenClawInstallCardView({ phase, logs, logEndRef, onInstall }: {
             ? <><Loader2 className="h-4 w-4 animate-spin" />正在安装本地服务…</>
             : <><Download className="h-4 w-4" />一键安装本地服务</>}
         </Button>
+        {installing && (
+          <div className="rounded-lg border border-blue-500/30 bg-blue-500/10 p-2 text-xs text-blue-700 dark:text-blue-400">
+            安装中，请耐心等待几分钟，不要关闭程序。若弹出「防火墙 / 网络访问」提示，请选择「允许」。
+          </div>
+        )}
         {phase === "failed" && (
           <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-2 text-xs text-rose-700 dark:text-rose-400">
             安装未成功。请检查网络后重试；也可以参考下方日志或联系支持。

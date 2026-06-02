@@ -172,30 +172,45 @@ pub fn apply_update(app: AppHandle, installer_path: String) -> Result<(), String
 
     #[cfg(target_os = "windows")]
     {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        const DETACHED_PROCESS: u32 = 0x0000_0008;
+
         let is_portable_exe = path.extension().and_then(|e| e.to_str()) == Some("exe")
             && path.file_name().and_then(|n| n.to_str()).map(|n| n.contains("portable")).unwrap_or(false);
         if is_portable_exe {
-            // Portable swap: generate a .bat script that waits, swaps, relaunches.
+            // Portable swap: generate a .bat that waits for this process to exit,
+            // renames the running exe to .bak, drops the new exe in place,
+            // relaunches, cleans up the .bak, then deletes itself.
             let current_exe = std::env::current_exe().map_err(|e| format!("获取当前程序路径失败: {}", e))?;
             let backup = current_exe.with_file_name(format!("{}.bak", current_exe.file_name().unwrap().to_string_lossy()));
             let bat_path = current_exe.with_file_name("_update.bat");
 
+            // ping is used instead of `timeout` because the script runs with no
+            // console window, where `timeout` (needs stdin) would fail.
+            // `(goto) 2>nul & del "%~f0"` is the canonical self-delete that avoids
+            // the "找不到批处理文件 / batch file cannot be found" error.
             let script = format!(
                 "@echo off\r\n\
-                 timeout /t 2 /nobreak >nul\r\n\
-                 move /y \"{}\" \"{}\" >nul\r\n\
-                 move /y \"{}\" \"{}\" >nul\r\n\
-                 start \"\" \"{}\"\r\n\
-                 del \"%~f0\"\r\n",
-                current_exe.display(), backup.display(),
-                path.display(), current_exe.display(),
-                current_exe.display()
+ping 127.0.0.1 -n 4 >nul\r\n\
+move /y \"{cur}\" \"{bak}\" >nul 2>&1\r\n\
+move /y \"{new}\" \"{cur}\" >nul 2>&1\r\n\
+start \"\" \"{cur}\"\r\n\
+ping 127.0.0.1 -n 3 >nul\r\n\
+del /q \"{bak}\" >nul 2>&1\r\n\
+(goto) 2>nul & del \"%~f0\"\r\n",
+                cur = current_exe.display(),
+                bak = backup.display(),
+                new = path.display(),
             );
 
             fs::write(&bat_path, script).map_err(|e| format!("生成更新脚本失败: {}", e))?;
 
+            // Launch the script hidden and detached so no console window appears
+            // and it survives this process exiting.
             std::process::Command::new("cmd")
-                .args(["/c", "start", "", &bat_path.to_string_lossy()])
+                .args(["/c", &bat_path.to_string_lossy()])
+                .creation_flags(CREATE_NO_WINDOW | DETACHED_PROCESS)
                 .spawn()
                 .map_err(|e| format!("启动更新脚本失败: {}", e))?;
 

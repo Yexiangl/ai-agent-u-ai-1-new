@@ -3916,14 +3916,20 @@ async fn install_openclaw(app: tauri::AppHandle) -> Result<serde_json::Value, St
 }
 
 // Build the platform-specific command that runs the official openclaw installer.
+// We pass the no-onboard flag so the installer does NOT launch the interactive
+// onboarding wizard at the end — that wizard expects a TTY and hangs when run
+// headless from inside the app.
 fn build_openclaw_install_command() -> std::process::Command {
     #[cfg(target_os = "windows")]
     {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         let mut cmd = std::process::Command::new("powershell");
         cmd.args([
             "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command",
-            "iwr -useb https://openclaw.ai/install.ps1 | iex",
+            "& ([scriptblock]::Create((iwr -useb https://openclaw.ai/install.ps1))) -NoOnboard",
         ]);
+        cmd.creation_flags(CREATE_NO_WINDOW);
         cmd
     }
     #[cfg(not(target_os = "windows"))]
@@ -3931,7 +3937,7 @@ fn build_openclaw_install_command() -> std::process::Command {
         let mut cmd = std::process::Command::new("bash");
         cmd.args([
             "-c",
-            "curl -fsSL https://openclaw.ai/install.sh | bash",
+            "curl -fsSL https://openclaw.ai/install.sh | bash -s -- --no-onboard",
         ]);
         cmd
     }
