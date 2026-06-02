@@ -1,4 +1,4 @@
-import { type KeyboardEvent, type ReactNode, memo, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type KeyboardEvent, type ReactNode, type RefObject, memo, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Bot,
   BookOpen,
@@ -72,6 +72,7 @@ import { type AgentRun, type AgentRunStatus } from "@/lib/agentRunStore";
 import { type ChatProject, loadProjects, saveProjects, createProject, DEFAULT_PROJECT_ID, SYSTEM_PROJECTS } from "@/lib/chatProjects";
 import { cn, getErrorMessage } from "@/lib/utils";
 import { checkUpdate, downloadUpdate, applyUpdate, onDownloadProgress, type UpdateInfo } from "@/lib/updater";
+import { checkOpenClawInstalled, installOpenClaw, onInstallLog, onInstallDone } from "@/lib/openclawInstaller";
 import { invoke } from "@tauri-apps/api/core";  // TASK-027C-D: install/uninstall
 import { officialSkills, type OfficialSkill } from "@/data/skills";
 import { tutorials } from "@/data/tutorials";
@@ -1584,6 +1585,9 @@ function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelCo
           </div>
         )}
       </StatusHero>
+
+      {/* TASK-066: One-click install of the local service (openclaw) */}
+      <OpenClawInstallCard onInstalled={refreshAll} />
 
       {/* TASK-038C: One-click AI assistant setup */}
       {ocChecked && (!ocConfig?.gatewayTokenPresent || !ocReady) && (
@@ -5422,6 +5426,93 @@ function TutorialsPage({ config }: { config: AppConfig }) {
         <SettingRow label="QQ" value={<span className="font-mono text-sm">858070120</span>} />
       </SettingGroup>
     </div>
+  );
+}
+
+// TASK-066: One-click installer for the openclaw local service. Shows only when
+// openclaw is not yet installed on this machine; streams install logs live.
+function OpenClawInstallCard({ onInstalled }: { onInstalled?: () => void }) {
+  type Phase = "checking" | "missing" | "installing" | "done" | "failed";
+  const [phase, setPhase] = useState<Phase>("checking");
+  const [logs, setLogs] = useState<string[]>([]);
+  const logEndRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    checkOpenClawInstalled()
+      .then((s) => { if (alive) setPhase(s.installed ? "done" : "missing"); })
+      .catch(() => { if (alive) setPhase("missing"); });
+    return () => { alive = false; };
+  }, []);
+
+  useEffect(() => { logEndRef.current?.scrollIntoView({ block: "end" }); }, [logs]);
+
+  const doInstall = async () => {
+    setPhase("installing");
+    setLogs([]);
+    let unlog: (() => void) | undefined;
+    let undone: (() => void) | undefined;
+    try {
+      unlog = await onInstallLog((line) => setLogs((prev) => [...prev.slice(-400), line]));
+      undone = await onInstallDone((success) => {
+        unlog?.();
+        if (success) {
+          setPhase("done");
+          checkOpenClawInstalled().then((s) => { if (s.installed) onInstalled?.(); });
+        } else {
+          setPhase("failed");
+        }
+        undone?.();
+      });
+      await installOpenClaw();
+    } catch (err) {
+      unlog?.(); undone?.();
+      setLogs((prev) => [...prev, getErrorMessage(err) || "安装启动失败"]);
+      setPhase("failed");
+    }
+  };
+
+  // Already installed (or still detecting): render nothing — the normal setup
+  // flow takes over.
+  if (phase === "checking" || phase === "done") return null;
+
+  return <OpenClawInstallCardView phase={phase} logs={logs} logEndRef={logEndRef} onInstall={doInstall} />;
+}
+
+function OpenClawInstallCardView({ phase, logs, logEndRef, onInstall }: {
+  phase: "missing" | "installing" | "failed";
+  logs: string[];
+  logEndRef: RefObject<HTMLDivElement | null>;
+  onInstall: () => void;
+}) {
+  const installing = phase === "installing";
+  return (
+    <Card className="border-amber-500/30 bg-amber-500/5">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-base">安装本地服务</CardTitle>
+        <CardDescription className="text-xs">
+          首次在这台电脑使用需要安装本地 AI 服务（约几分钟，需要联网）。安装只需在每台新电脑做一次。
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <Button onClick={onInstall} disabled={installing}>
+          {installing
+            ? <><Loader2 className="h-4 w-4 animate-spin" />正在安装本地服务…</>
+            : <><Download className="h-4 w-4" />一键安装本地服务</>}
+        </Button>
+        {phase === "failed" && (
+          <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-2 text-xs text-rose-700 dark:text-rose-400">
+            安装未成功。请检查网络后重试；也可以参考下方日志或联系支持。
+          </div>
+        )}
+        {(installing || logs.length > 0) && (
+          <div className="max-h-48 overflow-auto rounded-lg border border-border/60 bg-muted/40 p-2 font-mono text-[11px] leading-relaxed text-muted-foreground">
+            {logs.length === 0 ? <div className="opacity-60">准备中…</div> : logs.map((l, i) => <div key={i} className="whitespace-pre-wrap break-all">{l}</div>)}
+            <div ref={logEndRef} />
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 

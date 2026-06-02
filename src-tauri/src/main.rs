@@ -3857,9 +3857,89 @@ fn start_openclaw_gateway() -> Result<serde_json::Value, String> {
     }
 }
 
+// TASK-066: Detect whether the openclaw CLI is installed and on PATH.
+#[tauri::command]
+async fn check_openclaw_installed() -> Result<serde_json::Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut cmd = std::process::Command::new("openclaw");
+        cmd.arg("--version");
+        hide_command_window(&mut cmd);
+        match cmd.output() {
+            Ok(out) if out.status.success() => {
+                let text = String::from_utf8_lossy(&out.stdout);
+                let version = text.split_whitespace()
+                    .find(|t| t.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false) && t.contains('.'))
+                    .unwrap_or("").to_string();
+                serde_json::json!({ "installed": true, "version": version })
+            }
+            _ => serde_json::json!({ "installed": false, "version": "" }),
+        }
+    }).await.map_err(|e| e.to_string())
+}
+
+// TASK-066: One-click install of the openclaw CLI via the official installer
+// script. We shell out to the platform installer (PowerShell on Windows, bash
+// on macOS/Linux), stream every output line to the UI via "openclaw-install-log"
+// events, and emit "openclaw-install-done" with the exit result at the end.
+#[tauri::command]
+async fn install_openclaw(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
+    let mut cmd = build_openclaw_install_command();
+    cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+    hide_command_window(&mut cmd);
+
+    let mut child = cmd.spawn().map_err(|e| format!("无法启动安装程序：{}", e))?;
+    let stdout = child.stdout.take().ok_or("无法读取安装输出")?;
+    let stderr = child.stderr.take().ok_or("无法读取安装输出")?;
+
+    // Drain stderr on its own thread so it can't block the pipe.
+    let app_err = app.clone();
+    thread::spawn(move || {
+        let reader = BufReader::new(stderr);
+        for line in reader.lines().map_while(Result::ok) {
+            let _ = app_err.emit("openclaw-install-log", serde_json::json!({ "line": strip_ansi(&line) }));
+        }
+    });
+
+    // Stream stdout line-by-line, then wait for the process and report the result.
+    let app_out = app.clone();
+    thread::spawn(move || {
+        let reader = BufReader::new(stdout);
+        for line in reader.lines().map_while(Result::ok) {
+            let _ = app_out.emit("openclaw-install-log", serde_json::json!({ "line": strip_ansi(&line) }));
+        }
+        let status = child.wait();
+        let success = status.map(|s| s.success()).unwrap_or(false);
+        let _ = app_out.emit("openclaw-install-done", serde_json::json!({ "success": success }));
+    });
+
+    Ok(serde_json::json!({ "ok": true, "started": true }))
+}
+
+// Build the platform-specific command that runs the official openclaw installer.
+fn build_openclaw_install_command() -> std::process::Command {
+    #[cfg(target_os = "windows")]
+    {
+        let mut cmd = std::process::Command::new("powershell");
+        cmd.args([
+            "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command",
+            "iwr -useb https://openclaw.ai/install.ps1 | iex",
+        ]);
+        cmd
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let mut cmd = std::process::Command::new("bash");
+        cmd.args([
+            "-c",
+            "curl -fsSL https://openclaw.ai/install.sh | bash",
+        ]);
+        cmd
+    }
+}
+
 fn main() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![read_config, write_config, clear_config, read_chat_sessions, write_chat_sessions, clear_chat_sessions, read_chat_projects, write_chat_projects, portable_data_status, portable_runtime_status, read_installed_capabilities, check_hermes_installed, get_hermes_version, get_hermes_paths, get_hermes_help, check_hermes_api_server, hermes_chat_completion, cancel_hermes_chat_completion, read_hermes_model_config, read_hermes_native_memory, read_openclaw_workspace_memory, apply_hermes_model_config, apply_hermes_reasoning_config, read_hermes_cron_overview, read_hermes_cron_cli_status, ensure_ai_files_dirs, list_ai_files, delete_ai_file, open_ai_file_location, pick_and_upload_file, extract_ai_file_text, save_generated_file, read_openclaw_gateway_auth_for_local_use, get_or_create_openclaw_device_identity, open_url, open_openclaw_dashboard, start_openclaw_gateway, openclaw_http_chat_completion, openclaw_http_chat_completion_stream, cancel_openclaw_chat_completion, openclaw_http_status, openclaw_session_status, openclaw_web_search, openclaw_sessions_list, clawhub_browse, clawhub_search, clawhub_skill_detail, openclaw_skills_list, clawhub_install_skill, clawhub_uninstall_skill, translate_text, read_openclaw_config_summary, read_openclaw_model_provider_summary, apply_openclaw_model_provider_config, list_openclaw_channels, add_openclaw_channel, remove_openclaw_channel, restart_openclaw_gateway, list_pairing_requests, approve_pairing_request, get_openclaw_version, start_wechat_login, cancel_wechat_login, update::check_update, update::download_update, update::apply_update])
+        .invoke_handler(tauri::generate_handler![read_config, write_config, clear_config, read_chat_sessions, write_chat_sessions, clear_chat_sessions, read_chat_projects, write_chat_projects, portable_data_status, portable_runtime_status, read_installed_capabilities, check_hermes_installed, get_hermes_version, get_hermes_paths, get_hermes_help, check_hermes_api_server, hermes_chat_completion, cancel_hermes_chat_completion, read_hermes_model_config, read_hermes_native_memory, read_openclaw_workspace_memory, apply_hermes_model_config, apply_hermes_reasoning_config, read_hermes_cron_overview, read_hermes_cron_cli_status, ensure_ai_files_dirs, list_ai_files, delete_ai_file, open_ai_file_location, pick_and_upload_file, extract_ai_file_text, save_generated_file, read_openclaw_gateway_auth_for_local_use, get_or_create_openclaw_device_identity, open_url, open_openclaw_dashboard, start_openclaw_gateway, openclaw_http_chat_completion, openclaw_http_chat_completion_stream, cancel_openclaw_chat_completion, openclaw_http_status, openclaw_session_status, openclaw_web_search, openclaw_sessions_list, clawhub_browse, clawhub_search, clawhub_skill_detail, openclaw_skills_list, clawhub_install_skill, clawhub_uninstall_skill, translate_text, read_openclaw_config_summary, read_openclaw_model_provider_summary, apply_openclaw_model_provider_config, list_openclaw_channels, add_openclaw_channel, remove_openclaw_channel, restart_openclaw_gateway, list_pairing_requests, approve_pairing_request, get_openclaw_version, start_wechat_login, cancel_wechat_login, check_openclaw_installed, install_openclaw, update::check_update, update::download_update, update::apply_update])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
