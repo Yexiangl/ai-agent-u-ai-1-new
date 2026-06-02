@@ -1,5 +1,7 @@
 export const DEFAULT_BASE_URL = "https://ai.f1class.icu/v1";
 
+import type { PetState } from "@/lib/pet";
+
 export const MODEL_OPTIONS = ["deepseek-v4-flash", "deepseek-v4-pro", "kimi-k2.6"] as const;
 
 export type ModelName = (typeof MODEL_OPTIONS)[number];
@@ -15,6 +17,7 @@ export interface AppConfig {
   enabledSkills: string[];
   tasks: SavedTask[];
   showReasoning: boolean;
+  pet?: PetState | null;
 }
 
 export interface ConnectionStatus {
@@ -47,5 +50,6 @@ export const DEFAULT_CONFIG: AppConfig = {
   },
   enabledSkills: [],
   tasks: [],
-  showReasoning: true
+  showReasoning: true,
+  pet: null
 };

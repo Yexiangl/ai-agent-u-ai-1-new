@@ -298,14 +298,33 @@ OpenClaw 将成为主体 Agent 后端。Hermes 不再作为普通用户主路径
 | TASK-043E | 已完成（关于页） | P1 | 关于/教程低风险优化 | 已审查通过：关于页 Hero+3 SettingGroup（AI 助手/使用步骤/数据与安全）。P3 残留"对话模型: OpenClaw Agent"→"AI 助手"已修，普通 UI 无任何可见 OpenClaw Agent。clearConfig 逻辑不变。教程页优化未做，可另起 043E-2 或并入 043G。 |
 | TASK-043F | 已完成 | P2 | 能力中心顶部视觉升级 | 已审查通过：仅顶部 Card→StatusHero（badge 已安装数量）+section 标题 polish，卡片 grid 全保留。install/uninstall 全交互未改（确认弹窗/高风险二次确认/loading/error/details 折叠/Rust invoke）。installCommand 仅在安装详情 details 透明展示。无 P0/P1，无入口丢失。 |
 | TASK-043G | 已完成 | P2 | 文件库/摸鱼/对话轻量对齐 + 全局回归 | 已审查通过：文件库/教程已用语义 token 无需改；摸鱼/对话保留原样合理。10 页全局回归独立复跑 build+redaction 21/21 通过，逐一核验 043B-F 修复持久（记忆 onClick L4185、用量无 preview、关于无 OpenClaw Agent、能力安装卸载、重复词清除）。无 P0/P1。TASK-043 阶段性收口。 |
-| TASK-044 | 进行中 | P1 | 剩余页面高要求视觉打磨 | 父任务：用户要求继续高标准扣视觉，不以"能内测"为收口标准。043G 仅轻量对齐的文件库/教程仍像旧版，需深度升级。 |
-| TASK-044A | 待验收 | P1 | 剩余页面 UI 深度审计 | 已完成：docs/remaining-pages-visual-deep-audit.md。10 页评分，文件库/教程未达高要求（草台班子感最重），能力卡片/摸鱼需 polish，对话仅微调。拆 044B-G。只审计未改页面。 |
-| TASK-044B | 待规划 | P1 | 文件库深度视觉升级 | StatusHero+tile+列表卡片化+类型 badge+空状态+复制反馈。不碰 listAiFiles/extract/upload。注意表格→卡片交互完整性。 |
-| TASK-044C | 待规划 | P1 | 教程页深度视觉升级 | TutorialHero+timeline+FAQ 分区+下一步聚合。纯展示风险最低，建议先做。 |
-| TASK-044D | 待规划 | P2 | 摸鱼中心 widget 风格升级 | 圆角令牌对齐+iOS widget 卡+微动效。保留轻松不套 SettingGroup。 |
-| TASK-044E | 待规划 | P2 | AI 对话页精致化 polish | 气泡/复制反馈/chips/输入区微调。不改 send/stop/retry/stream 逻辑。最敏感最后做。 |
-| TASK-044F | 待规划 | P2 | 能力中心卡片深度 polish | 卡片层级+badge 降噪+权限风险视觉+details 美化。不改 install/uninstall/allowlist。按 043D 教训核验交互。 |
-| TASK-044G | 待规划 | P1 | 全页面高要求视觉回归 | 044B-F 收口回归，可同步更新 043A 规范。 |
+| TASK-044 | 阶段性完成 | P1 | 剩余页面高要求视觉打磨 | 044A-G 全部完成：审计→文件库→教程→能力卡片→摸鱼 widget→对话 polish→全页面回归。10 页视觉升级达标，无 P0/P1。建议阶段性收口后进入内测准备。 |
+| TASK-046 | 已修复 | P0 | AI 对话发消息后输入框消失 | 根因：高度链断裂。L885 main(chat) 改 flex flex-col overflow-hidden + L1011 chat wrapper 加 flex-1 min-h-0，重建 h-full 链。原 animate-fade-in wrapper（TASK-036B 引入）无高度，h-full 塌缩→消息撑高→输入框被 overflow-hidden 裁掉。Playwright A/B 实测：修复前 input bottom 3498px（视口 987 外、不滚动），修复后 971px 可见+内部滚动。改 2 行不碰逻辑。build+tsc+redaction 21/21 ✅。 |
+| TASK-047 | 进行中（待实测） | P2 | AI 对话流畅度优化 | 完成 3 项：①打字机匀速丝滑（按 performance.now 时间差×字/秒吐字，替代原按缓冲长度阶梯跳变，dt>100ms 截断防后台爆发，carry 累积小数）②入场动画隔离（animateFromIndexRef 基线，切会话/加载历史不批量播 animate-message-in）③消息行 memo 化（抽顶层 ChatMessageItem=memo，live 仅 last 传非 null、回调全 useCallback、DetailsEntry 改 open+onToggle 解耦 expandedDetailId，流式时仅最后一条重渲染、历史靠 [...prev] 浅拷贝保引用跳过）。tsc+build+redaction 21/21 ✅。未碰 send/stop/retry/regen/stream/usage/token/config 逻辑。待用户 tauri dev 实测体感。暂缓：①MarkdownContent 分块增量解析（memo 后收益变小）④用户消息锚定顶部（与 auto-follow 耦合高风险）。 |
+| TASK-048 | 待实测 | P1 | 逐字打字机失效修复 + 对话 UI macOS/iOS 重做 | 用户反馈：长回复一下子全吐出、没逐字、内容前一直"思考中"。根因（读前后端定位）：hermes-chat-done 处理器 L2659 立即 setLoading(false)+setPhase(done)+用全文覆盖 message.content，但此时打字机 contentBuf 还堆着未吐内容→isActiveAssistant 变 false→切全量渲染→绕过打字机。非 SSE 路径（main.rs:944）后端把全文塞进单个 content chunk + 立即 done，必中。**Part A 修复**：①done 改为只设 tw.done + 把收尾封装进 finalizeRef（不再直接关 loading/覆盖全文）②打字机 tick 在 buf 空+done 时调 finalizeRef 收尾（setLoading false+写元数据+saveCurrentSession），逐字吐完才收尾③cancelTypewriter/stopGeneration 清 finalizeRef 防残留④速度调 GPT 体感（content baseCps 45/maxCps 320、reasoning 55/320、accel=1+buf/600 更温和）。独立 node 仿真验证：1200字一次性到达场景 847帧逐字、每帧≤3字、全文完整、loading/phase 正确收尾。**Part B UI 重做**：①流式打字光标（.streaming-content>:last-child::after caretBlink 跟随末尾，pre 除外）②气泡 macOS 毛玻璃（助手 bg-card/70+backdrop-blur-xl+20px/6px 不对称圆角+柔和双层阴影；用户蓝渐变）③输入区 iMessage 风（24px 圆角+毛玻璃+focus 蓝光晕+居中 max-w-3xl）+圆形 ArrowUp 发送按钮④消息区 space-y-6/背景柔化⑤思考中改三点 bounce+秒数。移除未用 Send import。tsc+build+redaction 21/21 ✅，Playwright 视觉核对全部生效。待用户 tauri dev 实测逐字效果与观感。 |
+| TASK-049 | 待实测 | P1 | OpenClaw 真流式（SSE）改造 | TASK-048 实测仍"全吐+一直思考中"。**深挖根因**：用户走 OpenClaw 后端（USE_OPENCLAW_BACKEND=true），与 TASK-048 修的 Hermes 路径完全无关。OpenClaw 路径 openclawBackend.startChat→openClawChatCompletion→Rust openclaw_http_chat_completion 写死 stream:false，**阻塞等全文**再一次性返回，App.tsx OpenClaw 分支直接写全文+setLoading(false)，**从不调用打字机**。读本地 OpenClaw 文档（npm root -g/openclaw/docs/gateway/openai-http-api.md）确认网关原生支持 SSE（stream:true→text/event-stream，data:<json> delta，data:[DONE]）。curl 实测网关 stream:true 确返回逐 token SSE（delta.content "我"→"很好"→finish_reason stop→[DONE]）。**改造**：①Rust 新增 openclaw_http_chat_completion_stream（仿 hermes：stream:true+Accept text/event-stream+Bearer token，bytes_stream 逐块 parse_sse_line，emit openclaw-chat-chunk/done/error，复用 cancel_map/task_map）+openclaw_stream_body 助手（含非 SSE 回退）+cancel_openclaw_chat_completion，注册 handler②前端 openclawHttpClient 新增 openClawChatCompletionStream/cancelOpenClawChatCompletion③openclawBackend capabilities.streaming/abort 改 true，startChat 改流式启动，cancelChat 调远程取消④App.tsx 抽 attachOpenClawStreamListeners(rid,sessionId) 复用：注册 openclaw-chat-chunk/done/error→twRef.contentBuf+runTypewriter+finalizeRef（与 TASK-048 同套收尾），主发送+retryRun 都接入，删除旧阻塞式全文写入。效果：真逐字（后端边生成边推）+首 token 即消"思考中"+可远程中止。tsc+build+redaction 21/21+cargo check 全过，curl 实测网关 SSE 生效。待用户 tauri dev 实测逐字体感。 |
+| TASK-050 | 待实测 | P2 | OpenClaw 原生化优化（第1档 A+B） | 用户要求"更原生化、把 OpenClaw 原生功能放进项目"。全面盘点现有集成（HTTP:18789 聊天/状态、读 openclaw.json、CLI skills/plugins/dashboard、闲置的 WS 网关客户端）+读本地文档 v2026.5.27 + **实测本机网关**确认可用原生能力：/health（{ok,status:live}）、/tools/invoke（始终启用，实测 session_status/sessions_list/web_search 可用；memory_search 因无 embedding key 禁用、agents_list 被策略过滤、/v1/responses 404 默认关）。用户选第1档 A+B。**A 健康检查**：openclaw_http_status 增加 /health 预探测（gateway_live 判断比 /v1/models 猜测更准），返回补 gatewayLive/httpApiEnabled，HTML 分支补 httpApiEnabled:false。**B 原生状态面板**：①Rust 新增 openclaw_session_status 命令调 /tools/invoke session_status，parse_session_status 解析器把 emoji 多行 statusText（🦞版本/Uptime/Model/Tokens/Cache/Context 用量%/Compactions/Think）拆成结构化字段（first_uint+field_after 纯字符串解析，无 regex 依赖），注册 handler②前端 openclawHttpClient 新增 OpenClawSessionStatus 类型+readOpenClawSessionStatus③EnginesPage 加 ocSession state，refreshOpenClawStatus 在 ready 时拉取，渲染"运行状态"面板：上下文窗口进度条（≥90%红/≥75%橙/否则 primary）+Token 入出/缓存命中%/运行时长/压缩次数/思考强度。独立 rustc 实测解析器对真实网关输出全字段正确（171k/200k 85% 等）。cargo check+tsc+build+redaction 21/21 全过。暂未做 C 联网搜索/D 会话可视化/E WS 网关（ROI 低）。待用户 tauri dev 实测面板。 |
+| TASK-051 | 待实测 | P2 | OpenClaw 原生化优化（第2档 C+D + 第3档 E） | 续 TASK-050，用户要求做第二+三档。**实测调研**：web_search 返回 details.results[]={title,url,snippet,siteName}，title/snippet 裹 `<<<EXTERNAL_UNTRUSTED_CONTENT id=..>>>`+Source:+--- 需剥离；普通聊天默认不主动联网；sessions_list 字段齐全；WS 端点用项目 openclawGateway.ts 精确帧（v3 设备签名 payload 顺序=v3\|deviceId\|clientId\|clientMode\|role\|scopes\|signedAt\|token\|nonce\|platform\|，client.id 须='gateway-client' 枚举值，minProtocol/maxProtocol=4）实测 backend 模式 loopback CONNECT ok=true、protocol4、server.version 2026.5.27、features.methods 100+。CSP=null 允许 WebView 直连 ws://。**关键发现**(protocol.md:314-323)：WS 广播 agent/chat/tool-result 帧对 operator.read 客户端开放→HTTP 聊天触发的 run 也会广播。实测聊天期间收到 `agent` 事件：stream:lifecycle(start/end)、stream:assistant(text/delta)、stream:item(kind:tool,phase:start/update/end,status:running/completed/failed,name:web_search/web_fetch/exec,title,itemId)、stream:command_output。**C 聊天联网开关**：Rust openclaw_web_search（invoke_gateway_tool 共享助手 + strip_untrusted_wrapper 剥包装，实测剥离后干净）+ openclawHttpClient openClawWebSearch/类型；前端输入框「联网」开关(Globe,仅 OpenClaw)，send() 开启时先搜前5条注入 grounding 上下文+要求标引用号，UiChatMessage 加 sources 字段，气泡底「联网来源」可点列表(open_url)，新增 searching 阶段+占位「正在联网搜索」。**D 会话可视化**：Rust openclaw_sessions_list（含 totalTokensAcrossSessions 汇总）+前端类型；EnginesPage 加「会话活动」面板(会话数+累计 token + 每条状态点/agent/模型/token)。**E WS 工具进度**：openclawBackend 加 connectToolEvents(onTool)/disconnectToolEvents + OpenClawToolItem/OpenClawGatewayConnState 类型（复用现成 openclawGateway.ts 客户端，新建 OpenClawGatewayClient(undefined,token)→connect()→onEvent 过滤 agent+stream:item+kind:tool）；App.tsx 加 wsToolState/wsToolUnsubRef/wsToolItemsRef，openclawConnected 时 effect 连 WS 订阅工具事件→formatToolItem(中文工具名+状态,跳过 update 相)→按 activeRequestRef 附到当前 assistant 消息 toolEvents（复用现成 ToolsBlock 渲染），send() 清 dedup ref，header 加「工具流」指示(hover 显协议)。聊天流不动(仍 HTTP SSE)，WS 纯旁路只读、best-effort 不阻塞。cargo check(仅 3 个无关 snake_case 预存警告)+tsc+build+redaction 21/21 全过；实测 WS 握手 ok=true/protocol4 + 强制模型调 web_search/web_fetch/exec 收到完整 tool item 事件序列。待用户 tauri dev 实测联网开关/来源展示/会话面板/工具流进度。 |
+ | TASK-052 | 待实测 | P0 | 技能中心重构：对接真实 ClawHub API + 本机 CLI（去草台班子） | 用户指出技能中心是"草台班子"，要对接真实 ClawHub。**审计发现 4 处假/坏**：①前端 catalogItems 写死 9 条假数据（clawhub:file-summary 等 slug 真实 ClawHub 不存在，装不上）②get_install_info Rust 端假 slug allowlist③read_installed_capabilities 把 `skills list --json` 当数组解析（实际是 {skills:[],managedSkillsDir} 对象）→一直坏④uninstall_capability 调 `openclaw skills uninstall`（该子命令根本不存在，必失败）。**实测确认真实数据源**：ClawHub 公开只读 API（无需鉴权）/api/v1/skills?sort=downloads&nonSuspiciousOnly=true&cursor=（浏览+游标分页）、/api/v1/search?q=（相关性搜索）、/api/v1/skills/{slug}（详情含 owner/version/stats/moderation）；本机 CLI `openclaw skills list --json/search/install <slug> --global`（无 uninstall verb，装到 ~/.openclaw/skills/<slug>，source=openclaw-managed，带 .clawhub/origin.json 标记）。**Rust**：新增内存 TTL 缓存(OnceLock<Mutex<HashMap>>,browse/search 60s、detail 120s,上限 200)+429/Retry-After 处理+pct_encode(免 urlencoding 依赖)+clawhub_get 公共 helper(UA 标识、超时、untrusted 文本原样透传由 React 当文本渲染)；clawhub_norm_skill 归一化(list 项无 owner→用 /skills/{slug} 形式 URL，307 跳转到 /{owner}/{slug})；命令 clawhub_browse/clawhub_search/clawhub_skill_detail(详情补 owner/changelog/moderation verdict|isSuspicious|isMalwareBlocked)/openclaw_skills_list(修复对象解析+ready 计数)/clawhub_install_skill(slug 字符集校验+install --global+持久化记录)/clawhub_uninstall_skill(CLI 无 uninstall→删 ~/.openclaw/skills/<slug> 但仅当 .clawhub 标记存在+canonicalize 防越界)；删除假 get_install_info/install_capability/uninstall_capability/read_install_records 及 handler 注册。**前端**：新建 src/lib/clawhub.ts(类型+6 invoke 封装)；SkillsPage 重构为 3 Tab——在线市场(搜索/4 种排序/游标加载更多/卡片下载量·收藏·作者·版本·安全 badge/详情抽屉/真实安装)+已安装(openclaw_skills_list 真实本机技能，ClawHub 已装可卸载、内置只读)+本地工作流(保留原 officialSkills prompt 模板+Runner Drawer 不变)；新增 SkillMarketTab/SkillMarketCard/SkillInstalledTab/SkillLocalTab/SkillDetailDrawer 5 组件；清理未用 hermesHubSkills 导入。**验证**：cargo check 干净、tsc+vite build 全过、命令名前后端 6/6 对齐；实测 ClawHub API 三端点真实返回(self-improving-agent 45 万下载等)+CLI install/list/uninstall 全链路(install --global→list 显 openclaw-managed→.clawhub 标记校验→删目录)。待用户 tauri dev 实测 UI 三 Tab 交互。 |
+ | TASK-053 | 待实测 | P1 | 技能中心加载体验优化 + 在线市场英文翻译 | 用户反馈两点：①点能力中心卡一会儿才进②在线市场全英文（目标客户中国人）。**排查**：路由切换本身瞬时，卡顿来自挂载时两个慢请求——loadMarket 调 ClawHub API 实测~1.35s（网络）、refreshLocal 调 `openclaw skills list --json` 实测~0.9s（CLI 子进程冷启动）；旧 UI 空白期只有一个居中 spinner→像卡死。翻译：ClawHub displayName/summary/changelog 均英文原文（数据源决定），需本地翻译。用户选「按钮触发翻译」+「骨架屏+缓存复用」。**翻译引擎**：复用已配置的 f1class 模型代理（openclaw.json 的 ai-agent-proxy provider，baseUrl https://ai.f1class.icu/v1 + apiKey），实测 deepseek-v4-flash 翻译质量速度俱佳。**Rust**：新增 read_model_proxy_creds(读 ai-agent-proxy 的 baseUrl+apiKey，key 不回传前端)+TRANSLATE_CACHE(OnceLock<Mutex<HashMap>> text→zh，上限 500)+translate_text 命令(system prompt 要求保留技术术语/产品名/代码标识符、只输出译文、temp 0.2、缓存命中直接返回)，注册 handler。**前端**：clawhub.ts 加 translateText 封装+TranslateResult 类型。**加载优化**：①模块级 skillCenterCache(market/cursor/local/managedDir/ready/translations) stale-while-revalidate——state 初值读缓存，挂载时若缓存热则立即显示旧数据+后台静默 clawhubBrowse 刷新，冷则首次加载；切走切回 0 延迟②SkillMarketTab 首屏 loading 用 6 个 animate-pulse 骨架卡片(标题/badge/简介/统计/按钮占位)替代单 spinner，消除空白卡顿感。**翻译 UI**：SkillsPage 加 translations/translating/showZh state + translateSkill(已显中文则切回原文、否则批量翻译 name+summary[+changelog]、Promise.all、写 cache)+tr(text,on) helper；卡片右下「翻译/原文」小按钮(Languages 图标+loading)，详情抽屉头部「译成中文/看原文」pill 按钮，标题+简介+更新日志全部走 tr() 切换；翻译错误 amber 横幅。**验证**：cargo check 0 警告、tsc+vite build 全过、translate_text 前后端命令名对齐、creds 路径解析到 https://ai.f1class.icu/v1/chat/completions(实测该端点返回正确中文译文如"综合 PDF 操作工具包...")。待用户 tauri dev 实测首屏骨架屏/二次进入秒开/翻译按钮中英切换。 |
+ | TASK-054 | 待实测 | P0 | 能力中心"卡死"真因修复：CLI 同步命令阻塞主线程 | 续 TASK-053，用户反馈在其他页面点能力中心仍"卡死一会儿才显示"，要求改动态 loading。**复查发现 TASK-053 骨架屏没解决根因**：真因不是"等数据"，是整页冻结=主线程被同步阻塞。Tauri 把同步命令(`fn` 而非 `async fn`)放在主线程执行，而 openclaw_skills_list 是同步 fn + std::process::Command.output() 阻塞等 `openclaw skills list --json` 子进程冷启动~0.9s→这 0.9s 内 WebView 主线程冻结(点击无响应、骨架屏也渲染不出来，因为 React 渲染同样被卡)，直到命令返回才一次性显示。clawhub_browse 是 async 所以网络 1.35s 不卡 UI；问题全在同步 CLI 命令。**修复(根治)**：用项目已有的 tauri::async_runtime::spawn_blocking(零新依赖，line 1667 等已在用)把三个 spawn 子进程/FS 的同步命令改 async——openclaw_skills_list/clawhub_install_skill/clawhub_uninstall_skill 全部 `async fn` + 函数体包进 spawn_blocking(move||{...}).await.map_err()? ，AppHandle 可 Clone 移入闭包；命令执行挪到 tokio 阻塞线程池，主线程立即释放，UI 全程不冻结。现 6 个技能命令(browse/search/skill_detail 本就 async + 这 3 个)全异步。**前端体验补强**：因 refreshLocal 仍~0.9s(只是不再阻塞)，加 localLoaded state——StatusHero 未加载时显"正在检测本机技能…"(muted)、加载完显"已就绪 N 个"；已安装 Tab 冷启动显 4 个 animate-pulse 骨架卡片+头部"正在检测本机技能…"转圈，数据回来再填。**验证**：cargo check 0 警告、tsc+vite build 全过、确认 6 命令全 async。待用户 tauri dev 实测：从任意页点能力中心应立即出外壳(标题+Tab+市场骨架屏)无冻结、已安装数字短暂"检测中"后填充。 |
+ | TASK-055 | 待实测 | P0 | 对话两 bug 修复(切页面回复丢失+附件重复) + 思考程度功能 + 文件库重构 | 用户报三问题+一重构。**问题1 切页面回复丢失(真因)**：路由用固定 key 的 `<div>`(App.tsx Page)，切走时 ChatPage 整组件卸载→其 onunmount cleanup(App.tsx:2310-2317)主动拆掉所有 Tauri 流式监听器(hermes-chat-chunk 等)+清打字机定时器；但 Rust 后端仍在推 SSE→没人接收→回复内容永久写不回(数据状态已提升到 App 的 chatState 不丢，丢的是写回状态的监听器)。**修复**：ChatPage 改为持久挂载——App `<main>` 里始终渲染 ChatPage(active!=='chat' 时 `hidden` 隐藏)，其余页面走 Page；Page 删掉 chat 分支。chatState 本就在 App 顶层，安全。监听器/打字机随组件常驻，切页面不再断流。**问题3 附件重复(真因)**：「用于 Agent 分析」按钮本身不上传(只 setPendingChatAttachment+跳转)，重复发生在 ChatPage 消费 effect(App.tsx:2338)——React.StrictMode(main.tsx:7)开发期双调 effect + 去重判断 `attachments.find` 读闭包陈旧空数组→两次都判不存在→函数式 append 两次→同一文件加两个 chip→发送时内容嵌 prompt 两次。**修复**：加 consumedAttachmentRef/consumedTitleRef 守卫(同一 handoff 只消费一次)+onAttachmentConsumed() 提到 await 前同步清空+setAttachments 改函数式更新器内部 `prev.some(path)` 去重；pendingNewSessionTitle effect 同样加守卫。**问题2 思考程度(新功能)**：实测 OpenClaw 网关接受内联 `/think <level>` 指令(openclaw agent --thinking 支持 off/minimal/low/medium/high/xhigh/...，无 default)。用内联注入方案(纯前端、不依赖模型 reasoning 能力声明、仅作用当前消息)：加 THINK_LEVELS 常量(默认=不注入/低 low/中 medium/高 high)+ChatPage thinkLevel state；send() 构造 sendModelContent 时若非默认则前缀 `/think <lvl>\n`，只进 buildHermesMessages 的 lastUserModel(替换发给模型的最后一条 user 内容)，不污染显示气泡/历史/存档；retryRun 同样注入。UI：输入区工具栏「联网」右侧加 Brain 图标分段选择器(默认/低/中/高)。注：当前 proxy 模型 deepseek-v4-pro reasoning:false，高档位可能被降级但 /think 不报错。**文件库重构**：表格→响应式卡片网格(FileCard 组件，主操作「用于 Agent 分析」高亮+预览/打开位置/复制路径带文字标签/删除)；预览抽成 FilePreviewModal(自带 lazy 抽取+cancelled 守卫，可直接「用于分析」)；常量集中——ANALYZABLE_EXTENSIONS/PREVIEWABLE_EXTENSIONS/FILE_CATEGORIES(label+tone，对齐 Rust 后端分类)/formatFileSize 提到模块级(原散落 3+ 处且顺序不一致)；handleUpload/handleDelete await load()(原 fire-and-forget)；空态+加载骨架卡片;attachmentExtractCache 加 FIFO 上限 50(原无界内存泄漏)，新增 setAttachmentCache 替换 3 处 .set；删除未用的 Table/Th/Td 导入。**验证**：tsc 0 错、vite build 全过、cargo check 无回归。待用户 tauri dev 实测：①发消息后切页面再回来回复完整②文件库「用于分析」只加一个附件③思考程度四档可选+回答正常④文件库卡片布局/各交互。 |
+ | TASK-056 | 已修复待实测 | P0 | 思考程度选错档/不生效真因：模型未声明 reasoning→网关强制 off | 用户实测 TASK-055 思考程度：设「高」后问模型"你的档位"，回"off"。**排查(三层验证)**：①前端注入正确——选高确实发 `/think high`(代码 App.tsx:2880 逻辑无误)②经网关实测 /think high 返回 reasoning_tokens=0、无 reasoning_content、completion 仅 31token→**被网关降级成 off**③查 OpenClaw 官方文档 docs/tools/thinking 解析顺序第5条"non-reasoning models stay off"——我们的 ai-agent-proxy/deepseek-v4-pro 在 ~/.openclaw/openclaw.json 里 reasoning 字段未声明(None)，网关当非推理模型强制 off，/think 被忽略④**直连上游 ai.f1class.icu 实测 reasoning_effort 完全支持**：high→reasoning_tokens 97、medium→56、low→41，正确分档(证明能力在、只是配置没打通)。**根因**：模型回"off"不是瞎说，是真没收到思考指令。文档明示自定义 OpenAI 兼容模型需 compat.supportedReasoningEfforts 显式开启。**修复**：备份 openclaw.json(openclaw.json.bak-reasoning-时间戳)后，给 ai-agent-proxy 两个模型(deepseek-v4-pro/flash)加 reasoning:true + compat.supportedReasoningEfforts:[low,medium,high]。网关热加载(无需重启)。**验证(改后经网关)**：/think 触发 reasoning_tokens 从全 0→off=21/low=44/high=34(真正开始推理)，前端 tsc 0 错无回归。**重要提醒**：①「问模型自己的档位」不可靠——模型通常不知道自己的 reasoning_effort 设置，行为验证(是否更深入思考)比问它准②前端选择器「默认」档=不注入 /think，由 provider/模型默认决定(现 reasoning:true 的模型默认会用 medium 或最近支持档)。待用户 tauri dev 实测：选不同档位提一个需推理的问题(如数学题)看回答深度/质量差异，不要再用"问它档位"验证。 |
+  | TASK-057 | 已完成待实测 | P1 | 新增「消息通道」配置页(Telegram MVP，走 OpenClaw 原生通道) | 用户要做用户配置消息通道、走 OpenClaw 原生能力。**调研结论**：OpenClaw 本就是 AI agent↔聊天平台网关，原生支持 25+ 通道(Telegram/Discord/Slack/WhatsApp/Signal/微信/飞书...)，项目此前零通道代码。关键发现 channels CLI 有**完整非交互模式**(实测 OpenClaw 2026.5.27)：`channels list --all --json`(返回 {chat:{<id>:{accounts,installed,origin}}})、`channels add --channel telegram --token-file <f>`(写 botToken/enabled)、`channels remove --channel telegram --delete`(非交互删除，不带 --delete 会交互卡住)、`channels status --json`。决定走 CLI 驱动而非手拼 openclaw.json schema(通道字段 dmPolicy/allowFrom/groupPolicy/groups/topics 极易错)，同能力中心调 CLI 模式。**实现**：①Rust(main.rs)加 3 命令 list_openclaw_channels/add_openclaw_channel/remove_openclaw_channel，全 spawn_blocking(避免冻 WebView，TASK-054 教训)，加 is_valid_channel_id 白名单防注入，token 经 0600 临时文件传(--token-file)用完即删不进 argv，注册进 generate_handler!②src/lib/openclawChannels.ts 仿 clawhub.ts 薄封装(listOpenClawChannels 失败兜底空列表)③App.tsx 加 RouteId "channels"+导航项(Send 图标)+路由+ChannelsPage/ChannelsView/ChannelCard 组件。UI 参照 SkillsPage 卡片列表：CHANNEL_CATALOG 6 条(仅 telegram supported=true 有引导，其余"敬请期待")，每卡 连接(展开 token 输入)/断开(ConfirmDialog)，配置指南开 docs 链接。**安全**：bot token 绝不回前端/不存 config.json/localStorage，只由 Rust 经 CLI 写入 OpenClaw 0600 配置(同 App.tsx:1471 先例)。**MVP 范围**：仅 Telegram 跑通列出→填 token 启用→状态→停用闭环；Discord/Slack 等用同 UI 后续加(多数需 QR/OAuth/装插件)。**验证**：CLI 契约全实测(假 token add/remove 验证写入与清理，测后 openclaw.json channels 已清空)，tsc 0 错、vite build 过、cargo check 无回归。⚠️通道是「外部平台消息进来由 AI 处理」需网关常驻+外部账号(如 Telegram bot)，跟 App 内聊天是两回事。待用户实测：建真 BotFather token 连 Telegram→重启网关→配对→手机发消息验证。 |
+  | TASK-058 | 已完成待实测 | P1 | 摸鱼中心养成系电子宠物(lottie 动画) | 用户要把摸鱼桌宠做成养成系(成长/互动/状态)，考察开源方案。**调研结论**：现状仅「概念占位」——旧桌宠卡点击只让 AI 生成一段文字人设就跳走，无保存/成长/形象。GitHub virtual-pet 生态(163 仓)考察：硬件 ESP32(TamaFi)/Python 桌宠(MikuPet)/浏览器扩展(Pocket-Bird)/CLI(ccpet) 技术栈全不符，Web 游戏(Study Buddy)代码老旧耦合重，**直接套用成本>自研**。项目无任何动画/图形库(纯 CSS keyframes)。**决策**(问用户)：两个都做、用 lottie。**实现**：①装 lottie-react(React19 兼容，peer 支持 ^19)②src/lib/pet.ts 纯逻辑(可测)：PetState(name/level/exp/satiety/energy/mood/lastDecayAt/totalInteractions)、expForLevel(40+30/级)、stageForLevel(egg<2≤baby<6≤teen<12≤adult)、createPet、applyDecay(基于 lastDecayAt 时间差算饱食-8/h 活力-6/h 心情向需求均值漂移，开页面时算无后台定时器)、moodKey(饿/困/开心/平静/低落)、interact(feed+30饱+8exp/play-12活+16心+14exp/pet+10心+6exp，while 循环处理连续升级+进化)③scripts/gen_pet_lottie.py 程序生成 4 个 stage 的 Lottie JSON(src/assets/pet-{egg,baby,teen,adult}.json，~2.8KB/个，呼吸 squash+眨眼+腮红，每 stage 不同配色)——手写 Lottie keyframe 易错故用脚本保证合法④src/components/PetWidget.tsx：lazy 加载(lottie ~380KB 单独 chunk 只在摸鱼页加载，主包 476KB 不涨)，领养态(起名+蛋动画)/养成态(Lottie+Lv/stage/心情徽章+经验/饱食/活力三进度条+喂食/玩耍/摸摸/聊两句按钮)，点宠物=摸摸头+重播动画+flash 气泡，进化/升级 toast⑤摸鱼页旧桌宠卡换成 <Suspense><PetWidget>，MoyuCenterPage 加 config/updateConfig 透传(经现有 storage 持久化，AppConfig 加 pet 字段+storage.ts mergeConfig 加 pet 合并)，「聊两句」走 setChatDraft 让 AI 扮演宠物生成台词(差异化亮点)。**验证(Playwright 浏览器实测)**：Lottie 真渲染(200×200 SVG 14 形状)、decay 生效(energy 衰减到 0→显示"困了")、喂食 satiety 98→100/exp+8/interactions+1 即时持久化、领养流程(输入"小鱼干"→建 Lv.1→存储→UI 更新)全通过；tsc 0 错、build 过(代码分割生效)、cargo 无回归。待用户 tauri dev 实测：领养/喂养/玩耍/进化动画/聊两句跳转/关 App 再开看 decay。 |
+  | TASK-059 | 已完成待实测 | P1 | 消息通道就地教程 + 连接后自动重启网关 + 配对授权 UI | 用户反馈"客户都是懒逼"，要消息通道加教程、加自动重启(绑通道后都要重启生效)、目标客户做最少事。**调研**：①OpenClaw 有原生 `openclaw gateway restart`(实测 ~15s 返回 {action,ok,result:restarted}，网关是 macOS LaunchAgent 服务，重启不用客户碰终端)，flag：--safe(排空进行中任务再重启)/--force/--wait/--json；网关重启后 health OK 47ms②`openclaw pairing list <channel> --json`(返回 {channel,requests:[{code,from?...}]})、`pairing approve <channel> <code>`。**决策**(问用户三项全选推荐)：全自动重启、就地内联引导、做配对 UI。**实现**：①Rust(main.rs)加 3 命令 restart_openclaw_gateway(gateway restart --safe --json，剥离 CLI 前导非 JSON 行再解析)、list_pairing_requests、approve_pairing_request(配对码白名单 alnum/-/_ 防注入)，全 spawn_blocking，注册 handler②openclawChannels.ts 加 restartOpenClawGateway/listPairingRequests(失败兜底空)/approvePairingRequest + PairingRequest 类型③ChannelsPage 重构连接流程为 ConnectPhase(saving→restarting→verifying→done)：连接=保存 token→**自动调 restart→轮询 checkOpenClawHttpStatus 的 gatewayReachable 直到 OK(最多 30s，先等 1.5s 让服务先下线)**→刷新→弹 PairingPanel。客户只填一个 token 点一次，重启全透明。断开同样自动重启④ConnectProgress 组件：3 步进度条(CheckCircle2/Loader2)+"大约十几秒"文案，重启 15s 不像卡死⑤ChannelCard：CHANNEL_CATALOG.telegram 改 steps[3 步大白话]+openUrl(t.me/BotFather)+openLabel，卡内嵌 3 步编号清单+「打开 BotFather」一键拉起+「详细教程」开 docs⑥PairingPanel 组件：连接成功后显示"最后一步：去给 bot 发消息→回来点查看配对请求"，列出 requests 每条一键「授权」(approve)。**复用**现有 checkOpenClawHttpStatus 做 health 轮询(不新增命令)。**验证**：CLI 契约全实测(gateway restart 真重启+health 恢复、pairing list/approve 签名确认)，**Playwright 浏览器烟测**(channels 页渲染、Telegram 连接展开见 3 步+/newbot+BotFather 按钮+token 输入+详细教程、5 通道敬请期待)，唯一 console error 是 favicon 404 无关；tsc 0 错、build 481KB 过、cargo 无回归。测后 openclaw.json channels 已清空。⚠️连接/重启/配对完整逻辑需 tauri dev 实测(浏览器无 Tauri 后端 invoke 失败)：真 token 连 Telegram→看自动重启进度→手机发消息→查看配对请求→授权→对话。 |
+ | TASK-060 | 已修复待实测 | P0 | 修复绑定通道后自动重启网关报错(1006 崩溃 + 1008 配对) | 用户输入真 Telegram bot token 后报错：`gateway closed (1006 abnormal closure)`。**两个真因**(逐一复现定位)：①**1006 崩溃根因**：TASK-059 的 add_openclaw_channel 用 `--token-file <临时文件>` 传 token 后**立即删掉临时文件**——但 OpenClaw 是**按路径引用存 tokenFile、网关启动时才惰性读取**，临时文件已删→网关(重)启动读不到 token→崩溃 1006。实测确认坏配置写成 `{enabled:true,tokenFile:"/var/.../oc-chan-xxx.tok"}` 而文件不存在。**修复**：改用 `--token <token>` 内联传递，OpenClaw 把值直接存进自己的 0600 配置(botToken)，不再引用易失的临时文件路径。安全权衡：token 仅在 add 调用瞬间出现在本机 argv(同一用户本就拥有 OpenClaw 配置)，可接受；绝不留临时文件残留。②**1008 配对错根因**：restart 用了 `--safe` flag——`--safe` 会让 CLI 作为 WS 客户端连回网关请求提升 scope，需设备配对批准，全新环境直接 `pairing required (1008)` 失败。**修复**：去掉 `--safe`，用纯 `gateway restart --json`(最初实测就是这个能跑通，加 --safe 是过度设计)。**验证(完整闭环 CLI 实测)**：清理→add --token(写入确认是 botToken 非 tokenFile)→restart --json(返回 ok=true result=restarted)→health(OK 25ms,Telegram configured)，无 1006 无 1008；再 remove+restart 回到 channels:absent，确认无临时文件残留；cargo check + tsc 0 错无回归。**教训**：①CLI 的 --token-file 语义要确认是"读值存值"还是"存路径惰性读"——OpenClaw 是后者，自删文件必崩②restart 默认用最简形式，--safe/--force 等增强 flag 要确认前置条件(--safe 需配对 scope)。待用户 tauri dev 重测真 token 完整流程。 |
+ | TASK-061 | 已完成待实测 | P1 | 新增 QQ/飞书/微信三个中国客户通道 | 用户客户群体是中国人，要加微信/QQ/飞书。**调研(逐个实地核验 CLI+docs)**：三者复杂度差异极大——①**QQ(qqbot)**：最简单，`channels add --channel qqbot --token "AppID:AppSecret"` 实测会**自动装插件 @openclaw/qqbot + 把组合 token 拆成 appId/clientSecret 内联写入**，复用现有 add 流程零改动；②**飞书(feishu)**：**硬依赖 OpenClaw ≥2026.5.29**(当前 2026.5.27，实测 add 直接被 CLI 拦 `requires >=2026.5.29`)，凭据是 App ID+App Secret 两字段，需在飞书开放平台建企业自建应用+配事件订阅+权限+发布；③**微信(openclaw-weixin)**：最难，腾讯外部插件 `@tencent-weixin/openclaw-weixin`(v2.4.4)，**扫码登录**无 token，官方仅私聊，历史有重启循环 bug。**关键突破**：实测 `channels login --channel openclaw-weixin` 输出终端 ASCII 二维码 **+ 一个 fallback URL `https://liteapp.weixin.qq.com/q/xxx?qrcode=...`**——抓这个 URL 用 qrcode.react 在 App 内渲染干净二维码，绕开 ASCII 渲染难题。**决策**(问用户)：三个都做、App 内加版本检测、微信内嵌扫码(接受不确定性)。**实现**：①CHANNEL_CATALOG 重构为 setupType 三态(token/fields/qr)+minVersion+note+fields[]+joinChar②Rust 加 get_openclaw_version(解析 --version 取 x.y.z)、start_wechat_login(spawn channels login，BufReader 逐行读 stdout，strip_ansi 后正则抓 liteapp URL，12s 超时返回，全局 OnceLock<Mutex<Child>> 托管进程，子线程 drain 到 EOF 后 emit wechat-login-status done 事件)、cancel_wechat_login(kill 进程)③前端 lib 加 getOpenClawVersion/versionGte(点分版本比较)/startWeChatLogin/cancelWeChatLogin④ChannelCard 支持三种 setupType：token=单输入框、fields=多字段(飞书 App ID+Secret，连接时 join(":"))、qr=WeChatLoginPanel；minVersion 不满足显红色门禁禁用连接⑤WeChatLoginPanel：listen wechat-login-status 事件→startWeChatLogin 拿 URL→QRCodeSVG 渲染 180px 二维码→扫码成功跑 finishConnect(restart+verify+pairing)⑥装 qrcode.react@4.2.0(React19 兼容)。**验证**：CLI 全实测(qqbot add 自动装插件+拆 token 写 appId/clientSecret、feishu 版本拦截、微信 login 输出 QR URL 正则提取成功)；**Playwright 浏览器烟测**(4 通道渲染+连接按钮、飞书展开见 App ID/App Secret 双字段+开放平台按钮+企业自建应用步骤、微信展开见 3 步+腾讯第三方插件风险提示+正在生成二维码)；tsc 0 错、build 503KB 过(+21KB qrcode)、cargo 无回归。微信/qqbot 插件已装并启用，网关确认健康无重启循环，channels 配置只剩用户真 telegram 未污染。⚠️**待实测**：①QQ 真 AppID:AppSecret 连接②飞书需先 `openclaw update` 到 2026.5.29+ 再测(且 feishu 的 --token "appId:appSecret" 拆分格式因版本拦截**未能实测**，按 qqbot 同模式实现，升级后需验证)③微信真机扫码登录+登录成功事件触发(浏览器无 Tauri 后端，QR 渲染+事件链路未端到端实测)。 |
+ | AUDIT-062 | 审计完成待决策 | P1 | 全项目审计：死代码/重复UI/开发者向诊断 | 用户诉求：面向普通上班族的 U盘版本地 AI 助手，要"看得懂点得动"，排查缺失功能+多页重复+不必要诊断。**审计法**：2 个 explore 子代理并行通读 App.tsx(6040 行)+主代理逐条核实 file:line。**A. 死代码(确认未路由/未触发)**：①TasksPage(5500-5602「Hermes 定时任务」)——RouteId/navItems/Page switch 全无 tasks 分支，App() 也没接 cron state，整页+依赖(readHermesCron* 导入 60、Metric 组件 6036、HermesCronOverview/CliStatus 类型)全死②「应用配置到 Legacy 引擎」弹窗(1778-1853)——rg 确认无 `setShowApplyPreview(true)`，永不触发的死弹窗，且含"Legacy 引擎"字样③memoryKindDescription(5471)定义未调用④HomePage showTechInfo(1269)定义未用⑤死导入：readHermesNativeMemory/HermesNativeMemoryResult/isOpenClawBackendAvailable/readOpenClawProviderSummary(60/62/64)。**B. 重复 UI**：①AI 助手状态(CLI/服务/token/模型)在 HomePage(StatusHero 1274 + 右侧 SettingGroup 1340 自重复)、EnginesPage(StatusHero 1638 + 本地服务 SettingGroup 1855-1960 重复)、ChatPage(3490)三页重复——建议删 HomePage 1340-1345、精简 EnginesPage 1855-1886②「高级诊断」入口在 EnginesPage 出现两次(1655、1957)——删 1957③AboutPage「使用步骤」(5799-5804)与 TutorialsPage 教程重复——删，About 只留版本/简介/重置④售后 QQ、HomePage 快捷入口卡——可接受不算有害。**C. 开发者向诊断(用户明确说部分不该存在)**：①EnginesPage「高级诊断」弹窗(1962-2004) 暴露 `openclaw config set ...` CLI 命令、`~/.hermes/config.yaml`/`.env` 路径、binaryPath、`路由入口 openclaw/default`——建议删按钮或仅售后用②ChatPage 错误详情(3076/3094) 暴露 `http://127.0.0.1:8642/...`/"Legacy 引擎"/HTTP 状态——改为"本地服务未运行，去 AI 助手页点启动"③ChannelsPage 版本门控(4717) 让普通用户"在终端运行 openclaw update"——改为联系售后④ChatPage 流式诊断(3550) 已用 DEBUG_STREAM 正确隐藏，保持。**D. 命名泄露(Hermes/OpenClaw/Legacy/ClawHub 漏到用户界面)**：消息来源"Hermes"(755)、MemoryPage"Hermes"(5473/5476)、SkillsPage"安装命令 openclaw skills install"(4433)+"ClawHub/OpenClaw CLI"市场说明(4135)、ChannelsPage"OpenClaw 网关"(4869/4894)——统一改"AI 助手/本地服务"。**E. 缺失功能(普通用户视角)**：①无可用定时任务入口(仅 chat 里打 /cron CLI)——高②MemoryPage 纯只读，无"记住/忘记"能力，但页名叫"助手记忆"暗示可操作——中高③UsagePage 已是真实统计(非占位，PROJECT_CONTEXT 过时)但依赖模型返 usage，常显"暂未提供"无法显示余额——中。**注**：本条为审计报告，**未改任何业务代码**，待用户决策优先级后拆分实施任务。 |
+ | TASK-065 | 已完成待实测 | P1 | 在线更新功能(GitHub Releases，面向U盘便携版) | 用户需求：U盘便携运行(数据在U盘，不能装到电脑)、主要面向 Windows、要连 GitHub Actions 一起配。考察确认：Tauri **v2**、未装 updater 插件、git 已连 `github.com:Yexiangl/ai-agent-u-ai-1-new`、无 CI、已有 `workspace_root()`(检测U盘根目录，兼容 win `app/` 和 mac `.app`)。**决策**：因便携运行与 Tauri 官方 `tauri-plugin-updater`(为已安装版设计、会替换系统目录)不匹配，**放弃官方插件，自研"GitHub API 查询+下载+便携 swap"方案**。**TASK-A 后端**(新增 `src-tauri/src/update.rs`，191行，main.rs 加 `mod update;` + `workspace_root()` 改 `pub(crate)` + 注册3命令)：①`check_update`——调 `api.github.com/repos/.../releases/latest`，比对 `app.package_info().version`(单一版本源)，自研 semver `version_gt`，Windows 优先选名字含 `portable` 的 `.exe`(回退任意 `.exe`)、mac 选 `.dmg`；返回 `UpdateInfo{available,currentVersion,latestVersion,downloadUrl,releaseNotes,error}`(`#[serde(rename_all=camelCase)]`)②`download_update`——reqwest 流式下载到 `workspace_root/data/updates`(便携)或系统 temp(回退)，`bytes_stream` 边写边 `emit("update-download-progress",{downloaded,total,pct})`，文件名从 URL 末段做字符白名单校验③`apply_update`——**Windows 便携 swap**：若文件是 `*portable*.exe`，生成 `_update.bat`(timeout 2s 等本进程退出→`move` 旧 exe 到 `.bak`→`move` 新 exe 就位→`start` 重启→`del` 自删)，`cmd /c start` 拉起脚本后 spawn 线程 500ms 后 `app.exit(0)`；否则(安装包/dmg)直接启动安装器再退出。**TASK-B 前端**：①新增 `src/lib/updater.ts`(checkUpdate/downloadUpdate/applyUpdate/onDownloadProgress 封装 + 类型)②App.tsx 加 `UpdateCard`(状态机 idle→checking→available/uptodate→downloading→ready→error)+ `UpdateCardView`(SettingGroup「软件更新」：当前版本行+检查更新按钮、最新版本+更新内容(release notes)、下载进度条、下载完成「立即安装」、错误提示)，放在关于页版本徽章下方。**TASK-C CI**：新增 `.github/workflows/release.yml`——push `v*` tag 触发，matrix(windows-latest + macos-latest)并行 `npm ci`+`npm run tauri:build`，Windows 额外 `cp` 裸 exe 为 `AI-Agent-Workspace-portable.exe`，上传 artifacts，最后 ubuntu job 用 `softprops/action-gh-release` 收集所有产物建 Release(含便携 exe/dmg/安装包)。**改动文件**：新增 update.rs/updater.ts/release.yml，改 main.rs/App.tsx。**验证**：tsc 0 错；build 通过(494KB)；cargo check 无警告无错；**Playwright 烟测**——关于页「软件更新」卡渲染正常(当前版本行+检查更新按钮)，点检查更新浏览器态(无 Tauri runtime) invoke 抛错被 getErrorMessage 优雅兜底显示、页面不崩。**安全边界**：仅出站只读 GitHub API/release 下载，不传代码/数据；下载文件名做白名单校验；apply 用系统命令但路径来自本地下载。⚠️**待实测(必须真机)**：①Windows 便携版真机——check→download(进度条)→apply 的 `.bat` swap 全链路(尤其运行中 exe 能否被 move、重启是否正常)②首版需先手动打一个 Windows 包+建 Release 让 workflow 有参照③mac 无 Apple 签名 Gatekeeper 会拦(用户主要 Windows，mac 暂放低优先)④`workspace_root/data/updates` 在真实U盘路径下可写性⑤**未做签名校验**(ed25519，下载包未验签，后续应补，依赖已有 ed25519-dalek/@noble)。 |
+ | TASK-064 | 已完成待实测 | P1 | 落地 AUDIT-062 的 B：去跨页重复状态卡片(方案A 激进) | 用户确认走方案A。**B. 去重状态卡片**：①**首页**——删右侧 SettingGroup「AI 助手」(原 1339-1344，与顶部 StatusHero 100% 重复：状态/当前模型/查看设置按钮/新手引导链接)，外层两栏 grid(`grid-cols-1 xl:grid-cols-[1fr_320px]`)塌成单列，「最近会话」独占整行。注：连带删掉唯一的"新手引导"(重置 onboarding)入口——已 rg 全局确认无其他触发点，对普通用户非核心功能，需要时可后续在关于页补②**AI 助手页**——「本地服务」SettingGroup 删除与 StatusHero 重复的部分：本地服务状态行/密钥状态行/当前模型行/近次检查行(原 1685-1688) + 未就绪警告启动行(1689-1704) + gatewayStartError 行(1705-1707) + 已连接成功行(1708-1710)；**保留**两个 StatusHero 没有的独有监控卡片(运行状态：上下文窗口/Token/缓存命中/运行时长/压缩次数/思考强度；会话活动：5 个会话列表+累计 tokens) + 打开控制台按钮；SettingGroup 标题「本地服务」→「运行详情」、描述/action(重新检查→刷新)同步改，并整体包 `{ocReady && (...)}` ——服务没就绪时不显示空框(状态和启动操作都在上方 StatusHero)。**对话页**——顶部 CardHeader 状态栏(已就绪/需要配置+模型+相位+耗时)是工作区实时状态，方案A 判定合理保留不动。**改动文件**：src/App.tsx(5714→5681，净删 33 行)。**变量核查**：HomePage 的 config/updateConfig 变未使用 prop(父级 App 仍需传给其他页，无害)；EnginesPage 的 displayModel/ocChecked/timeAgo/handleStartGateway/gatewayStartError 仍被 StatusHero 引用，无孤立。**验证**：tsc 0 错；build 通过(bundle 494→491KB)；cargo check 无回归(未碰 Rust)；**Playwright 烟测**——首页确认「查看设置」「新手引导」「当前模型」全消失(右卡删净)、StatusHero/最近会话/快捷入口完好、单列布局正常；AI 助手页确认浏览器态(ocReady=false)下「运行详情」不显示、重复的密钥状态/近次检查行消失、StatusHero+模型配置+模型档位完好无空白页；0 业务 console error(仅 favicon 404 旧问题)。**安全边界**：纯前端布局/文案删除，未碰 Token/配置/网关/插件。⚠️**待实测**：tauri dev 真机——服务真就绪时「运行详情」两卡片(运行状态/会话活动)数据是否正常渲染(浏览器无后端未能实测填充态)。 |
+ | TASK-063 | 已完成待实测 | P1 | 落地 AUDIT-062 的 A+C+D：清死代码/砍诊断/统一命名 | 用户拍板先做 A+C+D。实现任务，全程改前先读、分组(从文件底部往上删避免行号漂移)、每组后核实 rg 计数。**A. 删死代码**：①TasksPage 整页(原 5500-5602「Hermes 定时任务」永不路由) + 依赖 Metric 组件 + cron 导入(readHermesCron*/HermesCron* 类型)②死弹窗「应用到 Legacy 引擎」(原 1777-1852，rg 确认无 setShowApplyPreview(true) 永不触发)+ 全套 apply* 状态(applying/applySteps/applyStep/applyDone/applyFailed/applySuccess)+updateStep/doApply 函数 + showApplyPreview 状态③memoryKindDescription(未调用)④HomePage showTechInfo 死状态⑤死导入 readHermesNativeMemory/HermesNativeMemoryResult/isOpenClawBackendAvailable/readOpenClawProviderSummary⑥连带清理 selectedModelInfo(删弹窗后变孤立)。**C. 砍开发者向诊断**：①EnginesPage「高级诊断」弹窗(暴露 `openclaw config set...` CLI 命令、`~/.hermes/config.yaml`/`.env` 路径、binaryPath、`路由入口 openclaw/default`)整个删除 + 两处入口按钮(原 1570/1794)+ showAdvanced 状态(注意 ChatPage 另有同名 showAdvanced 受 DEBUG_STREAM 控制，保留不动)②ChatPage 两处错误详情(原暴露 `http://127.0.0.1:8642/...`/"Legacy 引擎"/HTTP 状态码)改为"去 AI 助手页点启动本地服务"分步引导 + saveErrorSummary 文案去 Legacy + "技术详情"按钮改"详细说明"③ChannelsPage 版本门控(原让用户"在终端运行 openclaw update")改为"联系售后 QQ 858070120"。**D. 命名泄露统一**：消息来源 Hermes→AI Agent；ChannelsPage subtitle/错误/凭据说明/确认框/状态标签 OpenClaw 网关→本地服务(共5处)；SkillsPage 市场说明去 ClawHub/OpenClaw CLI、删"安装命令 openclaw skills install"行、搜索框/badge/标题/空态/安全提示去 ClawHub/OpenClaw(共7处)；连接成功"网关正在重启"→"本地服务正在重启"。**改动文件**：src/App.tsx(6040→5714 行，净删 326 行)。**验证**：tsc --noEmit 0 错；npm run build 通过(bundle 503→494KB，死代码摇树掉)；cargo check 无回归(未碰 Rust)；**Playwright 11 页全量烟测**——遍历首页/对话/AI助手/能力中心/摸鱼/记忆/用量/文件库/通道/教程/关于，断言 ClawHub/OpenClaw/Hermes/网关/Legacy/`openclaw `命令/127.0.0.1/8642 **全部 0 泄露**，导航无"定时任务"残留，0 console error，AI助手页核心元素(模型配置/本地服务/打开控制台)完好。**安全边界**：未碰 Token 写入逻辑、未碰 OpenClaw 配置、未启停网关、未装插件，纯前端文本+死代码删除。⚠️**待实测**：tauri dev 真机回归——重点①AI 助手页删诊断后启动/检查流程仍正常②对话报错时新文案显示正确③通道版本门控提示。 |
+ | TASK-044B | 已完成 | P1 | 文件库深度视觉升级 | 已审查通过：顶部 Card→StatusHero+5 tile（文件数 badge），表格包 rounded-2xl 容器。采保守策略保留 Table 结构，5+ 交互（上传/预览/打开位置/复制/用于分析/删除/筛选/刷新）逐一核验 intact，避开 043D 重构丢交互坑。file.path 仅复制/传参不显示。无 P0/P1。注：列表区仍为表格未卡片化，属部分升级（顶部升级到位，列表可后续再 polish）。 |
+| TASK-044C | 已完成 | P1 | 教程页深度视觉升级 | 已审查通过：StatusHero（快速上手+新手指南 badge）+3 SettingGroup 步骤（tutorials.ts 扩为 3 条）+常见问题 4 FAQ+售后 QQ。纯展示无按钮/逻辑，风险最低。FAQ 用量≠余额/不引导终端均正确。无 P0/P1。P3：step.split("。")[0] 多句会截断（当前全单句无影响）。 |
+| TASK-044D | 已完成 | P2 | 摸鱼中心 iOS widget 风格升级 + 修复 044F P3 空 badge | 已审查通过：摸鱼中心 widget 化（轻量 Hero+widget grid+rounded-3xl+soft shadow+hover translate+图标容器统一），保留轻松氛围未套 SettingGroup。044F P3 空 badge 已修（high_risk 改条件渲染不出空 pill）。044E 已顺带修复 044D-P3 嵌套 Button 语义问题（大 widget 内 Button→span）。5 widget onClick→jumpToChat 全保留。 |
+| TASK-044E | 已完成 | P2 | AI 对话页精致化 polish + 修复 044D P3 嵌套 Button | 已审查通过：空状态轻量 Hero 化、chips 加 icon+hover/active+轻提示、消息气泡对话感（用户 rounded-br-md 主色/AI rounded-bl-md border bg-card+shadow-sm）、操作区 opacity-0 group-hover 显、输入区 focus-within、发送/停止 shadow-sm。044D P3 嵌套 Button 已修（span 替代）。send/stop/retry/regen/streaming/usage/handleKeyDown 全未改，原生 button 保留 title/aria-label/disabled。无 P0/P1。044G 已清理 P3×2：PenLine import 已删除；8 个操作按钮已补 type="button"。 |
+| TASK-044F | 已完成 | P2 | 能力中心卡片深度 polish | 已审查通过：排名号移右上、高风险 title pill、badge 降噪、权限 pills、安装详情卡片化。install/uninstall/确认/高风险 checkbox gate/details/Rust invoke 全 intact，无 P0/P1。044F P3 空 badge 已由 044D 修复（high_risk 不渲染 rank badge，标题高风险 pill+风险 badge 已足够）。 |
+| TASK-044G | 已完成 | P1 | 全页面高要求视觉回归 + 044E P3 清理 | 已审查通过：10 页逐一回归无 P0/P1，044E P3×2 已清理（PenLine import 删除+8 个原生 button 补 type="button"）。建议 TASK-044 阶段性收口。 |
 | TASK-028 | 进行中（阶段性完成） | P2 | Portable / U 盘 A+B 模式可行性审计 | A+B 可行性、data mode、runtime 探针、Windows/macOS 启动方案和安全策略文档均已完成；仍等待实现类子任务。 |
 | TASK-028A | 已完成 | P2 | Portable / U 盘 A+B 模式可行性审计 | 已审查通过：A 模式优先，chatProjects localStorage 为 P0 portable 风险，B runtime 后置。 |
 | TASK-028B | 已完成 | P0 | Portable data 目录设计与路径检测 | 已审查通过：目录结构、system/portable mode、portable.json 触发和 chatProjects 迁移前置设计合格。 |
@@ -464,6 +483,13 @@ OpenClaw 将成为主体 Agent 后端。Hermes 不再作为普通用户主路径
 - TASK-043F 终审通过（2026-05-30）：能力中心顶部视觉升级合格，未发现 P0/P1。改动克制：仅顶部 Card→StatusHero（L3467，标题"能力中心"+安全指引副标题+badge 已安装 N 项/暂未安装+内置工作流说明 children）+已安装区/能力排行 section 标题 polish，卡片 grid 全部保留。【鉴于 043D P1 教训重点核查交互完整性——全部 intact】(1) 能力排行卡安装按钮 L3738 onClick=setInstallConfirm 保留；(2) 安装确认弹窗+高风险二次确认 checkbox（L3568-3573 needsHardConfirm high/unknown，未勾选时 L3575 确认按钮 disabled）保留；(3) 已安装卡卸载按钮 L3733 onClick=handleUninstall+卸载确认弹窗（L3586）保留；(4) installing/uninstalling/refreshing loading 三态保留；(5) installError inline+×关闭（L3475）保留；(6) 安装详情 <details>/<summary> 折叠（L3723-3724）保留；(7) 使用按钮 L3506 openRun 保留。【后端逻辑未改】install_capability（L3414）/uninstall_capability（L3449）Rust invoke 未改、allowlist 未改、nativeName/installCommand/installRef 语义未改、安装/卸载状态机未改。【#35 透明信息】installCommand（含 openclaw 命令）仅在折叠的"安装详情"disclosure（L3727）+安装确认弹窗透明展示，非普通主视觉，符合既有透明设计。普通主视图无技术词。未扫描外部 OpenClaw skills/plugins（catalog 为本地硬编码 L3384-3392）。npm run build ✅。未改对话/token/usage/memory。StatusHero 现已用于 6 页（AI 助手/关于/用量/记忆/首页/能力中心）。下一步建议 043G 文件库/教程/摸鱼/对话轻量对齐+全局回归，收口 043 系列。
 - TASK-043G 终审通过（2026-05-30）：剩余页面轻量对齐+全局回归合格，复审独立复跑验证（非仅采信回执）。【独立验证】npm run build ✅、test-redaction 21/21 ✅（注：回执提及 probe.mjs 实际不存在，无碍）。【轻量对齐判断认同】文件库（复制反馈 L3939+语义 token+空状态）/教程（步骤卡语义 token）已合规无需改；摸鱼中心（prompt 跳转 L4001-4002 setChatDraft+setActive 未改，保留轻松氛围）/AI 对话（聊天优先不套设置组件）保留原样合理——不过度统一是正确决策。【10 页回归——逐一独立核验 043B-F 修复持久】(1) 首页 9 入口 route 匹配 nav；(2) 用量页最近会话 L4483 仅 title+token 无 lastMessagePreview、usage 统计 L4373-4406 未改、额度说明 L4493 明确；(3) 助手记忆文件行 onClick=setSelectedId(file.id)（L4185）043D-P1 修复持久、SettingRow onClick/selected props（L4720-4746）在；(4) 关于页对话模型"AI 助手"无 OpenClaw Agent（L4522）、clearConfig 确认（L4542）在；(5) 能力中心 install/uninstall_capability invoke 在；(6) 重复词"记忆记忆"0 命中；(7) 对话页 send/stop/regen/clipboard 交互在（7 命中）。【技术词】用户可见 UI 无 OpenClaw/Gateway 等（残留全为 JS 变量名 gatewayStartError/高级诊断 StreamDiagnostics/安装详情 details/source 值经映射）。未读 .env、无 token 泄露。【结论】TASK-043（B-G 全部子任务+043A 文档）阶段性收口，全局视觉规范推广完成，StatusHero 用于 6 页+SettingGroup 多页。下一步建议：git 收口 043 系列→内测交付清单/真实 token 人工冒烟（自动化无法覆盖真实密钥下的一键启用/对话/用量回写链路）。
 - TASK-044A 已完成（2026-05-30）：剩余页面 UI 深度审计。输出 docs/remaining-pages-visual-deep-audit.md。【重要修正】本审计推翻 043G "文件库/教程已合规无需改" 的结论——043G 以"功能没坏/已用语义 token"为标准，但用户要求"高要求产品视觉"，二者标准不同。从高要求视角实读代码后：文件库（L3847-3937 纯 Card 标题+原始 HTML 表格 tr/Td+弱复制反馈，像文件调试页）和教程（L4505-4506 单行 JSX、Card 平铺、无 Hero/无结构/无主路径，像说明文本堆叠）确实仍像旧版，未达高要求——用户判断准确。能力中心卡片（043F 仅升级顶部，卡片本身 badge 偏多层级平）、摸鱼中心（已较精致但 rounded-xl 与体系 2xl/3xl 不统一、顶部非 Hero）需 polish。AI 对话（空状态 L3057/输入区 L3209 已成熟）仅需微调。首页/AI 助手/关于/用量/记忆已达标无需二次。10 页评分表见文档。拆 044B 文件库/044C 教程（P1）+044D 摸鱼/044E 对话/044F 能力卡片（P2）+044G 回归。推荐顺序：044C 教程（风险最低先验证）→044B 文件库→044F 能力卡片→044D 摸鱼→044E 对话→044G 回归。【边界】不改对话发送/token/config/install/uninstall/allowlist/usage/memory/文件逻辑、不读 .env、不输出 token、不引入新 UI 库、不强行统一。【特别提醒】044B（表格→卡片）和 044F（卡片重排）有 043D 式"重构丢交互"风险，复审务必核验可点击元素（上传/预览/打开位置/用于分析/安装/卸载）。本任务只审计未改页面。
+- TASK-044A 收口确认（2026-05-30）：commit f395af2。
+- TASK-044C 终审通过（2026-05-30）：教程页深度视觉升级合格，确实从"说明文本/卡片平铺"升级为正式新手引导页，未发现 P0/P1。结构（L4505）：StatusHero（标题"快速上手"+副标题+"新手指南"muted badge）+tutorials.map 3 个 SettingGroup（快速上手教程/能力中心使用/查看本地用量，各含编号 SettingRow+共 N 步描述）+常见问题 SettingGroup（4 FAQ）+售后 SettingGroup（QQ SettingRow）。【FAQ 内容核查】(1) 模型访问密钥"由服务方提供...不需要理解技术细节"无技术词；(2) 本地服务未运行"前往 AI 助手页点击启动本地服务按钮"——不引导终端命令 ✅；(3) 用量统计 vs 额度"不代表剩余额度，实际额度以服务后台为准"——明确避免商业误解 ✅；(4) 安装须知"确认来源/类型/风险/权限，高风险需二次确认"——提醒但不吓人 ✅。【数据】tutorials.ts 1→3 条，结构 {title,steps[]} 未变，既有渲染兼容（L4515 map）。【纯展示安全】教程页无 button/setActive/onClick/invoke（#17-21 trivially 满足：无自动发送/启动/写配置/安装）——最安全升级。FAQ 文本引导用户去对应页面而非加按钮，保守但合理。npm run build ✅+redaction 21/21 ✅。教程页+tutorials.ts 0 技术词。未改对话/token/config/启用/gateway/能力/usage/memory。【P3 非阻塞】L4519 label=step.split("。")[0]+"。" 仅取首句，若未来某 step 含两个句号则第二句静默丢失；当前 12 步全为单句无影响，提醒后续编辑 tutorials.ts 注意。下一步建议 044B 文件库（注意表格→卡片交互完整性，吸取 043D 教训）。
+- TASK-044B 终审通过（2026-05-30）：文件库深度视觉升级合格，未发现 P0/P1。改动：顶部普通 Card→StatusHero（L3849，标题"文件库"+副标题+文件数 badge files.length 个文件/暂无文件准确）+5 stat tiles（总/上传/生成/视频/导出，counts reduce 统计逻辑未改）移入 Hero children，表格区包 rounded-2xl border bg-card overflow-hidden 容器（L3877）。【关键——吸取 043D P1 教训逐一核验交互完整性，全部 intact】(1) 上传 L3872 pickAndUploadFile()+load()；(2) 预览 L3916 extractAiFileText()+缓存逻辑未改；(3) 打开位置 L3937 openAiFileLocation()；(4) 复制路径 L3938-3940 clipboard.writeText+copiedPathId inline"已复制"1.5s 反馈；(5) 用于 Agent 分析 L3909 setPendingChatAttachment+setActive("chat")——无自动发送（仅带入附件跳转）；(6) 删除 L3941 setConfirmDelete→L3989 deleteAiFile+load（回执未提但保留）；(7) 筛选 tab L3869 setFilter；(8) 刷新 L3873 load()；(9) 预览模态 L3952-3979 完整；(10) 删除确认弹窗 L3982 完整。【保守策略正确】保留原生 Table 结构（tr/Td 未动），只换顶部+包容器——彻底规避 043D 式"换组件丢交互"风险，所有 onClick 逐字未改。【安全】file.path 仅作 React key/函数传参/clipboard 复制（L3900/3910/3926/3937/3939/3941），UI 显示 file.name 不显示完整路径，无敏感路径暴露（#20）。文件读取/上传/保存/索引/预览/打开/复制/分析逻辑均未改。npm run build ✅+redaction 21/21 ✅。文件库 0 技术词。未改对话/token/usage/memory。【客观说明】列表区仍为表格未卡片化，属部分升级——顶部升级到位，列表卡片化（044A 曾列为可选方向）未做；当前足够，列表可后续再 polish 或并入 044G。下一步建议 044F 能力中心卡片 polish（同样按 043D 教训核验 install/uninstall 交互）。
+- TASK-044F 复审（2026-05-30）：能力中心卡片深度 polish 基本合格，发现 1 个 P3 视觉缺陷（不阻塞）。排行卡（L3699）：排名号移右上角 #N（L3709 muted/40 不抢标题）；高风险标题行红 pill（L3705）+弱化副文本"安装需要二次确认"（L3724）；badge 降噪移除 category 保留 4 核心（类型/来源/风险/排行 L3714-3717）；权限文本→compact pills（L3719-3722）未隐藏权限；安装详情 details 卡片化（L3727），nativeName+installCommand 保留可读。【交互完整性——按 043D 教训逐一核验全 intact】安装 L3739 setInstallConfirm、卸载 L3734 handleUninstall、确认弹窗+高风险二次确认 checkbox（L3568-3575 needsHardConfirm gate 未勾选 disabled）、installing/uninstalling/refreshing 三态、installError inline、details 展开收起、install_capability(L3414)/uninstall_capability(L3449) invoke、needsHardConfirm(L3463)、installRecords 读取(L3470)、已安装区+空状态(L3628-3634) 全保留。【P3 缺陷——建议修不阻塞】L3717 rankGroup badge fallback：hot→热门/trending→趋势/new→新/else→""。high_risk 组（2 项 ext-github-helper L3387、ext-browser-auto L3388）label 为空串，Badge（badge.tsx 有 border px-2 py-0.5）渲染成可见空红 pill——正是用户要消除的"草台班子感"，且回执称"移除空 ''"不实。这 2 项已有标题高风险 pill+风险 badge，空 rank badge 冗余。修法：high_risk→"高危"或不渲染。遵守只 P0/P1 改码约束未自动改，建议并入 044D/044G 顺手修。【安全】installCommand/nativeName 仅安装详情+确认弹窗透明区，主视觉无技术词。未改 allowlist/语义/状态机/对话/token/usage/memory。build ✅+redaction 21/21 ✅。下一步建议 044D 摸鱼 widget 化（顺带修本 P3）。
+- TASK-044D 终审通过（2026-05-31）：摸鱼中心 iOS widget 风格升级 + 044F P3 修复，均合格，未发现 P0/P1。【044F P3 已修】L3717 原单 Badge 空串 fallback 改为条件渲染（L3722-3724 仅 hot→热门/trending→趋势/new→新各自 && 渲染，high_risk 不渲染 rank badge），空红 pill 消除。high_risk 项辨识保留：标题高风险 pill+riskLabel 风险 badge（L3721）仍在；needsHardConfirm 二次确认（L3468/3573/3575）+install/uninstall invoke 未改。【摸鱼 widget 化合格】轻量 Hero（L4024 rounded-3xl+Sparkles+"摸鱼中心"+emerald"轻量休息"badge+副标题+随机来一个/去 AI 对话双按钮）+widget grid（大 桌宠陪伴 violet col-span-2、中 快速放松 amber、小×3 今日状态 sky/随机冷知识 emerald/今日成就 rose），统一 rounded-3xl+soft 渐变+shadow-sm→hover:shadow-md+hover:-translate-y-0.5+图标容器 rounded-2xl。轻松不幼稚，未套 SettingGroup/SettingRow（符合不设置页化）。【交互 intact】5 widget onClick 全保留→jumpToChat（L4060/4082/4110/4129/4148）；jumpToChat=setChatDraft+setActive("chat")（L4007-4010）未改；randomPrompt（L4012-4019）随机选 prompt 后 jumpToChat 无自动发送；去 AI 对话（L4047）仅 setActive；安全提示强化（L4166-4167 明示"只填入不自动发送，不读取文件或隐私"）。新图标 Shuffle/Coffee/Zap/Lightbulb/Trophy 导入齐全。无后台任务/通知/计时器。Moyu 0 技术词、无 sendMessage。build ✅+redaction 21/21 ✅。未改对话/token/config/usage/memory/.env。【P3 非阻塞】大 widget L4058 可点击 div 内嵌真实 <Button>生成桌宠</Button>（L4073 无自身 onClick 靠冒泡）——功能正常但 interactive 嵌套 interactive 属 HTML 语义小瑕疵（小 widget 已正确用 span）；建议 044E/G 顺手改 span 或给 Button 独立 onClick+stopPropagation。下一步建议 044E AI 对话页精致化（最敏感，最小改动）。
+- TASK-044E 终审通过（2026-05-31）：AI 对话页精致化 + 044D P3 修复，合格，未发现 P0/P1（发现 2 个 P3 lint 级小瑕疵，不阻塞）。【对话逻辑零改动——逐一核验】send(L2299)/stopGeneration(L2688)/retryRun(L2734)/regenLast(L2831)/handleKeyDown(L2845)/skipTypewriter(L2147) 定义位置与签名未变；发送 onClick={send}(L3269)、停止 onClick={stopGeneration}(L3265)、重试 retryRun(L3165)、重新生成 regenLast(L3175) 调用未改；流式 key={message.requestId||index}(L3110)+isActiveAssistant?StreamingMarkdownContent:MarkdownContent(L3120) 未动不闪烁；usage/DetailsEntry(L3176) 未改；Enter/Shift+Enter 经 handleKeyDown(L3233) 未改；chips 仅 setInput(card.fill)+focus(L3080) 无自动发送。【视觉 polish 合格】空状态图标 rounded-3xl+shadow-sm(L3068)、4 chips 加 icon(FileText/ListChecks/Bug/Wrench)+hover:shadow-sm+active:scale-[0.99](L3081)+"点击后只填入不自动发送"(L3089)；气泡用户 max-w-[70%] rounded-2xl rounded-br-md bg-primary(L3115)/AI rounded-bl-md border-border/50 bg-card(L3116) 均 shadow-sm；操作区 opacity-0 group-hover:opacity-100(L3144/3159)；输入区 focus-within:border-primary/30+shadow-md(L3209)、textarea disabled:opacity-50(L3228)；发送/停止 rounded-full shadow-sm。【原生 button 转换安全】title+aria-label 全保留(L3145/3149/3160/3164/3165/3167/3174/3175)，retry/regen disabled={hasRunningRun} 保留(L3165/3175)，复制"已复制"setCopiedMsgId+1.5s+emerald(L3146-3148)。【044D P3 已修】摸鱼大 widget 生成桌宠 L4085 改 <span> 样式(非真 Button)，外层 div onClick+jumpToChat 保留，interactive 嵌套消除。【安全】L3154 "OpenClaw Agent" 是 source 比较条件映射成显示"AI Agent"(去内部化逻辑非渲染文本)，主视觉无技术词。未改 token/config/启用/安装/文件/usage/memory/.env。build ✅+tsc --noEmit exit0+redaction 21/21 ✅。【P3×2 非阻塞】(1) PenLine import(L27) 未使用——回执 #42 称"无 unused import"不实；tsconfig 未开 noUnusedLocals 故 tsc/build 仍过，建议 044G 删。(2) 操作区原生 button 未加 type="button"——但 chat 无 <form>/onSubmit 包裹，默认 submit 无副作用无害；建议 044G 补全。下一步建议 044G 全页面高要求视觉回归（收口 044 系列，顺带清 PenLine+补 type=button）。
+- TASK-044G 终审通过 + TASK-044 阶段性收口确认（2026-05-31）：全页面高要求视觉回归合格，独立复跑验证（非仅采信回执），未发现 P0/P1。【044E P3×2 已清理——独立核验】(1) PenLine import 已删（rg 无输出）；(2) 8 个 chat 操作区原生 button（h-7 w-7）全补 type="button"（L3144/3148/3159/3163/3164/3166/3173/3174），onClick/title/aria-label/disabled(hasRunningRun) 均未改；第 9 个 type=button 是 SettingRow(L4850) 既有无关。build ✅+tsc --noEmit exit0+redaction 21/21 ✅。【10 页关键不变量独立抽查】044F high_risk 空 badge 仍条件渲染消除(L3733)；043C 用量页 最近会话无 lastMessagePreview（lastMessagePreview 仅用于对话侧边栏 L1099/2943 属正当，UsagePage L4441+ 不含）；043D 记忆 onClick=setSelectedId(file.id)(L4265)+无"记忆记忆"重复词；044D 摸鱼 桌宠 是 <span>(L4084) 非 Button；install_capability(L3430)/uninstall_capability(L3465)/needsHardConfirm gate(L3479/3584/3591) intact；文件 ops（pickAndUploadFile/extractAiFileText/openAiFileLocation/setPendingChatAttachment/deleteAiFile）16 处引用未改。【技术词】主视觉干净，残留全在允许位置：高级诊断弹窗（L1651 showAdvanced gated，L1656 明示"用于排查问题，不含密钥/Token"，内含 Gateway/HTTP 接口/路由入口）、安装详情 details、JS 变量名（gatewayStartError）、source 映射逻辑（L3153 "OpenClaw Agent"→显示"AI Agent" 去内部化）。secrets 扫描 src/App.tsx UI 无 token/Bearer/URL 泄露。未读 .env、未输出 token。【probe】openclaw-http-api-probe.mjs 存在（需运行 gateway 的集成探针，本复审未执行，属回执自报）。【结论】TASK-044（A 审计+B 文件库+C 教程+D 摸鱼+E 对话+F 能力卡片+G 回归）阶段性收口，10 页视觉达到高要求，StatusHero/SettingGroup/widget 体系覆盖完整。【下一步】建议：(1) git 收口 044 系列；(2) 真实 token 人工冒烟——自动化（build/tsc/redaction/probe）无法覆盖真实密钥下的一键启用→对话发送→流式→usage 回写链路；(3) 按 docs/release-checklist.md 逐项验收准备内测。人工冒烟是上线前最后必经关口。
 - TASK-036C 终审通过（2026-05-29）：能力中心视觉 polish 合格。排行卡片 nativeName/installCommand 折叠到 <details className="text-[10px]"><summary>安装详情</summary>，主视觉优先展示名称/简介/badges/按钮。已安装卡片安装命令弱化（text-muted-foreground/70）。信息保留完整未删除。安装确认弹窗仍展示完整 nativeName/installCommand。排行免责"排行仅用于浏览参考"保留。高风险项辨识度不变。Toast 未接入本任务可接受（inline error 仍有效）。未改 install/uninstall/allowlist/风险逻辑。下一步建议 TASK-036D AI 对话页交互 polish。
 - TASK-036D 终审通过（2026-05-29）：AI 对话页交互 polish 合格。(1) 消息动画：animate-message-in 0.18s ease-out translateY(6px)，key=requestId 保证流式输出不重新触发动画。(2) 空状态："开始一次 AI 对话" + 4 chip 引导（总结/任务/报错/方案），点击填入输入框不自动发送。(3) 回执说"18ms"实为 0.18s=180ms，合理。未改 send/retry/regen/stop/session/usage/backend 逻辑。下一步建议 TASK-036E AI 助手页 polish 或跳到 TASK-036G 回归。
 - TASK-036E 终审通过（2026-05-29）：AI 助手页诊断/配置 polish 合格。(1) 状态 badge："已准备好"→"已连接"更准确。(2) 正常文案："AI 助手已连接，可以开始对话"。(3) 异常分层：本地服务未运行/密钥未配置/需要检查，各有明确提示。(4) openclaw gateway start 仅为文本提示非自动执行。(5) 模型配置说明更适合普通用户。(6) "重新检查本地服务"比"重启"更准确。(7) 普通视图无 provider/baseUrl/API URL/Token 明文。npm run build 补跑通过。未改 Token/config 写入/对话/install。下一步建议 TASK-036F 或 TASK-036G 回归。
@@ -5844,3 +5870,223 @@ export type AgentBackendEvent =
 2. portable mode 下 data/app 读写正常。
 3. portable 不可写时 fallback system mode。
 4. portable/runtime status 不暴露敏感信息。
+
+---
+
+## TASK-044D 执行反馈
+
+**状态**：待验收  
+**执行日期**：2026-05-31  
+**修改文件**：
+- `src/App.tsx`（MoyuCenterPage 重写 + 图标导入 + 044F P3 空 badge 修复）
+
+### 摸鱼中心视觉变化摘要
+
+从旧版（居中 h1 + 渐变 Hero 三 tile + Card 堆叠 + 紧凑三卡）升级为 iOS widget / 控制中心风格：
+
+1. **顶部轻量 Hero**：
+   - Sparkles 图标容器 + 标题"摸鱼中心"+ emerald"轻量休息"badge
+   - 副标题"短暂休息一下，让 AI 帮你换个脑子。"
+   - 主操作："随机来一个"（Shuffle）+"去 AI 对话"（MessageSquare）
+
+2. **Widget Grid**：
+   - 桌宠陪伴（大 widget，sm:col-span-2）：violet 渐变 + Bot 图标 + 引用 bubble + 生成桌宠按钮
+   - 快速放松（中 widget）：amber 渐变 + Coffee 图标 + 3 条任务清单
+   - 今日状态（小 widget）：sky 渐变 + Zap 图标 +"生成状态"标签
+   - 随机冷知识（小 widget）：emerald 渐变 + Lightbulb 图标 +"换一个"标签
+   - 今日成就（小 widget）：rose 渐变 + Trophy 图标 +"生成徽章"标签
+
+3. **视觉细节**：
+   - 统一 rounded-3xl 大圆角
+   - 柔和 widget-like 渐变（from-xxx-50/70 via-background to-background）
+   - 轻阴影 shadow-sm → hover:shadow-md
+   - hover:-translate-y-0.5 微动效
+   - cursor-pointer + transition-all
+   - 图标容器统一 rounded-2xl bg-xxx-500/10
+   - 小屏 grid-cols-1 → sm:grid-cols-3 不炸
+
+4. **文案**：
+   - "桌宠陪伴"（原 AI 桌宠）
+   - "快速放松"（原今日休息任务）
+   - 保留轻松氛围，不幼稚不油
+
+### 044F P3 空 badge 修复
+
+- **问题**：能力中心排行卡 L3717，rankGroup === "high_risk" 时 label 为 ""，Badge 组件仍有 border/padding，渲染空红 pill。
+- **修复**：条件渲染，仅 hot/trending/new 渲染 Badge，high_risk 不渲染（已有标题"高风险"pill + 风险 badge，不重复）。
+- **验证**：high_risk 项（GitHub 辅助、浏览器自动化）不再显示空排行 badge。
+
+### 交互完整性核验
+
+- jumpToChat = setChatDraft + setActive("chat") ✅ 保留
+- 所有 5 个 widget onClick 保留 ✅
+- cursor-pointer + hover 保留 ✅
+- 随机 prompt 逻辑新增（randomPrompt）✅
+- 安全提示保留 ✅
+- 不自动发送 ✅
+- 不读取文件/隐私 ✅
+
+### 业务逻辑
+
+- 未改 AI 对话发送逻辑
+- 未改 prompt 跳转逻辑
+- 未改后台任务/通知/计时器
+- 未改 token/config 写入
+- 未改能力安装/卸载
+- 未改 usage/memory/文件逻辑
+
+### 验证结果
+
+- `npm run build` ✅（1.61s）
+- `cargo check --manifest-path src-tauri/Cargo.toml` ✅（3 个 snake_case 警告，与本次无关）
+- `node scripts/test-redaction.mjs` ✅（21/21 通过）
+
+---
+
+## TASK-044E 执行反馈
+
+**状态**：已完成  
+**执行日期**：2026-05-31  
+**修改文件**：
+- `src/App.tsx`（ChatPage 视觉 polish + 5 个新图标导入 + 044D P3 嵌套 Button 修复）
+
+### AI 对话页视觉变化摘要
+
+#### 空状态 polish
+
+- 图标容器：rounded-3xl + shadow-sm（更立体）
+- 标题：加 tracking-tight（更稳）
+- 副标题："直接提问，或选一个快捷提示填入输入框。"
+- chips 升级：
+  - 每个 chip 加 icon（FileText/ListChecks/Bug/Wrench）
+  - icon 容器：rounded-xl bg-muted/60，hover 时 bg-primary/10
+  - chip hover：border-primary/30 + shadow-sm + active:scale-[0.99]
+- 底部轻提示："点击后只填入输入框，不会自动发送。"
+
+#### 消息气泡 polish
+
+- 用户消息：max-w-[65%]→70%，rounded-2xl rounded-br-md（对话感），bg-primary/85→bg-primary
+- AI 消息：rounded-2xl rounded-bl-md，加 border border-border/50，bg-muted/30→bg-card
+- 两者都加 shadow-sm（轻微浮起感）
+
+#### 消息操作区 polish
+
+- 默认 opacity-0，group-hover 时 opacity-100（不干扰阅读）
+- 所有操作从 Button 组件改为原生 button（更轻，无多余 padding）
+- 统一样式：h-7 w-7 rounded-lg text-muted-foreground/60 hover:bg-muted hover:text-foreground
+- "已复制"反馈：font-medium text-emerald-600（更明显）
+- AI 消息元信息加 "·" 分隔符
+
+#### 输入区 polish
+
+- 外层容器 focus-within:border-primary/30 focus-within:shadow-md（聚焦更明显）
+- textarea disabled:opacity-50
+- 发送/停止按钮加 shadow-sm
+
+### 044D P3 嵌套 Button 修复
+
+- **问题**：摸鱼中心大 widget（可点击 div）内部嵌真实 `<Button>生成桌宠</Button>`，Button 无自身 onClick，靠事件冒泡。功能正常但 HTML 语义瑕疵。
+- **修复**：`<Button>` → `<span className="inline-flex...rounded-xl bg-primary px-3 text-xs font-medium text-primary-foreground">生成桌宠</span>`
+- **保留**：外层 widget onClick、jumpToChat、prompt 内容、setChatDraft+setActive("chat") 全不变
+
+### 交互与业务逻辑核验
+
+- send() 逻辑未改 ✅
+- stopGeneration() 未改 ✅
+- retryRun() 未改 ✅
+- regenLast() 未改 ✅
+- streaming/typewriter 未改 ✅
+- usage 保存逻辑未改 ✅
+- chat session 存储未改 ✅
+- Enter 发送 / Shift+Enter 换行未改 ✅
+- chips 点击仍只 setInput，不自动发送 ✅
+- 复制/重试/重新生成/保存逻辑未改 ✅
+
+### 验证结果
+
+- `npm run build` ✅（1.67s）
+- `cargo check --manifest-path src-tauri/Cargo.toml` ✅（3 个 snake_case 警告，与本次无关）
+- `node scripts/test-redaction.mjs` ✅（21/21 通过）
+
+---
+
+## TASK-044G 执行反馈
+
+**状态**：已完成  
+**执行日期**：2026-05-31  
+**修改文件**：
+- `src/App.tsx`（删除 unused PenLine import + 8 个原生 button 补 type="button"）
+
+### 044E P3 清理结果
+
+**P3-1：删除 unused import PenLine**
+- 删除 `src/App.tsx` 第 27 行 `PenLine,`
+- 验证：`rg "PenLine" src/App.tsx` 无输出
+- Build 仍通过 ✅
+
+**P3-2：Chat 操作区原生 button 补 type="button"**
+- 8 个消息操作区 button（用户消息 2 个 + AI 消息 6 个）已补 `type="button"`
+- 验证：`rg 'type="button".*inline-flex h-7 w-7' src/App.tsx | wc -l` = 8
+- 未改 onClick / title / aria-label / disabled / hover class
+- Build 仍通过 ✅
+
+### 10 页高要求视觉回归结果
+
+| 页面 | 状态 | 核心检查项 | 结果 |
+|---|---|---|---|
+| 首页 | ✅ | StatusHero + 9 入口 route 匹配 nav + 最近会话 → chat | 通过 |
+| AI 对话 | ✅ | send/stop/retry/regen/streaming/usage 未改 + chips 只 setInput + Enter/Shift+Enter + P3 已清理 | 通过 |
+| AI 助手 | ✅ | StatusHero 四态 + handleStartGateway + saveConfig + 一键启用完整 | 通过 |
+| 能力中心 | ✅ | StatusHero + 排行卡 polish + 044F P3 badge 仍修复 + install/uninstall/二次确认 intact | 通过 |
+| 本地用量 | ✅ | StatusHero + usage 统计未改 + 无余额误导 | 通过 |
+| 助手记忆 | ✅ | StatusHero + 文件列表 onClick + 只读预览 + 脱敏 | 通过 |
+| 文件库 | ✅ | StatusHero + 上传/预览/打开位置/复制/用于分析/删除 intact | 通过 |
+| 教程 | ✅ | StatusHero + 3 SettingGroup + FAQ 准确 + 无自动动作 | 通过 |
+| 关于 | ✅ | Hero + SettingGroup + clearConfig 确认弹窗 | 通过 |
+| 摸鱼中心 | ✅ | Widget 风格 + 5 widget onClick→jumpToChat + 不自动发送 + 044D P3 已修 | 通过 |
+
+### 技术词残留检查
+
+- `OpenClaw Agent` / `Hermes Agent`：仅消息 source 内部值，UI 已映射为"AI Agent" ✅
+- `Gateway`：仅高级诊断区域 ✅
+- `baseUrl` / `provider` / `config validate`：仅代码变量/内部函数 ✅
+- 普通 UI 无技术词暴露 ✅
+
+### 敏感信息检查
+
+- `apiKey`：仅 `src/lib/config.ts` 类型定义和默认值 ✅
+- `redaction.ts`：脱敏模块，正常包含敏感词 ✅
+- UI 无 token/URL/密钥暴露 ✅
+
+### 是否发现 P0/P1
+
+**无 P0/P1。**
+
+- 所有 044B-F 升级未破坏交互
+- 044E P3×2 已清理
+- 无新增视觉缺陷
+- 无业务逻辑改动
+
+### 是否建议 TASK-044 阶段性收口
+
+**建议阶段性收口。**
+
+理由：
+1. 044A-G 全部完成，10 页视觉升级达标
+2. 无 P0/P1，所有已知 P3 已清理
+3. 核心交互（send/stop/install/uninstall/upload/memory/read）全 intact
+4. 验证通过：build + cargo check + redaction 21/21 + OpenClaw probe
+
+### 验证结果
+
+- `npm run build` ✅（1.71s）
+- `cargo check --manifest-path src-tauri/Cargo.toml` ✅（3 个 snake_case 警告，与本次无关）
+- `node scripts/test-redaction.mjs` ✅（21/21 通过）
+- `node scripts/openclaw-http-api-probe.mjs` ✅（/v1/models + /v1/chat/completions 通过）
+
+### 下一步建议
+
+1. **git 收口 TASK-044**：commit 当前所有 044B-G 改动
+2. **真实 token 人工冒烟**：一键启用 → 发送消息 → 停止生成 → 复制 → 安装/卸载能力 → 上传文件 → 用量统计
+3. **内测交付清单**：按 docs/release-checklist.md 逐项验收
+4. **不做 TASK-045**：用户明确"不要再开启新的 UI 改造任务"

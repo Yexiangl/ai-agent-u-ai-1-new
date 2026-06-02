@@ -125,6 +125,23 @@ TASK-044A | 日期：2026-05-30 | 只做审计，不改业务代码。
 
 边界：保留轻松定位，不过度系统化。风险最低。
 
+### TASK-044D 执行结果（2026-05-31）
+
+已升级为 iOS widget / 控制中心风格：
+
+- **顶部轻量 Hero**：Sparkles 图标 + 标题 + emerald"轻量休息"badge + 副标题 +"随机来一个"/"去 AI 对话"双操作
+- **Widget Grid**：
+  - 大 widget（col-span-2）：桌宠陪伴（violet 渐变 + Bot 图标 + 引用 bubble）
+  - 中 widget：快速放松（amber 渐变 + Coffee 图标 + 3 条任务）
+  - 小 widget×3：今日状态（sky）、随机冷知识（emerald）、今日成就（rose）
+- **视觉统一**：全部 rounded-3xl、柔和渐变、shadow-sm→hover:shadow-md、hover:-translate-y-0.5、图标容器 rounded-2xl bg-xxx-500/10
+- **文案优化**："桌宠陪伴"/"快速放松"/"今日状态"/"随机冷知识"/"今日成就"
+- **交互保留**：5 个 widget 全部 onClick→jumpToChat、随机 prompt、安全提示 intact
+- **未套 SettingGroup/SettingRow**：保持轻松氛围
+- **044F P3 修复**：high_risk 不渲染空排行 badge
+
+评分更新：视觉 3→4、一致性 3→4、信息层级 4→4、交互 4→4。
+
 ---
 
 ## 7. AI 对话页深度审计
@@ -147,6 +164,38 @@ TASK-044A | 日期：2026-05-30 | 只做审计，不改业务代码。
 - 严格不改 send/stop/retry/regenerate/stream 逻辑
 
 边界：聊天专注优先，**绝不套设置组件**，只做局部视觉。风险中（对话区敏感）。
+
+### TASK-044E 执行结果（2026-05-31）
+
+AI 对话页精致化 polish 已完成，只改视觉不改逻辑：
+
+- **空状态 polish**：
+  - 图标容器改为 rounded-3xl + shadow-sm，更立体
+  - 标题加 tracking-tight，更稳
+  - 副标题更自然："直接提问，或选一个快捷提示填入输入框。"
+  - chips 升级：加 icon（FileText/ListChecks/Bug/Wrench）+ 图标容器 rounded-xl bg-muted/60 hover:bg-primary/10 + hover shadow-sm + active scale-[0.99]
+  - 底部轻提示："点击后只填入输入框，不会自动发送。"
+
+- **消息气泡 polish**：
+  - 用户消息：max-w-[65%]→70%，rounded-2xl rounded-br-md（对话感更强），bg-primary/85→bg-primary（更纯粹）
+  - AI 消息：rounded-2xl rounded-bl-md，加 subtle border border-border/50，bg-muted/30→bg-card（更清晰）
+  - 阴影：加 shadow-sm 让气泡有轻微浮起感
+
+- **操作区 polish**：
+  - 默认 opacity-0，group-hover 时才 opacity-100（更干净，不干扰阅读）
+  - 所有操作按钮从 Button 组件改为原生 button（更轻，无 Button 默认 padding/margin）
+  - 统一 rounded-lg + hover:bg-muted + hover:text-foreground
+  - "已复制"反馈改为 font-medium text-emerald-600（更明显）
+  - AI 消息元信息（来源/模型/耗时）加 "·" 分隔符，更清晰
+
+- **输入区 polish**：
+  - 外层容器加 focus-within:border-primary/30 focus-within:shadow-md（聚焦时更明显）
+  - textarea disabled 态加 opacity-50
+  - 发送/停止按钮加 shadow-sm（更统一）
+
+- **044D P3 修复**：摸鱼中心大 widget 内嵌 Button→span（避免 interactive 嵌套）
+
+评分更新：视觉 4→4（已达高要求）、交互 4→4、一致性 4→4。无需二次升级。
 
 ---
 
@@ -223,3 +272,44 @@ TASK-044A | 日期：2026-05-30 | 只做审计，不改业务代码。
 每个子任务完成后：build + cargo check + redaction 21/21 + 该页交互冒烟 + 技术词扫描。
 
 特别提醒：044B（表格→卡片）和 044F（卡片重排）有 043D 式"重构丢交互"风险，复审时务必逐一核验可点击元素（上传/预览/打开位置/用于分析/安装/卸载）行为保留。
+
+---
+
+## 12. TASK-044G 全页面回归结果（2026-05-31）
+
+### 044E P3 清理
+
+- **P3-1**：删除 unused `PenLine` import（src/App.tsx:27）
+- **P3-2**：8 个 Chat 消息操作区原生 button 补 `type="button"`
+
+### 10 页回归逐一核验
+
+| 页面 | 044 改造 | 核心交互核验 | 结果 |
+|---|---|---|---|
+| 首页 | 043B StatusHero | 9 入口 route 匹配 nav，最近会话 → chat | ✅ |
+| AI 对话 | 044E polish | send/stop/retry/regen/stream/usage 未改，chips 只 setInput，P3 已清 | ✅ |
+| AI 助手 | 043A 规范 | handleStartGateway/saveConfig/一键启用完整，StatusHero 四态 | ✅ |
+| 能力中心 | 044F 卡片 | install/uninstall/二次确认/details 全 intact，044F P3 badge 仍修复 | ✅ |
+| 本地用量 | 043C StatusHero | usage 统计未改，无余额误导 | ✅ |
+| 助手记忆 | 043D StatusHero | 文件列表 onClick，只读预览，脱敏 | ✅ |
+| 文件库 | 044B 深度 | 上传/预览/打开位置/复制/用于分析/删除 intact | ✅ |
+| 教程 | 044C 深度 | 3 SettingGroup + FAQ 准确，无自动动作 | ✅ |
+| 关于 | 043E 规范 | clearConfig 确认弹窗，无技术词 | ✅ |
+| 摸鱼中心 | 044D widget | 5 widget onClick→jumpToChat，不自动发送，044D P3 已修 | ✅ |
+
+### 全局检查
+
+- **技术词**：普通 UI 无 OpenClaw/Gateway/provider/baseUrl/API URL 暴露 ✅
+- **敏感信息**：无 token/URL/密钥泄露到 UI ✅
+- **P0/P1**：无 ✅
+
+### 验证
+
+- `npm run build` ✅
+- `cargo check` ✅
+- `node scripts/test-redaction.mjs` 21/21 ✅
+- `node scripts/openclaw-http-api-probe.mjs` ✅
+
+### 结论
+
+TASK-044 阶段性收口，10 页视觉升级达标，无 P0/P1，建议进入内测准备。

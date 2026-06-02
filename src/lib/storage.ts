@@ -10,7 +10,8 @@ function mergeConfig(value: Partial<AppConfig> | null): AppConfig {
     baseUrl: DEFAULT_CONFIG.baseUrl,
     selectedEngine: "hermes",
     tasks: value?.tasks ?? DEFAULT_CONFIG.tasks,
-    enabledSkills: value?.enabledSkills ?? DEFAULT_CONFIG.enabledSkills
+    enabledSkills: value?.enabledSkills ?? DEFAULT_CONFIG.enabledSkills,
+    pet: value?.pet ?? DEFAULT_CONFIG.pet
   };
 }
 

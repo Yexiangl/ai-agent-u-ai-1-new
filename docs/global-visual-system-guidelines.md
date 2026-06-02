@@ -237,3 +237,133 @@ TASK-043A | 基于 TASK-042 AI 助手页视觉升级验证成果
 | 3 | P3 | TASK-043G | 文件库/教程 | 轻量对齐 |
 
 **推荐第一步**：TASK-043E 关于页低风险试点
+
+---
+
+## 16. 摸鱼中心 iOS widget 风格实践（TASK-044D）
+
+摸鱼中心不套 SettingGroup/SettingRow，采用独立的 widget 风格：
+
+### 结构
+
+```
+轻量 Hero（rounded-3xl gradient）
+  └─ 图标 + 标题 + badge + 副标题
+  └─ 主操作（随机 / 去对话）
+
+Widget Grid（grid-cols-1 sm:grid-cols-3 gap-3）
+  ├─ 大 widget（sm:col-span-2）
+  │   └─ 图标容器 + 标题 + 描述 + 内部元素 + 按钮
+  ├─ 中 widget
+  │   └─ 图标容器 + 标题 + 描述 + 列表
+  └─ 小 widget ×3
+      └─ 图标容器 + 标题 + 描述 + 轻标签
+
+安全提示（rounded-2xl muted）
+```
+
+### 视觉令牌
+
+| 元素 | 规范 |
+|---|---|
+| Hero | `rounded-3xl` `shadow-sm` `bg-gradient-to-br from-sky-50/60 via-background to-amber-50/40` `p-6` |
+| 大 widget | `rounded-3xl` `shadow-sm` `bg-gradient-to-br from-violet-50/70 via-background to-background` `p-5` |
+| 中 widget | `rounded-3xl` `shadow-sm` `bg-gradient-to-br from-amber-50/60 via-background to-background` `p-5` |
+| 小 widget | `rounded-3xl` `shadow-sm` `bg-gradient-to-br from-xxx-50/60 via-background to-background` `p-4` |
+| 图标容器 | `h-9/10 w-9/10` `rounded-2xl` `bg-xxx-500/10` |
+| hover | `transition-all hover:shadow-md hover:-translate-y-0.5` |
+| 轻标签 | `rounded-lg bg-xxx-500/10 px-2 py-1 text-[11px] font-medium text-xxx-600` |
+
+### 原则
+
+- 轻松但不幼稚：文案自然，不用 sticker 风
+- 精致但不花哨：柔和渐变 + 轻阴影，不用强毛玻璃/复杂动画
+- 整体可点击：widget div 带 `cursor-pointer` + `onClick`，内部按钮同行为不冲突
+- 不引入新 UI 库：纯 Tailwind + lucide-react
+
+---
+
+## 17. AI 对话页 polish 经验（TASK-044E）
+
+AI 对话页保持聊天专注，不套 SettingGroup/StatusHero，只做局部视觉 polish：
+
+### 空状态
+
+| 元素 | 规范 |
+|---|---|
+| 图标容器 | `rounded-3xl` `shadow-sm` `bg-primary/10` `h-14 w-14` |
+| 标题 | `text-lg font-semibold tracking-tight` |
+| chips | `rounded-2xl border border-border/60 bg-card` + icon 容器 `rounded-xl bg-muted/60` |
+| chip hover | `hover:border-primary/30 hover:bg-primary/[0.03] hover:shadow-sm active:scale-[0.99]` |
+| 轻提示 | `text-[11px] text-muted-foreground/50` "不会自动发送" |
+
+### 消息气泡
+
+| 元素 | 规范 |
+|---|---|
+| 用户消息 | `rounded-2xl rounded-br-md bg-primary text-primary-foreground shadow-sm max-w-[70%]` |
+| AI 消息 | `rounded-2xl rounded-bl-md border border-border/50 bg-card text-foreground shadow-sm max-w-[720px]` |
+| 对话感圆角 | 用户右下角收紧 `rounded-br-md`，AI 左下角收紧 `rounded-bl-md` |
+
+### 消息操作区
+
+| 元素 | 规范 |
+|---|---|
+| 默认态 | `opacity-0`（不干扰阅读） |
+| hover 态 | `group-hover:opacity-100 transition-opacity` |
+| 按钮样式 | 原生 `button`（非 Button 组件），`h-7 w-7 rounded-lg text-muted-foreground/60 hover:bg-muted hover:text-foreground` |
+| 已复制反馈 | `text-[10px] font-medium text-emerald-600` |
+| 元信息分隔 | `text-muted-foreground/30` "·" |
+
+### 输入区
+
+| 元素 | 规范 |
+|---|---|
+| 容器 | `rounded-2xl border border-border/40 bg-card/90 shadow-sm` |
+| focus 态 | `focus-within:border-primary/30 focus-within:shadow-md transition-colors` |
+| textarea | `border-0 bg-transparent focus-visible:ring-0 disabled:opacity-50` |
+| 发送/停止 | `rounded-full shadow-sm` |
+
+### 原则
+
+- **不改业务逻辑**：send/stop/retry/regen/streaming/usage 全保留
+- **只做 className**：不改消息数据结构、不改渲染 key、不改请求流程
+- **操作区弱化**：默认隐藏，hover 才显示，保持阅读专注
+- **按钮轻量化**：消息操作区用原生 button 替代 Button 组件，避免多余 padding 和默认样式
+- **语义正确**：避免 interactive 元素嵌套（如可点击 div 内不再放 Button）
+
+---
+
+## 18. TASK-044 系列最终收口经验
+
+### 10 页高要求视觉升级达成
+
+| 页面 | 改造任务 | 风格 | 风险 |
+|---|---|---|---|
+| 首页 | 043B | StatusHero + 9 入口 dashboard | 低 |
+| AI 助手 | 042 | StatusHero + SettingGroup | 低 |
+| 关于 | 043E | StatusHero + SettingGroup | 最低 |
+| 用量概览 | 043C | StatusHero + dashboard tile | 低 |
+| 助手记忆 | 043D | StatusHero + SettingGroup | 低（曾出 P1：SettingRow onClick） |
+| 能力中心 | 044F | StatusHero + 卡片 polish | 中（紧邻 install/uninstall） |
+| 文件库 | 044B | StatusHero + 表格容器 | 中（表格交互多） |
+| 教程 | 044C | StatusHero + SettingGroup | 最低（纯展示） |
+| 摸鱼中心 | 044D | iOS widget grid | 低（轻量休息） |
+| AI 对话 | 044E | 消息气泡/输入区 polish | 中（最敏感） |
+
+### 关键教训
+
+1. **043D P1 教训**：SettingRow 从 div 改为支持 onClick 时，必须确保 props 透传完整。重构组件时必查可点击元素。
+2. **044F P3 教训**：Badge 条件渲染时，空字符串 fallback 会产生视觉缺陷（空 pill）。应使用条件渲染 `condition && <Badge>` 而非 `""` fallback。
+3. **044D P3 教训**：可点击 div 内部不应嵌套真实 `<Button>`（HTML 语义瑕疵）。改用 styled span 或确保 Button 有独立 onClick + stopPropagation。
+4. **044E P3 教训**：unused import 及时清理；原生 button 在表单外也应补 `type="button"` 以防未来变动。
+5. **保守策略正确**：044B 文件库保留 Table 结构只换顶部，044F 能力中心只改卡片展示层——都成功避开了"重构丢交互"风险。
+
+### 验证清单（每次子任务后必做）
+
+- [ ] `npm run build` 通过
+- [ ] `cargo check` 通过
+- [ ] `node scripts/test-redaction.mjs` 21/21 通过
+- [ ] 该页核心交互冒烟（逐一核验可点击元素）
+- [ ] 技术词扫描（普通 UI 无 OpenClaw/Gateway/provider/baseUrl 暴露）
+- [ ] 敏感信息扫描（无 token/URL/密钥泄露）

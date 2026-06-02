@@ -3,7 +3,7 @@
 use std::fs;
 use std::collections::HashMap;
 use std::error::Error;
-use std::io::{Read, Write};
+use std::io::{Read, Write, BufRead, BufReader};
 use std::net::{SocketAddr, TcpStream};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
@@ -14,6 +14,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use futures_util::StreamExt;
 use calamine::Reader;
 use tauri::{Emitter, Manager};
+
+mod update;
 
 type CancelMap = Mutex<HashMap<String, Arc<AtomicBool>>>;
 type TaskMap = Mutex<HashMap<String, tauri::async_runtime::JoinHandle<()>>>;
@@ -46,7 +48,7 @@ fn config_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 }
 
 // TASK-028G-1: Unified workspace root detection (Windows + macOS .app bundle)
-fn workspace_root() -> Option<PathBuf> {
+pub(crate) fn workspace_root() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
     let current = exe.parent()?;
 
@@ -2323,6 +2325,190 @@ fn load_openclaw_gateway_token() -> Result<String, String> {
     Ok(token.to_string())
 }
 
+fn emit_openclaw_error(app: &tauri::AppHandle, request_id: &str, error: &str, status: Option<u16>, body: Option<&str>) {
+    let _ = app.emit("openclaw-chat-error", serde_json::json!({
+        "requestId": request_id,
+        "error": error,
+        "url": "http://127.0.0.1:18789/v1/chat/completions",
+        "model": "openclaw/default",
+        "status": status,
+        "body": body
+    }));
+}
+
+// Reads an OpenAI-style SSE response body, emitting incremental content/reasoning chunks.
+async fn openclaw_stream_body(
+    app: &tauri::AppHandle,
+    rid: &str,
+    mdl: &str,
+    response: reqwest::Response,
+    is_sse: bool,
+    started: std::time::Instant,
+    cancel_flag: Arc<AtomicBool>,
+) {
+    // Non-SSE fallback: parse the full JSON once and emit it as a single chunk + done.
+    if !is_sse {
+        match response.json::<serde_json::Value>().await {
+            Ok(json) => {
+                let content = json.get("choices").and_then(|c| c.get(0)).and_then(|c| c.get("message")).and_then(|m| m.get("content")).and_then(|c| c.as_str()).unwrap_or("");
+                let usage = json.get("usage").cloned();
+                if !content.is_empty() {
+                    let _ = app.emit("openclaw-chat-chunk", serde_json::json!({ "requestId": rid, "content": content, "type": "content" }));
+                }
+                let _ = app.emit("openclaw-chat-done", serde_json::json!({
+                    "requestId": rid, "content": content, "model": mdl,
+                    "rawUsage": usage, "elapsedMs": started.elapsed().as_millis() as u64
+                }));
+            }
+            Err(e) => emit_openclaw_error(app, rid, &format!("JSON 解析失败: {}", e), None, None),
+        }
+        return;
+    }
+
+    let mut content_accumulated = String::new();
+    let mut reasoning_accumulated = String::new();
+    let mut usage_info: Option<serde_json::Value> = None;
+    let mut finish_reason: Option<String> = None;
+    let mut has_done = false;
+    let mut line_buffer = String::new();
+    let mut current_event = SseEvent { event: "message".to_string(), data: String::new() };
+    let mut stream = response.bytes_stream();
+
+    while let Some(item) = stream.next().await {
+        if cancel_flag.load(Ordering::Relaxed) {
+            let _ = app.emit("openclaw-chat-done", serde_json::json!({
+                "requestId": rid, "content": content_accumulated, "reasoningContent": reasoning_accumulated,
+                "model": mdl, "rawUsage": usage_info, "elapsedMs": started.elapsed().as_millis() as u64,
+                "stopped": true, "partial": !content_accumulated.is_empty(), "warning": "已停止生成"
+            }));
+            return;
+        }
+        let bytes = match item {
+            Ok(b) => b,
+            Err(e) => {
+                if !content_accumulated.is_empty() || !reasoning_accumulated.is_empty() {
+                    let _ = app.emit("openclaw-chat-done", serde_json::json!({
+                        "requestId": rid, "content": content_accumulated, "reasoningContent": reasoning_accumulated,
+                        "model": mdl, "rawUsage": usage_info, "elapsedMs": started.elapsed().as_millis() as u64,
+                        "partial": true, "warning": "流式连接提前结束，已保留已生成内容", "streamError": e.to_string()
+                    }));
+                } else {
+                    emit_openclaw_error(app, rid, &format!("读取流式响应失败: {}", e), None, None);
+                }
+                return;
+            }
+        };
+        line_buffer.push_str(&String::from_utf8_lossy(&bytes));
+        while let Some(nl) = line_buffer.find('\n') {
+            let mut line = line_buffer[..nl].to_string();
+            if line.ends_with('\r') { line.pop(); }
+            line_buffer = line_buffer[nl + 1..].to_string();
+            let Some(completed) = parse_sse_line(&line, &mut current_event) else { continue; };
+            if completed.data == "[DONE]" { has_done = true; continue; }
+            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&completed.data) {
+                if let Some(fr) = json.get("choices").and_then(|c| c.get(0)).and_then(|c| c.get("finish_reason")).and_then(|v| v.as_str()) {
+                    finish_reason = Some(fr.to_string());
+                }
+                if let Some(delta) = json.get("choices").and_then(|c| c.get(0)).and_then(|c| c.get("delta")) {
+                    let content = delta.get("content").and_then(|v| v.as_str()).unwrap_or("");
+                    let reasoning = delta.get("reasoning_content").and_then(|v| v.as_str()).unwrap_or("");
+                    if !content.is_empty() {
+                        content_accumulated.push_str(content);
+                        let _ = app.emit("openclaw-chat-chunk", serde_json::json!({ "requestId": rid, "content": content, "type": "content" }));
+                    }
+                    if !reasoning.is_empty() {
+                        reasoning_accumulated.push_str(reasoning);
+                        let _ = app.emit("openclaw-chat-chunk", serde_json::json!({ "requestId": rid, "content": reasoning, "reasoningContent": reasoning, "type": "reasoning" }));
+                    }
+                }
+                if let Some(obj) = json.get("usage") { if !obj.is_null() { usage_info = Some(obj.clone()); } }
+            }
+        }
+    }
+
+    let _ = app.emit("openclaw-chat-done", serde_json::json!({
+        "requestId": rid, "content": content_accumulated, "reasoningContent": reasoning_accumulated,
+        "model": mdl, "rawUsage": usage_info, "elapsedMs": started.elapsed().as_millis() as u64,
+        "diagnostics": { "receivedDone": has_done, "finishReason": finish_reason }
+    }));
+}
+
+// SSE streaming chat for the OpenClaw gateway. Mirrors hermes_chat_completion: requests
+// stream:true, parses OpenAI-style `data:` delta lines, emits incremental chunk events,
+// and supports user cancellation via cancel_map. The frontend feeds these chunks into the
+// same typewriter pipeline so OpenClaw replies appear char-by-char like ChatGPT.
+#[tauri::command]
+fn openclaw_http_chat_completion_stream(
+    app: tauri::AppHandle,
+    request_id: String,
+    messages: serde_json::Value,
+    model: Option<String>,
+) -> Result<serde_json::Value, String> {
+    let rid = request_id.clone();
+    let mdl = model.unwrap_or_else(|| "openclaw/default".to_string());
+
+    let token = match load_openclaw_gateway_token() {
+        Ok(t) => t,
+        Err(e) => { emit_openclaw_error(&app, &rid, &e, None, None); return Err(e); }
+    };
+
+    let cancel_flag = Arc::new(AtomicBool::new(false));
+    cancel_map().lock().unwrap().insert(rid.clone(), cancel_flag.clone());
+    let rid_for_handle = rid.clone();
+
+    let handle = tauri::async_runtime::spawn(async move {
+        let started = std::time::Instant::now();
+        let url = "http://127.0.0.1:18789/v1/chat/completions";
+        let client = match reqwest::Client::builder()
+            .connect_timeout(Duration::from_secs(10))
+            .build() {
+            Ok(c) => c,
+            Err(e) => { emit_openclaw_error(&app, &rid, &format!("创建 HTTP client 失败: {}", e), None, None); return; }
+        };
+        let request_body = serde_json::json!({ "model": mdl, "messages": messages, "stream": true });
+        let response = match client
+            .post(url)
+            .header("Accept", "text/event-stream")
+            .header("Accept-Encoding", "identity")
+            .header("Authorization", format!("Bearer {}", token))
+            .json(&request_body)
+            .send()
+            .await
+        {
+            Ok(r) => r,
+            Err(e) => { emit_openclaw_error(&app, &rid, &format!("无法连接 OpenClaw 网关: {}", e), None, None); cancel_map().lock().unwrap().remove(&rid); return; }
+        };
+        let status_code = response.status().as_u16();
+        let content_type = response.headers().get("content-type").and_then(|v| v.to_str().ok()).unwrap_or("").to_lowercase();
+        let is_sse = content_type.contains("text/event-stream");
+        if status_code != 200 {
+            let body_text = response.text().await.unwrap_or_default();
+            let body_summary: String = body_text.chars().take(500).collect();
+            emit_openclaw_error(&app, &rid, &format!("HTTP {}: OpenClaw 网关返回错误", status_code), Some(status_code), Some(&body_summary));
+            cancel_map().lock().unwrap().remove(&rid);
+            return;
+        }
+        openclaw_stream_body(&app, &rid, &mdl, response, is_sse, started, cancel_flag).await;
+        cancel_map().lock().unwrap().remove(&rid);
+        task_map().lock().unwrap().remove(&rid);
+    });
+    task_map().lock().unwrap().insert(rid_for_handle, handle);
+
+    Ok(serde_json::json!({ "success": true, "accepted": true, "requestId": request_id }))
+}
+
+#[tauri::command]
+fn cancel_openclaw_chat_completion(request_id: String) -> Result<serde_json::Value, String> {
+    if let Some(flag) = cancel_map().lock().unwrap().get(&request_id) {
+        flag.store(true, Ordering::Relaxed);
+    }
+    if let Some(handle) = task_map().lock().unwrap().remove(&request_id) {
+        handle.abort();
+    }
+    cancel_map().lock().unwrap().remove(&request_id);
+    Ok(serde_json::json!({ "cancelled": true, "requestId": request_id }))
+}
+
 #[tauri::command]
 async fn openclaw_http_chat_completion(
     messages: serde_json::Value,
@@ -2472,6 +2658,25 @@ async fn openclaw_http_status() -> Result<serde_json::Value, String> {
         .build()
         .map_err(|e| format!("创建 HTTP client 失败: {}", e))?;
 
+    // Preflight: GET /health is a fast, unambiguous liveness probe ({"ok":true,"status":"live"}).
+    // It distinguishes "gateway process down" from "HTTP API enabled but model route missing"
+    // far more reliably than inferring from /v1/models.
+    let mut gateway_live = false;
+    if let Ok(h) = client
+        .get("http://127.0.0.1:18789/health")
+        .header("Authorization", format!("Bearer {}", token))
+        .timeout(std::time::Duration::from_secs(5))
+        .send()
+        .await
+    {
+        if h.status().is_success() {
+            if let Ok(hj) = h.json::<serde_json::Value>().await {
+                gateway_live = hj.get("status").and_then(|v| v.as_str()) == Some("live")
+                    || hj.get("ok").and_then(|v| v.as_bool()) == Some(true);
+            }
+        }
+    }
+
     let resp = match client
         .get("http://127.0.0.1:18789/v1/models")
         .header("Authorization", format!("Bearer {}", token))
@@ -2485,6 +2690,7 @@ async fn openclaw_http_status() -> Result<serde_json::Value, String> {
                 "ready": false,
                 "error": format!("Gateway 不可达: {}", e),
                 "models": [],
+                "gatewayReachable": gateway_live,
             }));
         }
     };
@@ -2505,6 +2711,9 @@ async fn openclaw_http_status() -> Result<serde_json::Value, String> {
             "ready": false,
             "error": "HTTP API 未启用（返回 Control UI HTML）",
             "models": [],
+            "gatewayReachable": true,
+            "gatewayLive": gateway_live,
+            "httpApiEnabled": false,
         }));
     }
 
@@ -2543,13 +2752,844 @@ async fn openclaw_http_status() -> Result<serde_json::Value, String> {
         "defaultModel": default_model,
         "statusCode": 200,
         "gatewayReachable": true,
+        "gatewayLive": gateway_live,
+        "httpApiEnabled": true,
         "authOk": true,
         "authRequired": true,
     }))
 }
 
+// Parses the first run of integer digits out of a string, e.g. "171k" -> 171, "85%)" -> 85.
+fn first_uint(s: &str) -> Option<u64> {
+    let digits: String = s.chars().skip_while(|c| !c.is_ascii_digit()).take_while(|c| c.is_ascii_digit()).collect();
+    if digits.is_empty() { None } else { digits.parse().ok() }
+}
+
+// Extracts the substring after `label` up to the next `·` separator or end of line, trimmed.
+fn field_after<'a>(line: &'a str, label: &str) -> Option<&'a str> {
+    let rest = line.split_once(label)?.1;
+    let val = rest.split('·').next().unwrap_or(rest).trim();
+    if val.is_empty() { None } else { Some(val) }
+}
+
+// Turns the emoji-tagged session_status text card into structured fields the UI can render
+// as a real native status panel (context-window gauge, token usage, cache hit, version, etc.).
+fn parse_session_status(text: &str) -> serde_json::Value {
+    let mut out = serde_json::Map::new();
+    out.insert("statusText".into(), serde_json::Value::String(text.to_string()));
+    for raw in text.lines() {
+        let line = raw.trim();
+        if let Some(v) = line.strip_prefix("🦞") {
+            out.insert("version".into(), serde_json::Value::String(v.trim().to_string()));
+        } else if line.contains("Uptime:") {
+            if let Some(v) = field_after(line, "gateway") { out.insert("uptimeGateway".into(), serde_json::Value::String(v.to_string())); }
+        } else if line.contains("Model:") {
+            if let Some(v) = field_after(line, "Model:") { out.insert("model".into(), serde_json::Value::String(v.to_string())); }
+        } else if line.contains("Tokens:") {
+            if let Some(rest) = line.split_once("Tokens:").map(|x| x.1) {
+                if let Some(i) = first_uint(rest) { out.insert("tokensIn".into(), serde_json::json!(i)); }
+                if let Some(o) = rest.split_once('/').and_then(|x| first_uint(x.1)) { out.insert("tokensOut".into(), serde_json::json!(o)); }
+            }
+        } else if line.contains("Cache:") {
+            if let Some(h) = first_uint(line.split_once("Cache:").map(|x| x.1).unwrap_or("")) { out.insert("cacheHitPct".into(), serde_json::json!(h)); }
+        } else if line.contains("Context:") {
+            let rest = line.split_once("Context:").map(|x| x.1).unwrap_or("");
+            if let Some(used) = first_uint(rest) { out.insert("contextUsedK".into(), serde_json::json!(used)); }
+            if let Some(total) = rest.split_once('/').and_then(|x| first_uint(x.1)) { out.insert("contextTotalK".into(), serde_json::json!(total)); }
+            if let Some(pct) = rest.split_once('(').and_then(|x| first_uint(x.1)) { out.insert("contextPct".into(), serde_json::json!(pct)); }
+            if let Some(c) = line.split_once("Compactions:").and_then(|x| first_uint(x.1)) { out.insert("compactions".into(), serde_json::json!(c)); }
+        } else if line.contains("Think:") {
+            if let Some(v) = field_after(line, "Think:") { out.insert("thinkLevel".into(), serde_json::Value::String(v.to_string())); }
+        }
+    }
+    serde_json::Value::Object(out)
+}
+
+// Calls the gateway's always-on /tools/invoke endpoint with the native `session_status` tool
+// and returns parsed structured fields plus the raw card text.
+#[tauri::command]
+async fn openclaw_session_status() -> Result<serde_json::Value, String> {
+    let token = match load_openclaw_gateway_token() {
+        Ok(t) => t,
+        Err(e) => return Ok(serde_json::json!({ "ok": false, "error": e })),
+    };
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(5))
+        .build()
+        .map_err(|e| format!("创建 HTTP client 失败: {}", e))?;
+
+    let resp = match client
+        .post("http://127.0.0.1:18789/tools/invoke")
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "application/json")
+        .json(&serde_json::json!({ "tool": "session_status", "action": "json", "args": {} }))
+        .timeout(std::time::Duration::from_secs(12))
+        .send()
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => return Ok(serde_json::json!({ "ok": false, "error": format!("Gateway 不可达: {}", e) })),
+    };
+
+    if !resp.status().is_success() {
+        return Ok(serde_json::json!({ "ok": false, "error": format!("HTTP {}", resp.status().as_u16()) }));
+    }
+    let json: serde_json::Value = match resp.json().await {
+        Ok(j) => j,
+        Err(e) => return Ok(serde_json::json!({ "ok": false, "error": format!("JSON 解析失败: {}", e) })),
+    };
+
+    // statusText lives either in result.details.statusText or result.content[0].text.
+    let result = json.get("result");
+    let text = result
+        .and_then(|r| r.get("details"))
+        .and_then(|d| d.get("statusText"))
+        .and_then(|v| v.as_str())
+        .or_else(|| result.and_then(|r| r.get("content")).and_then(|c| c.get(0)).and_then(|c| c.get("text")).and_then(|v| v.as_str()))
+        .unwrap_or("");
+
+    if text.is_empty() {
+        return Ok(serde_json::json!({ "ok": false, "error": "session_status 无返回文本" }));
+    }
+
+    let mut parsed = parse_session_status(text);
+    if let Some(obj) = parsed.as_object_mut() {
+        obj.insert("ok".into(), serde_json::Value::Bool(true));
+        if let Some(key) = result.and_then(|r| r.get("details")).and_then(|d| d.get("sessionKey")).and_then(|v| v.as_str()) {
+            obj.insert("sessionKey".into(), serde_json::Value::String(key.to_string()));
+        }
+    }
+    Ok(parsed)
+}
+
+// Calls the gateway's always-on /tools/invoke endpoint with one tool and returns the parsed
+// JSON body. Shared by web_search / sessions_list / (future) tool commands.
+async fn invoke_gateway_tool(tool: &str, args: serde_json::Value, timeout_secs: u64) -> Result<serde_json::Value, String> {
+    let token = load_openclaw_gateway_token()?;
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(5))
+        .build()
+        .map_err(|e| format!("创建 HTTP client 失败: {}", e))?;
+    let resp = client
+        .post("http://127.0.0.1:18789/tools/invoke")
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "application/json")
+        .json(&serde_json::json!({ "tool": tool, "action": "json", "args": args }))
+        .timeout(std::time::Duration::from_secs(timeout_secs))
+        .send()
+        .await
+        .map_err(|e| format!("Gateway 不可达: {}", e))?;
+    let status = resp.status().as_u16();
+    if status == 404 {
+        return Err(format!("工具不可用（被策略拒绝或未启用）: {}", tool));
+    }
+    if !resp.status().is_success() {
+        return Err(format!("HTTP {}", status));
+    }
+    resp.json::<serde_json::Value>().await.map_err(|e| format!("JSON 解析失败: {}", e))
+}
+
+// Strips OpenClaw's external-untrusted-content wrappers so search titles/snippets render cleanly.
+// Format: "<<<EXTERNAL_UNTRUSTED_CONTENT id=\"..\">>>\nSource: ..\n---\n<text>\n<<<END_..>>>"
+fn strip_untrusted_wrapper(s: &str) -> String {
+    let text = s
+        .lines()
+        .filter(|l| {
+            let t = l.trim();
+            !t.starts_with("<<<EXTERNAL_UNTRUSTED_CONTENT")
+                && !t.starts_with("<<<END_EXTERNAL_UNTRUSTED_CONTENT")
+                && !t.starts_with("Source:")
+                && t != "---"
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    text.trim().to_string()
+}
+
+// Web search via the native `web_search` tool (DuckDuckGo, key-free on this gateway).
+#[tauri::command]
+async fn openclaw_web_search(query: String) -> Result<serde_json::Value, String> {
+    if query.trim().is_empty() {
+        return Err("搜索词为空".to_string());
+    }
+    let json = invoke_gateway_tool("web_search", serde_json::json!({ "query": query }), 20).await?;
+    let details = json.get("result").and_then(|r| r.get("details"));
+    let provider = details.and_then(|d| d.get("provider")).and_then(|v| v.as_str()).unwrap_or("unknown");
+    let took_ms = details.and_then(|d| d.get("tookMs")).and_then(|v| v.as_u64()).unwrap_or(0);
+    let results: Vec<serde_json::Value> = details
+        .and_then(|d| d.get("results"))
+        .and_then(|r| r.as_array())
+        .map(|arr| {
+            arr.iter()
+                .map(|item| {
+                    let title = strip_untrusted_wrapper(item.get("title").and_then(|v| v.as_str()).unwrap_or(""));
+                    let snippet = strip_untrusted_wrapper(item.get("snippet").and_then(|v| v.as_str()).unwrap_or(""));
+                    serde_json::json!({
+                        "title": title,
+                        "snippet": snippet,
+                        "url": item.get("url").and_then(|v| v.as_str()).unwrap_or(""),
+                        "siteName": item.get("siteName").and_then(|v| v.as_str()).unwrap_or(""),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    Ok(serde_json::json!({
+        "ok": true,
+        "query": query,
+        "provider": provider,
+        "tookMs": took_ms,
+        "count": results.len(),
+        "results": results,
+    }))
+}
+
+// Lists the gateway's agent sessions with usage/status fields for the activity panel.
+#[tauri::command]
+async fn openclaw_sessions_list() -> Result<serde_json::Value, String> {
+    let json = invoke_gateway_tool("sessions_list", serde_json::json!({}), 12).await?;
+    let details = json.get("result").and_then(|r| r.get("details"));
+    let sessions: Vec<serde_json::Value> = details
+        .and_then(|d| d.get("sessions"))
+        .and_then(|s| s.as_array())
+        .map(|arr| {
+            arr.iter()
+                .map(|s| {
+                    serde_json::json!({
+                        "key": s.get("key").and_then(|v| v.as_str()).unwrap_or(""),
+                        "agentId": s.get("agentId").and_then(|v| v.as_str()).unwrap_or(""),
+                        "channel": s.get("channel").and_then(|v| v.as_str()).unwrap_or(""),
+                        "model": s.get("model").and_then(|v| v.as_str()).unwrap_or(""),
+                        "status": s.get("status").and_then(|v| v.as_str()).unwrap_or(""),
+                        "contextTokens": s.get("contextTokens").and_then(|v| v.as_u64()).unwrap_or(0),
+                        "totalTokens": s.get("totalTokens").and_then(|v| v.as_u64()).unwrap_or(0),
+                        "runtimeMs": s.get("runtimeMs").and_then(|v| v.as_u64()).unwrap_or(0),
+                        "thinkingLevel": s.get("thinkingLevel").and_then(|v| v.as_str()).unwrap_or(""),
+                        "updatedAt": s.get("updatedAt").and_then(|v| v.as_u64()).unwrap_or(0),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let total_tokens: u64 = sessions.iter().map(|s| s.get("totalTokens").and_then(|v| v.as_u64()).unwrap_or(0)).sum();
+    Ok(serde_json::json!({
+        "ok": true,
+        "count": sessions.len(),
+        "totalTokensAcrossSessions": total_tokens,
+        "sessions": sessions,
+    }))
+}
+
+// ── ClawHub public catalog (https://clawhub.ai) ──
+// Read-only public API. We cache responses in-memory with a short TTL and honor
+// 429/Retry-After so we behave as a polite third-party directory consumer.
+const CLAWHUB_BASE: &str = "https://clawhub.ai";
+
+// key -> (expires_at_unix_ms, json_body)
+static CLAWHUB_CACHE: OnceLock<Mutex<HashMap<String, (u128, serde_json::Value)>>> = OnceLock::new();
+
+fn clawhub_cache() -> &'static Mutex<HashMap<String, (u128, serde_json::Value)>> {
+    CLAWHUB_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn now_ms() -> u128 {
+    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0)
+}
+
+fn clawhub_cache_get(key: &str) -> Option<serde_json::Value> {
+    let map = clawhub_cache().lock().ok()?;
+    let (exp, val) = map.get(key)?;
+    if *exp > now_ms() { Some(val.clone()) } else { None }
+}
+
+fn clawhub_cache_put(key: String, val: serde_json::Value, ttl_ms: u128) {
+    if let Ok(mut map) = clawhub_cache().lock() {
+        if map.len() > 200 { map.clear(); } // crude bound
+        map.insert(key, (now_ms() + ttl_ms, val));
+    }
+}
+
+// GET a ClawHub API path and parse JSON, with TTL cache + 429 handling.
+async fn clawhub_get(path: &str, ttl_ms: u128) -> Result<serde_json::Value, String> {
+    if let Some(cached) = clawhub_cache_get(path) {
+        return Ok(cached);
+    }
+    let client = reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(6))
+        .user_agent("ai-agent-workspace/0.1 (+clawhub-directory-client)")
+        .build()
+        .map_err(|e| format!("创建 HTTP client 失败: {}", e))?;
+    let url = format!("{}{}", CLAWHUB_BASE, path);
+    let resp = client.get(&url).timeout(Duration::from_secs(20)).send().await
+        .map_err(|e| format!("ClawHub 不可达: {}", e))?;
+    let status = resp.status();
+    if status.as_u16() == 429 {
+        let retry = resp.headers().get("retry-after").and_then(|v| v.to_str().ok()).unwrap_or("?").to_string();
+        return Err(format!("RATE_LIMIT:{}", retry));
+    }
+    if !status.is_success() {
+        return Err(format!("HTTP {}", status.as_u16()));
+    }
+    let body = resp.json::<serde_json::Value>().await.map_err(|e| format!("JSON 解析失败: {}", e))?;
+    clawhub_cache_put(path.to_string(), body.clone(), ttl_ms);
+    Ok(body)
+}
+
+// Minimal percent-encoding for query values (avoids adding a urlencoding dep).
+fn pct_encode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() * 2);
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
+            _ => out.push_str(&format!("%{:02X}", b)),
+        }
+    }
+    out
+}
+
+// Map clawhub_get errors into a friendly Chinese message for the UI.
+fn map_clawhub_err(e: String) -> String {
+    if let Some(retry) = e.strip_prefix("RATE_LIMIT:") {
+        format!("请求过于频繁，请 {} 秒后重试", retry)
+    } else {
+        format!("无法连接 ClawHub 技能市场：{}", e)
+    }
+}
+
+// Normalize a ClawHub skill object (from /skills items or /search results) into a
+// stable shape for the UI. Untrusted text fields are passed through as plain strings
+// (the WebView renders them as text, never as HTML).
+fn clawhub_norm_skill(s: &serde_json::Value) -> serde_json::Value {
+    let str_at = |k: &str| s.get(k).and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let owner = s.get("owner");
+    let owner_handle = owner.and_then(|o| o.get("handle")).and_then(|v| v.as_str())
+        .or_else(|| s.get("ownerHandle").and_then(|v| v.as_str())).unwrap_or("").to_string();
+    let latest = s.get("latestVersion").and_then(|v| v.get("version")).and_then(|v| v.as_str())
+        .or_else(|| s.get("version").and_then(|v| v.as_str()))
+        .or_else(|| s.get("tags").and_then(|t| t.get("latest")).and_then(|v| v.as_str()))
+        .unwrap_or("").to_string();
+    let stats = s.get("stats");
+    let downloads = stats.and_then(|st| st.get("downloads")).and_then(|v| v.as_u64()).unwrap_or(0);
+    let stars = stats.and_then(|st| st.get("stars")).and_then(|v| v.as_u64()).unwrap_or(0);
+    let installs = stats.and_then(|st| st.get("installsCurrent")).and_then(|v| v.as_u64()).unwrap_or(0);
+    let slug = str_at("slug");
+    // /skills list items have no owner; the slug-only URL 307-redirects to the
+    // canonical /{owner}/{slug} page, so use it as the safe fallback.
+    let url = if owner_handle.is_empty() {
+        format!("{}/skills/{}", CLAWHUB_BASE, slug)
+    } else {
+        format!("{}/{}/{}", CLAWHUB_BASE, owner_handle, slug)
+    };
+    serde_json::json!({
+        "slug": slug,
+        "displayName": str_at("displayName"),
+        "summary": str_at("summary"),
+        "version": latest,
+        "ownerHandle": owner_handle,
+        "downloads": downloads,
+        "stars": stars,
+        "installs": installs,
+        "updatedAt": s.get("updatedAt").and_then(|v| v.as_u64()).unwrap_or(0),
+        "url": url,
+    })
+}
+
+// Browse the public ClawHub skill catalog with sort + pagination.
+#[tauri::command]
+async fn clawhub_browse(sort: Option<String>, limit: Option<u32>, cursor: Option<String>) -> Result<serde_json::Value, String> {
+    let sort = sort.unwrap_or_else(|| "downloads".into());
+    let limit = limit.unwrap_or(24).clamp(1, 60);
+    let mut path = format!("/api/v1/skills?limit={}&sort={}&nonSuspiciousOnly=true", limit, sort);
+    if let Some(c) = cursor.filter(|c| !c.is_empty()) {
+        path.push_str(&format!("&cursor={}", pct_encode(&c)));
+    }
+    let body = clawhub_get(&path, 60_000).await.map_err(map_clawhub_err)?;
+    let items: Vec<serde_json::Value> = body.get("items").and_then(|v| v.as_array())
+        .map(|arr| arr.iter().map(clawhub_norm_skill).collect()).unwrap_or_default();
+    Ok(serde_json::json!({
+        "ok": true,
+        "items": items,
+        "nextCursor": body.get("nextCursor").cloned().unwrap_or(serde_json::Value::Null),
+    }))
+}
+
+// Relevance search across the public ClawHub catalog.
+#[tauri::command]
+async fn clawhub_search(query: String, limit: Option<u32>) -> Result<serde_json::Value, String> {
+    let q = query.trim();
+    if q.is_empty() { return Ok(serde_json::json!({ "ok": true, "items": [] })); }
+    let limit = limit.unwrap_or(24).clamp(1, 60);
+    let path = format!("/api/v1/search?q={}&limit={}&nonSuspiciousOnly=true", pct_encode(q), limit);
+    let body = clawhub_get(&path, 60_000).await.map_err(map_clawhub_err)?;
+    let items: Vec<serde_json::Value> = body.get("results").and_then(|v| v.as_array())
+        .map(|arr| arr.iter().map(clawhub_norm_skill).collect()).unwrap_or_default();
+    Ok(serde_json::json!({ "ok": true, "items": items }))
+}
+
+// Full detail for one skill slug, including moderation/security snapshot.
+#[tauri::command]
+async fn clawhub_skill_detail(slug: String) -> Result<serde_json::Value, String> {
+    let slug = slug.trim();
+    if slug.is_empty() { return Err("缺少 slug".into()); }
+    let path = format!("/api/v1/skills/{}", pct_encode(slug));
+    let body = clawhub_get(&path, 120_000).await.map_err(map_clawhub_err)?;
+    let skill = body.get("skill").cloned().unwrap_or(serde_json::Value::Null);
+    let mut norm = clawhub_norm_skill(&skill);
+    // Enrich with version/owner/moderation from the detail envelope.
+    if let Some(lv) = body.get("latestVersion") {
+        if let Some(v) = lv.get("version").and_then(|v| v.as_str()) { norm["version"] = v.into(); }
+        if let Some(ch) = lv.get("changelog").and_then(|v| v.as_str()) { norm["changelog"] = ch.into(); }
+    }
+    if let Some(owner) = body.get("owner") {
+        let h = owner.get("handle").and_then(|v| v.as_str()).unwrap_or("");
+        norm["ownerHandle"] = h.into();
+        norm["ownerDisplayName"] = owner.get("displayName").and_then(|v| v.as_str()).unwrap_or(h).into();
+        norm["url"] = format!("{}/{}/{}", CLAWHUB_BASE, h, slug).into();
+    }
+    let md = body.get("moderation");
+    norm["moderation"] = serde_json::json!({
+        "verdict": md.and_then(|m| m.get("verdict")).and_then(|v| v.as_str()).unwrap_or("clean"),
+        "isSuspicious": md.and_then(|m| m.get("isSuspicious")).and_then(|v| v.as_bool()).unwrap_or(false),
+        "isMalwareBlocked": md.and_then(|m| m.get("isMalwareBlocked")).and_then(|v| v.as_bool()).unwrap_or(false),
+    });
+    if let Some(meta) = body.get("metadata") { norm["metadata"] = meta.clone(); }
+    Ok(serde_json::json!({ "ok": true, "skill": norm }))
+}
+
+// List skills installed/available on the local machine via the OpenClaw CLI.
+// Fixes the prior bug where the output was parsed as a bare array; the real shape
+// is { workspaceDir, managedSkillsDir, skills: [...] }.
+#[tauri::command]
+async fn openclaw_skills_list() -> Result<serde_json::Value, String> {
+    // Runs the `openclaw` CLI (cold start ~0.9s). Must run off the main thread,
+    // otherwise the WebView freezes while the subprocess runs.
+    tauri::async_runtime::spawn_blocking(move || {
+        let out = std::process::Command::new("openclaw")
+            .args(["skills", "list", "--json"]).output()
+            .map_err(|e| format!("无法运行 openclaw skills list：{}", e))?;
+        if !out.status.success() {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            return Err(format!("openclaw skills list 失败：{}", stderr.trim()));
+        }
+        let text = String::from_utf8_lossy(&out.stdout);
+        let parsed: serde_json::Value = serde_json::from_str(&text)
+            .map_err(|e| format!("解析 skills list 输出失败：{}", e))?;
+        let managed_dir = parsed.get("managedSkillsDir").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let skills: Vec<serde_json::Value> = parsed.get("skills").and_then(|v| v.as_array())
+            .map(|arr| arr.iter().map(|s| {
+                let str_at = |k: &str| s.get(k).and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let bundled = s.get("bundled").and_then(|v| v.as_bool()).unwrap_or(false);
+                serde_json::json!({
+                    "name": str_at("name"),
+                    "description": str_at("description"),
+                    "emoji": str_at("emoji"),
+                    "source": str_at("source"),
+                    "homepage": str_at("homepage"),
+                    "bundled": bundled,
+                    "eligible": s.get("eligible").and_then(|v| v.as_bool()).unwrap_or(false),
+                    "disabled": s.get("disabled").and_then(|v| v.as_bool()).unwrap_or(false),
+                    "modelVisible": s.get("modelVisible").and_then(|v| v.as_bool()).unwrap_or(false),
+                })
+            }).collect()).unwrap_or_default();
+        let ready = skills.iter().filter(|s| s.get("eligible").and_then(|v| v.as_bool()).unwrap_or(false) && !s.get("disabled").and_then(|v| v.as_bool()).unwrap_or(false)).count();
+        Ok(serde_json::json!({
+            "ok": true,
+            "managedSkillsDir": managed_dir,
+            "total": skills.len(),
+            "ready": ready,
+            "skills": skills,
+        }))
+    }).await.map_err(|e| e.to_string())?
+}
+
+// Allowed messaging-channel ids, mirrors OpenClaw's `--channel` enum. We gate on
+// this so a malformed/injected channel name can never reach the CLI.
+fn is_valid_channel_id(id: &str) -> bool {
+    matches!(id,
+        "telegram" | "whatsapp" | "discord" | "irc" | "googlechat" | "slack" | "signal"
+        | "imessage" | "feishu" | "nostr" | "msteams" | "mattermost" | "nextcloud-talk"
+        | "matrix" | "line" | "zalo" | "clickclack" | "zalouser" | "synology-chat"
+        | "tlon" | "qqbot" | "twitch")
+}
+
+// List all chat channels (configured + installable catalog) via the OpenClaw CLI.
+// Returns the raw `{ chat: { <id>: { accounts, installed, origin } } }` shape so the
+// frontend can render status without us re-deriving it.
+#[tauri::command]
+async fn list_openclaw_channels() -> Result<serde_json::Value, String> {
+    // CLI cold start ~0.9s; run off the main thread so the WebView never freezes.
+    tauri::async_runtime::spawn_blocking(move || {
+        let out = std::process::Command::new("openclaw")
+            .args(["channels", "list", "--all", "--json"]).output()
+            .map_err(|e| format!("无法运行 openclaw channels list：{}", e))?;
+        if !out.status.success() {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            return Err(format!("读取通道列表失败：{}", stderr.trim()));
+        }
+        let text = String::from_utf8_lossy(&out.stdout);
+        let parsed: serde_json::Value = serde_json::from_str(&text)
+            .map_err(|e| format!("解析通道列表输出失败：{}", e))?;
+        Ok(serde_json::json!({ "ok": true, "chat": parsed.get("chat").cloned().unwrap_or(serde_json::json!({})) }))
+    }).await.map_err(|e| e.to_string())?
+}
+
+// Add/update a messaging channel account. The bot token is passed inline via --token
+// so OpenClaw stores the value in its own 0600 config (botToken). See the in-body note
+// for why --token-file with a self-deleted temp file is unsafe here.
+#[tauri::command]
+async fn add_openclaw_channel(channel: String, token: String) -> Result<serde_json::Value, String> {
+    let channel = channel.trim().to_string();
+    if !is_valid_channel_id(&channel) {
+        return Err("不支持的通道类型".into());
+    }
+    let token = token.trim().to_string();
+    if token.is_empty() || token.len() > 4096 {
+        return Err("无效的凭据".into());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        // Pass the token inline via --token so OpenClaw stores the value (botToken) in
+        // its own 0600 config. NOTE: do NOT use --token-file with a temp file we delete:
+        // OpenClaw persists the file *path* by reference and reads it lazily at gateway
+        // startup, so a deleted temp file makes the gateway crash on (re)start
+        // (1006 abnormal closure). The token is only briefly on argv for the local user
+        // who already owns the OpenClaw config.
+        let out = std::process::Command::new("openclaw")
+            .args(["channels", "add", "--channel", &channel, "--token", &token])
+            .output()
+            .map_err(|e| format!("无法运行 openclaw channels add：{}", e))?;
+        if !out.status.success() {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            return Err(format!("添加通道失败：{}", stderr.trim()));
+        }
+        Ok(serde_json::json!({ "ok": true, "channel": channel }))
+    }).await.map_err(|e| e.to_string())?
+}
+
+// Remove (delete) a channel account non-interactively (`--delete` skips the prompt).
+#[tauri::command]
+async fn remove_openclaw_channel(channel: String) -> Result<serde_json::Value, String> {
+    let channel = channel.trim().to_string();
+    if !is_valid_channel_id(&channel) {
+        return Err("不支持的通道类型".into());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        let out = std::process::Command::new("openclaw")
+            .args(["channels", "remove", "--channel", &channel, "--delete"]).output()
+            .map_err(|e| format!("无法运行 openclaw channels remove：{}", e))?;
+        if !out.status.success() {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            return Err(format!("移除通道失败：{}", stderr.trim()));
+        }
+        Ok(serde_json::json!({ "ok": true, "channel": channel }))
+    }).await.map_err(|e| e.to_string())?
+}
+
+// Restart the OpenClaw gateway service so newly added channels take effect, with
+// `--json` for a parseable result. The service is managed by launchd/systemd, so this
+// needs no terminal from the user. NOTE: we intentionally do NOT pass `--safe`: that
+// path connects back as a WS client requesting elevated scopes, which needs device
+// pairing approval and fails with "pairing required" (1008) on a fresh setup.
+#[tauri::command]
+async fn restart_openclaw_gateway() -> Result<serde_json::Value, String> {
+    // Restart can take ~15s (service reload + health settle); never block the UI thread.
+    tauri::async_runtime::spawn_blocking(move || {
+        let out = std::process::Command::new("openclaw")
+            .args(["gateway", "restart", "--json"]).output()
+            .map_err(|e| format!("无法重启本地服务，请确认 OpenClaw 已安装。({})", e))?;
+        if !out.status.success() {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            return Err(format!("重启网关失败：{}", stderr.trim()));
+        }
+        // The CLI prints a non-JSON status line before the JSON body; grab the JSON object.
+        let text = String::from_utf8_lossy(&out.stdout);
+        let parsed = text.find('{')
+            .and_then(|i| serde_json::from_str::<serde_json::Value>(&text[i..]).ok())
+            .unwrap_or(serde_json::json!({ "ok": true, "result": "restarted" }));
+        Ok(serde_json::json!({ "ok": true, "restart": parsed }))
+    }).await.map_err(|e| e.to_string())?
+}
+
+// List pending pairing requests for a channel (e.g. the code shown after a user first
+// DMs the bot). Returns the raw `{ channel, requests: [...] }` shape; falls back to an
+// empty list so the UI can render even when the gateway has nothing pending.
+#[tauri::command]
+async fn list_pairing_requests(channel: String) -> Result<serde_json::Value, String> {
+    let channel = channel.trim().to_string();
+    if !is_valid_channel_id(&channel) {
+        return Err("不支持的通道类型".into());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        let out = std::process::Command::new("openclaw")
+            .args(["pairing", "list", &channel, "--json"]).output()
+            .map_err(|e| format!("无法读取配对请求：{}", e))?;
+        if !out.status.success() {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            return Err(format!("读取配对请求失败：{}", stderr.trim()));
+        }
+        let text = String::from_utf8_lossy(&out.stdout);
+        let parsed: serde_json::Value = serde_json::from_str(text.trim())
+            .unwrap_or(serde_json::json!({ "channel": channel, "requests": [] }));
+        Ok(serde_json::json!({ "ok": true, "requests": parsed.get("requests").cloned().unwrap_or(serde_json::json!([])) }))
+    }).await.map_err(|e| e.to_string())?
+}
+
+// Approve a pairing code, allowing that sender to talk to the bot.
+#[tauri::command]
+async fn approve_pairing_request(channel: String, code: String) -> Result<serde_json::Value, String> {
+    let channel = channel.trim().to_string();
+    if !is_valid_channel_id(&channel) {
+        return Err("不支持的通道类型".into());
+    }
+    let code = code.trim().to_string();
+    // Pairing codes are short alphanumeric tokens; reject anything that could be an arg/flag.
+    if code.is_empty() || code.len() > 64 || !code.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+        return Err("无效的配对码".into());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        let out = std::process::Command::new("openclaw")
+            .args(["pairing", "approve", &channel, &code]).output()
+            .map_err(|e| format!("无法批准配对：{}", e))?;
+        if !out.status.success() {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            return Err(format!("批准配对失败：{}", stderr.trim()));
+        }
+        Ok(serde_json::json!({ "ok": true, "code": code }))
+    }).await.map_err(|e| e.to_string())?
+}
+
+// Report the installed OpenClaw version string, e.g. "2026.5.27". Used by the UI to
+// gate channels that require a newer OpenClaw (Feishu needs >= 2026.5.29).
+#[tauri::command]
+async fn get_openclaw_version() -> Result<serde_json::Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let out = std::process::Command::new("openclaw")
+            .arg("--version").output()
+            .map_err(|e| format!("无法读取 OpenClaw 版本：{}", e))?;
+        let text = String::from_utf8_lossy(&out.stdout);
+        // Output looks like: "OpenClaw 2026.5.27 (27ae826) — ...". Pull the first x.y.z token.
+        let version = text.split_whitespace()
+            .find(|tok| tok.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false) && tok.contains('.'))
+            .unwrap_or("")
+            .to_string();
+        Ok(serde_json::json!({ "ok": true, "version": version }))
+    }).await.map_err(|e| e.to_string())?
+}
+
+// --- WeChat (openclaw-weixin) QR login -------------------------------------------
+// WeChat uses an interactive `channels login` that prints an ASCII QR plus a fallback
+// URL (https://liteapp.weixin.qq.com/...). We spawn it, extract that URL so the UI can
+// render a clean QR, keep the process alive until the user scans, and emit a
+// "wechat-login-status" event when it finishes. The child is tracked so it can be
+// cancelled if the user closes the panel.
+static WECHAT_LOGIN_CHILD: OnceLock<Mutex<Option<std::process::Child>>> = OnceLock::new();
+fn wechat_login_child() -> &'static Mutex<Option<std::process::Child>> {
+    WECHAT_LOGIN_CHILD.get_or_init(|| Mutex::new(None))
+}
+
+// Kill any in-flight WeChat login process. Safe to call repeatedly.
+fn kill_wechat_login() {
+    if let Ok(mut guard) = wechat_login_child().lock() {
+        if let Some(mut child) = guard.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+}
+
+// Strip ANSI escape sequences so URL extraction works on colored CLI output.
+fn strip_ansi(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == 0x1b {
+            // Skip CSI sequence: ESC [ ... letter
+            i += 1;
+            if i < bytes.len() && bytes[i] == b'[' {
+                i += 1;
+                while i < bytes.len() && !bytes[i].is_ascii_alphabetic() { i += 1; }
+                if i < bytes.len() { i += 1; }
+            }
+        } else {
+            out.push(bytes[i] as char);
+            i += 1;
+        }
+    }
+    out
+}
+
+// Start the WeChat QR login. Spawns the interactive CLI, reads stdout until the QR
+// fallback URL appears, returns it, then keeps reading in a thread and emits
+// "wechat-login-status" {state:"done"|"failed"} when the process exits.
+#[tauri::command]
+async fn start_wechat_login(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
+    kill_wechat_login(); // ensure no stale login is running
+    let mut child = std::process::Command::new("openclaw")
+        .args(["channels", "login", "--channel", "openclaw-weixin"])
+        .stdout(Stdio::piped()).stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("无法启动微信登录：{}", e))?;
+    let stdout = child.stdout.take().ok_or("无法读取登录输出")?;
+    if let Ok(mut guard) = wechat_login_child().lock() { *guard = Some(child); }
+
+    // Read line-by-line; capture the first liteapp URL, then keep draining until EOF.
+    let (tx, rx) = std::sync::mpsc::channel::<String>();
+    thread::spawn(move || {
+        let reader = BufReader::new(stdout);
+        let mut sent_url = false;
+        for line in reader.lines() {
+            let line = match line { Ok(l) => strip_ansi(&l), Err(_) => continue };
+            if !sent_url {
+                if let Some(idx) = line.find("https://liteapp.weixin.qq.com/") {
+                    let url: String = line[idx..].split_whitespace().next().unwrap_or("").to_string();
+                    if !url.is_empty() { let _ = tx.send(url); sent_url = true; }
+                }
+            }
+        }
+        // Stream ended: the process exited. Report best-effort completion.
+        let _ = app.emit("wechat-login-status", serde_json::json!({ "state": "done" }));
+    });
+
+    // Wait up to ~12s for the URL to show up.
+    match rx.recv_timeout(Duration::from_secs(12)) {
+        Ok(url) => Ok(serde_json::json!({ "ok": true, "qrUrl": url })),
+        Err(_) => { kill_wechat_login(); Err("登录二维码获取超时，请重试".into()) }
+    }
+}
+
+// Cancel an in-flight WeChat login (user closed the panel).
+#[tauri::command]
+async fn cancel_wechat_login() -> Result<serde_json::Value, String> {
+    kill_wechat_login();
+    Ok(serde_json::json!({ "ok": true }))
+}
+
+// Install a ClawHub skill by its real slug via the OpenClaw CLI.
+#[tauri::command]
+#[allow(non_snake_case)]
+async fn clawhub_install_skill(app: tauri::AppHandle, slug: String, displayName: String) -> Result<serde_json::Value, String> {
+    let slug = slug.trim().to_string();
+    if slug.is_empty() || slug.len() > 200 || !slug.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '/' || c == '.') {
+        return Err("无效的技能 slug".into());
+    }
+    // CLI install can take seconds (network download); run off the main thread.
+    tauri::async_runtime::spawn_blocking(move || {
+        let out = std::process::Command::new("openclaw")
+            .args(["skills", "install", &slug, "--global"]).output()
+            .map_err(|e| format!("无法运行安装命令：{}", e))?;
+        if !out.status.success() {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            return Err(format!("安装失败：{}", stderr.trim()));
+        }
+        let mut records = load_skill_records(&app);
+        records.retain(|r| r.get("slug").and_then(|v| v.as_str()) != Some(&slug));
+        records.push(serde_json::json!({
+            "slug": slug, "name": displayName, "kind": "skill", "source": "clawhub",
+            "installedAt": now_ms(), "installedByApp": true,
+        }));
+        save_skill_records(&app, &records);
+        Ok(serde_json::json!({ "ok": true, "action": "installed", "slug": slug }))
+    }).await.map_err(|e| e.to_string())?
+}
+
+// Uninstall a ClawHub-managed skill. The CLI has no uninstall verb, so we remove the
+// managed skill directory (~/.openclaw/skills/<slug>) — but only when it carries the
+// `.clawhub` provenance marker, so we never touch bundled or hand-authored skills.
+#[tauri::command]
+async fn clawhub_uninstall_skill(app: tauri::AppHandle, slug: String) -> Result<serde_json::Value, String> {
+    let slug = slug.trim().to_string();
+    // Reject anything that could escape the managed dir.
+    if slug.is_empty() || slug.contains("..") || slug.contains('/') || slug.contains('\\') {
+        return Err("无效的技能 slug".into());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        let home = home_dir().ok_or("无法定位用户主目录")?;
+        let skill_dir = home.join(".openclaw").join("skills").join(&slug);
+        if !skill_dir.exists() {
+            return Err("未找到该技能的本地安装目录".into());
+        }
+        // Safety: only delete directories that were installed from ClawHub.
+        if !skill_dir.join(".clawhub").exists() {
+            return Err("该技能不是通过 ClawHub 安装的，已跳过删除以保护本地数据".into());
+        }
+        // Canonicalize and confirm the resolved path is still under the managed dir.
+        let managed = home.join(".openclaw").join("skills");
+        let canon = skill_dir.canonicalize().map_err(|e| format!("路径解析失败：{}", e))?;
+        let managed_canon = managed.canonicalize().map_err(|e| format!("路径解析失败：{}", e))?;
+        if !canon.starts_with(&managed_canon) {
+            return Err("路径越界，已拒绝删除".into());
+        }
+        fs::remove_dir_all(&canon).map_err(|e| format!("删除失败：{}", e))?;
+        let mut records = load_skill_records(&app);
+        records.retain(|r| r.get("slug").and_then(|v| v.as_str()) != Some(&slug));
+        save_skill_records(&app, &records);
+        Ok(serde_json::json!({ "ok": true, "action": "uninstalled", "slug": slug }))
+    }).await.map_err(|e| e.to_string())?
+}
+
 const MODEL_PROXY_BASE_URL: &str = "https://ai.f1class.icu/v1";
 const MODEL_PROXY_PROVIDER_ID: &str = "ai-agent-proxy";
+
+// Read the model-proxy (f1class) baseUrl + apiKey from openclaw.json. The key is
+// used only to call the proxy and is never returned to the frontend.
+fn read_model_proxy_creds() -> Result<(String, String), String> {
+    let home = home_dir().ok_or("无法定位用户主目录")?;
+    let config_path = home.join(".openclaw").join("openclaw.json");
+    if !config_path.exists() { return Err("未找到模型配置，请先在「AI 助手」中配置模型".into()); }
+    let content = fs::read_to_string(&config_path).map_err(|e| e.to_string())?;
+    let cfg: serde_json::Value = serde_json::from_str(&content).map_err(|e| e.to_string())?;
+    let proxy = cfg.get("models").and_then(|m| m.get("providers")).and_then(|p| p.get(MODEL_PROXY_PROVIDER_ID));
+    let key = proxy.and_then(|p| p.get("apiKey")).and_then(|k| k.as_str()).filter(|s| !s.is_empty())
+        .ok_or("未配置模型密钥，请先在「AI 助手」中完成模型配置")?;
+    let base = proxy.and_then(|p| p.get("baseUrl")).and_then(|b| b.as_str()).unwrap_or(MODEL_PROXY_BASE_URL);
+    Ok((base.trim_end_matches('/').to_string(), key.to_string()))
+}
+
+// text -> translated text cache (translations are deterministic enough to cache long).
+static TRANSLATE_CACHE: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+fn translate_cache() -> &'static Mutex<HashMap<String, String>> {
+    TRANSLATE_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+// Translate English skill text into Simplified Chinese via the f1class proxy.
+#[tauri::command]
+async fn translate_text(text: String) -> Result<serde_json::Value, String> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() { return Ok(serde_json::json!({ "ok": true, "text": "" })); }
+    if let Ok(cache) = translate_cache().lock() {
+        if let Some(hit) = cache.get(trimmed) { return Ok(serde_json::json!({ "ok": true, "text": hit, "cached": true })); }
+    }
+    let (base, key) = read_model_proxy_creds()?;
+    let client = reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(8)).build()
+        .map_err(|e| format!("创建 HTTP client 失败: {}", e))?;
+    let body = serde_json::json!({
+        "model": "deepseek-v4-flash",
+        "stream": false,
+        "temperature": 0.2,
+        "messages": [
+            { "role": "system", "content": "You are a professional translator. Translate the user's text into natural, concise Simplified Chinese suitable for a software skill marketplace. Keep technical terms, product names, and code identifiers in their original form. Output only the translation with no quotes, labels, or explanation." },
+            { "role": "user", "content": trimmed }
+        ]
+    });
+    let resp = client.post(format!("{}/chat/completions", base))
+        .header("Authorization", format!("Bearer {}", key))
+        .header("Content-Type", "application/json")
+        .json(&body).timeout(Duration::from_secs(40)).send().await
+        .map_err(|e| format!("翻译请求失败: {}", e))?;
+    if !resp.status().is_success() {
+        return Err(format!("翻译服务返回错误 (HTTP {})", resp.status().as_u16()));
+    }
+    let data = resp.json::<serde_json::Value>().await.map_err(|e| format!("解析翻译结果失败: {}", e))?;
+    let out = data.get("choices").and_then(|c| c.get(0)).and_then(|c| c.get("message"))
+        .and_then(|m| m.get("content")).and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+    if out.is_empty() { return Err("翻译结果为空".into()); }
+    if let Ok(mut cache) = translate_cache().lock() {
+        if cache.len() > 500 { cache.clear(); }
+        cache.insert(trimmed.to_string(), out.clone());
+    }
+    Ok(serde_json::json!({ "ok": true, "text": out }))
+}
 
 #[tauri::command]
 fn read_openclaw_model_provider_summary() -> Result<serde_json::Value, String> {
@@ -2780,73 +3820,6 @@ fn save_skill_records(app: &tauri::AppHandle, records: &[serde_json::Value]) {
     }
 }
 
-// Built-in allowlist: catalog_id -> (kind, install_ref)
-fn get_install_info(id: &str) -> Option<(&str, &str)> {
-    match id {
-        "ext-file-summary" => Some(("skill", "clawhub:file-summary")),
-        "ext-table-analyze" => Some(("skill", "clawhub:table-analyze")),
-        "ext-web-research" => Some(("skill", "clawhub:web-research")),
-        "ext-github-helper" => Some(("plugin", "clawhub:github-helper")),
-        "ext-browser-auto" => Some(("plugin", "clawhub:browser-auto")),
-        "ext-memory-kb" => Some(("plugin", "openclaw:memory-kb")),
-        "ext-data-api" => Some(("skill", "clawhub:data-api")),
-        "ext-fun-fact" => Some(("skill", "clawhub:fun-fact")),
-        "ext-countdown" => Some(("skill", "clawhub:countdown")),
-        _ => None,
-    }
-}
-#[tauri::command]
-fn install_capability(app: tauri::AppHandle, catalogId: String, name: String, kind: String, riskLevel: String) -> Result<serde_json::Value, String> {
-    let (kind_str, install_ref) = get_install_info(&catalogId).ok_or("未识别的安装引用")?;
-    if kind_str != kind.as_str() { return Err("类型不匹配".into()); }
-
-    let output = std::process::Command::new("openclaw")
-        .arg(if kind_str == "skill" { "skills" } else { "plugins" })
-        .arg("install").arg(install_ref).output();
-
-    let success = output.map(|o| o.status.success()).unwrap_or(false);
-
-    if success {
-        let mut records = load_skill_records(&app);
-        records.retain(|r| r.get("catalogId").and_then(|v| v.as_str()) != Some(&catalogId));
-        records.push(serde_json::json!({
-            "catalogId": catalogId, "name": name, "kind": kind_str, "riskLevel": riskLevel,
-            "installRef": install_ref, "installedAt": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis(),
-            "installedByApp": true,
-        }));
-        save_skill_records(&app, &records);
-        Ok(serde_json::json!({ "success": true, "action": "installed" }))
-    } else {
-        Err(format!("openclaw {} install {} failed", kind_str, install_ref))
-    }
-}
-#[tauri::command]
-fn uninstall_capability(app: tauri::AppHandle, catalogId: String, kind: String) -> Result<serde_json::Value, String> {
-    let mut records = load_skill_records(&app);
-    let rec = records.iter().find(|r| r.get("catalogId").and_then(|v| v.as_str()) == Some(&catalogId))
-        .cloned().ok_or("未找到安装记录")?;
-    let install_ref = rec.get("installRef").and_then(|v| v.as_str()).unwrap_or("");
-    let kind_str = rec.get("kind").and_then(|v| v.as_str()).unwrap_or(&kind);
-
-    let output = std::process::Command::new("openclaw")
-        .arg(if kind_str == "skill" { "skills" } else { "plugins" })
-        .arg("uninstall").arg(install_ref).output();
-
-    let success = output.map(|o| o.status.success()).unwrap_or(false);
-    if success {
-        records.retain(|r| r.get("catalogId").and_then(|v| v.as_str()) != Some(&catalogId));
-        save_skill_records(&app, &records);
-        Ok(serde_json::json!({ "success": true, "action": "uninstalled" }))
-    } else {
-        Err(format!("openclaw {} uninstall {} failed", kind_str, install_ref))
-    }
-}
-
-#[tauri::command]
-fn read_install_records(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
-    Ok(serde_json::json!(load_skill_records(&app)))
-}
-
 #[tauri::command]
 fn open_url(url: String) -> Result<(), String> {
     #[cfg(target_os = "macos")]
@@ -2886,7 +3859,7 @@ fn start_openclaw_gateway() -> Result<serde_json::Value, String> {
 
 fn main() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![read_config, write_config, clear_config, read_chat_sessions, write_chat_sessions, clear_chat_sessions, read_chat_projects, write_chat_projects, portable_data_status, portable_runtime_status, read_installed_capabilities, install_capability, uninstall_capability, read_install_records, check_hermes_installed, get_hermes_version, get_hermes_paths, get_hermes_help, check_hermes_api_server, hermes_chat_completion, cancel_hermes_chat_completion, read_hermes_model_config, read_hermes_native_memory, read_openclaw_workspace_memory, apply_hermes_model_config, apply_hermes_reasoning_config, read_hermes_cron_overview, read_hermes_cron_cli_status, ensure_ai_files_dirs, list_ai_files, delete_ai_file, open_ai_file_location, pick_and_upload_file, extract_ai_file_text, save_generated_file, read_openclaw_gateway_auth_for_local_use, get_or_create_openclaw_device_identity, open_url, open_openclaw_dashboard, start_openclaw_gateway, openclaw_http_chat_completion, openclaw_http_status, read_openclaw_config_summary, read_openclaw_model_provider_summary, apply_openclaw_model_provider_config])
+        .invoke_handler(tauri::generate_handler![read_config, write_config, clear_config, read_chat_sessions, write_chat_sessions, clear_chat_sessions, read_chat_projects, write_chat_projects, portable_data_status, portable_runtime_status, read_installed_capabilities, check_hermes_installed, get_hermes_version, get_hermes_paths, get_hermes_help, check_hermes_api_server, hermes_chat_completion, cancel_hermes_chat_completion, read_hermes_model_config, read_hermes_native_memory, read_openclaw_workspace_memory, apply_hermes_model_config, apply_hermes_reasoning_config, read_hermes_cron_overview, read_hermes_cron_cli_status, ensure_ai_files_dirs, list_ai_files, delete_ai_file, open_ai_file_location, pick_and_upload_file, extract_ai_file_text, save_generated_file, read_openclaw_gateway_auth_for_local_use, get_or_create_openclaw_device_identity, open_url, open_openclaw_dashboard, start_openclaw_gateway, openclaw_http_chat_completion, openclaw_http_chat_completion_stream, cancel_openclaw_chat_completion, openclaw_http_status, openclaw_session_status, openclaw_web_search, openclaw_sessions_list, clawhub_browse, clawhub_search, clawhub_skill_detail, openclaw_skills_list, clawhub_install_skill, clawhub_uninstall_skill, translate_text, read_openclaw_config_summary, read_openclaw_model_provider_summary, apply_openclaw_model_provider_config, list_openclaw_channels, add_openclaw_channel, remove_openclaw_channel, restart_openclaw_gateway, list_pairing_requests, approve_pairing_request, get_openclaw_version, start_wechat_login, cancel_wechat_login, update::check_update, update::download_update, update::apply_update])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
