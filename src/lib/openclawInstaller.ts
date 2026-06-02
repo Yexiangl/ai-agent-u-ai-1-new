@@ -9,6 +9,7 @@ import { listen } from "@tauri-apps/api/event";
 export interface OpenClawInstallStatus {
   installed: boolean;
   version: string;
+  onPath?: boolean;
 }
 
 export type InstallPhase = "idle" | "installing" | "done" | "failed";

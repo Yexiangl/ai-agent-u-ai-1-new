@@ -5435,6 +5435,9 @@ function OpenClawInstallCard({ onInstalled }: { onInstalled?: () => void }) {
   // Detection state is local; install phase/logs come from the module store so
   // they survive navigating away from this page mid-install.
   const [detected, setDetected] = useState<"checking" | "missing" | "installed">("checking");
+  // After a successful install, whether openclaw is reachable in THIS process.
+  // false → installed but the app likely needs a restart for PATH to refresh.
+  const [needsRestart, setNeedsRestart] = useState(false);
   const [, forceRender] = useState(0);
   const logEndRef = useRef<HTMLDivElement | null>(null);
   const prevPhaseRef = useRef(getInstallState().phase);
@@ -5454,11 +5457,18 @@ function OpenClawInstallCard({ onInstalled }: { onInstalled?: () => void }) {
 
   const store = getInstallState();
 
-  // When the install transitions to done, re-check and notify the parent.
+  // When the install transitions to done, re-check. If openclaw is reachable
+  // now, notify the parent and hide. If installed but not yet on PATH, ask the
+  // user to restart the app.
   useEffect(() => {
     if (prevPhaseRef.current !== "done" && store.phase === "done") {
       checkOpenClawInstalled().then((s) => {
-        if (s.installed) { setDetected("installed"); onInstalled?.(); }
+        if (s.installed && s.onPath) {
+          setDetected("installed");
+          onInstalled?.();
+        } else if (s.installed) {
+          setNeedsRestart(true);
+        }
       });
     }
     prevPhaseRef.current = store.phase;
@@ -5466,8 +5476,12 @@ function OpenClawInstallCard({ onInstalled }: { onInstalled?: () => void }) {
 
   useEffect(() => { logEndRef.current?.scrollIntoView({ block: "end" }); }, [store.logs.length]);
 
-  // Hide the card once openclaw is installed and the install isn't mid-flight.
+  // Installed and reachable: hide the card, the normal config flow takes over.
   if ((detected === "installed" || detected === "checking") && store.phase === "idle") return null;
+  // Installed but needs a restart: show the restart prompt.
+  if (store.phase === "done" && needsRestart) {
+    return <OpenClawInstallCardView phase="needsRestart" logs={store.logs} logEndRef={logEndRef} onInstall={startInstall} />;
+  }
   if (store.phase === "done") return null;
 
   const viewPhase: "missing" | "installing" | "failed" =
@@ -5477,12 +5491,31 @@ function OpenClawInstallCard({ onInstalled }: { onInstalled?: () => void }) {
 }
 
 function OpenClawInstallCardView({ phase, logs, logEndRef, onInstall }: {
-  phase: "missing" | "installing" | "failed";
+  phase: "missing" | "installing" | "failed" | "needsRestart";
   logs: string[];
   logEndRef: RefObject<HTMLDivElement | null>;
   onInstall: () => void;
 }) {
   const installing = phase === "installing";
+  // Installed but the running app still can't see openclaw (stale PATH): ask
+  // the user to restart the app once.
+  if (phase === "needsRestart") {
+    return (
+      <Card className="border-emerald-500/30 bg-emerald-500/5">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base">本地服务安装完成</CardTitle>
+          <CardDescription className="text-xs">
+            本地 AI 服务已安装成功。请完全关闭并重新打开本程序，让它生效，然后回到本页继续配置。
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-2 text-xs text-emerald-700 dark:text-emerald-400">
+            提示：关闭程序后重新运行 U 盘里的程序即可；这一步每台电脑只需做一次。
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
   return (
     <Card className="border-amber-500/30 bg-amber-500/5">
       <CardHeader className="pb-2">

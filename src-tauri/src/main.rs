@@ -32,6 +32,91 @@ fn hide_command_window(command: &mut Command) {
 #[cfg(not(windows))]
 fn hide_command_window(_command: &mut Command) {}
 
+// TASK-068: Resolve the openclaw executable WITHOUT relying on the parent
+// process PATH. After a fresh install the official script appends npm's global
+// bin to the *user* PATH, but our already-running process keeps its stale PATH
+// and would fail to find `openclaw` until restarted. So we probe the known
+// install locations directly. The first hit is cached for the session.
+fn resolve_openclaw_bin() -> String {
+    static CACHE: OnceLock<String> = OnceLock::new();
+    if let Some(found) = CACHE.get() {
+        // Re-validate the cached non-bare path still exists; bare "openclaw"
+        // (PATH lookup) is always considered usable.
+        if found == "openclaw" || std::path::Path::new(found).exists() {
+            return found.clone();
+        }
+    }
+
+    // 1) Try a plain PATH lookup first (works when PATH is already fresh).
+    let mut probe = Command::new("openclaw");
+    probe.arg("--version");
+    hide_command_window(&mut probe);
+    if probe.output().map(|o| o.status.success()).unwrap_or(false) {
+        return CACHE.get_or_init(|| "openclaw".to_string()).clone();
+    }
+
+    // 2) Probe known install locations that the official installer uses.
+    for cand in openclaw_known_paths() {
+        if cand.exists() {
+            let s = cand.to_string_lossy().to_string();
+            return CACHE.get_or_init(|| s.clone()).clone();
+        }
+    }
+
+    // 3) Give up: fall back to the bare name (caller will surface the error).
+    "openclaw".to_string()
+}
+
+// Candidate absolute paths for the openclaw launcher, per platform.
+fn openclaw_known_paths() -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    #[cfg(windows)]
+    {
+        // npm global install: %APPDATA%\npm\openclaw.cmd
+        if let Ok(appdata) = std::env::var("APPDATA") {
+            out.push(PathBuf::from(&appdata).join("npm").join("openclaw.cmd"));
+        }
+        // git-checkout wrapper: %USERPROFILE%\.local\bin\openclaw.cmd
+        if let Ok(home) = std::env::var("USERPROFILE") {
+            out.push(PathBuf::from(&home).join(".local").join("bin").join("openclaw.cmd"));
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        if let Some(home) = dirs_home() {
+            out.push(home.join(".local").join("bin").join("openclaw"));
+            out.push(home.join(".openclaw").join("bin").join("openclaw"));
+        }
+        // Common npm global prefixes on macOS/Linux.
+        out.push(PathBuf::from("/opt/homebrew/bin/openclaw"));
+        out.push(PathBuf::from("/usr/local/bin/openclaw"));
+        out.push(PathBuf::from("/usr/bin/openclaw"));
+    }
+    out
+}
+
+#[cfg(not(windows))]
+fn dirs_home() -> Option<PathBuf> {
+    std::env::var("HOME").ok().map(PathBuf::from)
+}
+
+// Build a Command for the openclaw CLI using the resolved binary path so it
+// works even when the process PATH is stale (post-install, before restart).
+// On Windows a `.cmd` shim must be launched through `cmd /c` rather than
+// executed directly, so handle that case.
+fn openclaw_command() -> Command {
+    let bin = resolve_openclaw_bin();
+    #[cfg(windows)]
+    {
+        if bin.to_lowercase().ends_with(".cmd") || bin.to_lowercase().ends_with(".bat") {
+            let mut c = Command::new("cmd");
+            c.arg("/c").arg(&bin);
+            return c;
+        }
+    }
+    Command::new(bin)
+}
+
 fn cancel_map() -> &'static CancelMap {
     static MAP: OnceLock<CancelMap> = OnceLock::new();
     MAP.get_or_init(|| Mutex::new(HashMap::new()))
@@ -3164,7 +3249,7 @@ async fn openclaw_skills_list() -> Result<serde_json::Value, String> {
     // Runs the `openclaw` CLI (cold start ~0.9s). Must run off the main thread,
     // otherwise the WebView freezes while the subprocess runs.
     tauri::async_runtime::spawn_blocking(move || {
-        let out = std::process::Command::new("openclaw")
+        let out = openclaw_command()
             .args(["skills", "list", "--json"]).output()
             .map_err(|e| format!("无法运行 openclaw skills list：{}", e))?;
         if !out.status.success() {
@@ -3219,7 +3304,7 @@ fn is_valid_channel_id(id: &str) -> bool {
 async fn list_openclaw_channels() -> Result<serde_json::Value, String> {
     // CLI cold start ~0.9s; run off the main thread so the WebView never freezes.
     tauri::async_runtime::spawn_blocking(move || {
-        let out = std::process::Command::new("openclaw")
+        let out = openclaw_command()
             .args(["channels", "list", "--all", "--json"]).output()
             .map_err(|e| format!("无法运行 openclaw channels list：{}", e))?;
         if !out.status.success() {
@@ -3253,7 +3338,7 @@ async fn add_openclaw_channel(channel: String, token: String) -> Result<serde_js
         // startup, so a deleted temp file makes the gateway crash on (re)start
         // (1006 abnormal closure). The token is only briefly on argv for the local user
         // who already owns the OpenClaw config.
-        let out = std::process::Command::new("openclaw")
+        let out = openclaw_command()
             .args(["channels", "add", "--channel", &channel, "--token", &token])
             .output()
             .map_err(|e| format!("无法运行 openclaw channels add：{}", e))?;
@@ -3273,7 +3358,7 @@ async fn remove_openclaw_channel(channel: String) -> Result<serde_json::Value, S
         return Err("不支持的通道类型".into());
     }
     tauri::async_runtime::spawn_blocking(move || {
-        let out = std::process::Command::new("openclaw")
+        let out = openclaw_command()
             .args(["channels", "remove", "--channel", &channel, "--delete"]).output()
             .map_err(|e| format!("无法运行 openclaw channels remove：{}", e))?;
         if !out.status.success() {
@@ -3293,7 +3378,7 @@ async fn remove_openclaw_channel(channel: String) -> Result<serde_json::Value, S
 async fn restart_openclaw_gateway() -> Result<serde_json::Value, String> {
     // Restart can take ~15s (service reload + health settle); never block the UI thread.
     tauri::async_runtime::spawn_blocking(move || {
-        let out = std::process::Command::new("openclaw")
+        let out = openclaw_command()
             .args(["gateway", "restart", "--json"]).output()
             .map_err(|e| format!("无法重启本地服务，请确认 OpenClaw 已安装。({})", e))?;
         if !out.status.success() {
@@ -3319,7 +3404,7 @@ async fn list_pairing_requests(channel: String) -> Result<serde_json::Value, Str
         return Err("不支持的通道类型".into());
     }
     tauri::async_runtime::spawn_blocking(move || {
-        let out = std::process::Command::new("openclaw")
+        let out = openclaw_command()
             .args(["pairing", "list", &channel, "--json"]).output()
             .map_err(|e| format!("无法读取配对请求：{}", e))?;
         if !out.status.success() {
@@ -3346,7 +3431,7 @@ async fn approve_pairing_request(channel: String, code: String) -> Result<serde_
         return Err("无效的配对码".into());
     }
     tauri::async_runtime::spawn_blocking(move || {
-        let out = std::process::Command::new("openclaw")
+        let out = openclaw_command()
             .args(["pairing", "approve", &channel, &code]).output()
             .map_err(|e| format!("无法批准配对：{}", e))?;
         if !out.status.success() {
@@ -3362,7 +3447,7 @@ async fn approve_pairing_request(channel: String, code: String) -> Result<serde_
 #[tauri::command]
 async fn get_openclaw_version() -> Result<serde_json::Value, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let out = std::process::Command::new("openclaw")
+        let out = openclaw_command()
             .arg("--version").output()
             .map_err(|e| format!("无法读取 OpenClaw 版本：{}", e))?;
         let text = String::from_utf8_lossy(&out.stdout);
@@ -3424,7 +3509,7 @@ fn strip_ansi(s: &str) -> String {
 #[tauri::command]
 async fn start_wechat_login(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
     kill_wechat_login(); // ensure no stale login is running
-    let mut child = std::process::Command::new("openclaw")
+    let mut child = openclaw_command()
         .args(["channels", "login", "--channel", "openclaw-weixin"])
         .stdout(Stdio::piped()).stderr(Stdio::piped())
         .spawn()
@@ -3474,7 +3559,7 @@ async fn clawhub_install_skill(app: tauri::AppHandle, slug: String, displayName:
     }
     // CLI install can take seconds (network download); run off the main thread.
     tauri::async_runtime::spawn_blocking(move || {
-        let out = std::process::Command::new("openclaw")
+        let out = openclaw_command()
             .args(["skills", "install", &slug, "--global"]).output()
             .map_err(|e| format!("无法运行安装命令：{}", e))?;
         if !out.status.success() {
@@ -3677,7 +3762,7 @@ fn apply_openclaw_model_provider_config(token: String, model_preset: String) -> 
     }
 
     // TASK-038D: Validate config after write
-    let validate = std::process::Command::new("openclaw")
+    let validate = openclaw_command()
         .arg("config").arg("validate")
         .output();
     let validated = validate.as_ref().map(|o| o.status.success()).unwrap_or(false);
@@ -3715,7 +3800,7 @@ fn read_installed_capabilities() -> Result<serde_json::Value, String> {
     let mut warnings: Vec<String> = Vec::new();
     let mut skills: Vec<serde_json::Value> = Vec::new();
     let mut plugins: Vec<serde_json::Value> = Vec::new();
-    let cli_available = std::process::Command::new("openclaw").arg("--version").output().is_ok();
+    let cli_available = openclaw_command().arg("--version").output().is_ok();
 
     if !cli_available {
         return Ok(serde_json::json!({
@@ -3727,7 +3812,7 @@ fn read_installed_capabilities() -> Result<serde_json::Value, String> {
     }
 
     // Read skills (skills list --json)
-    match std::process::Command::new("openclaw").args(["skills", "list", "--json"]).output() {
+    match openclaw_command().args(["skills", "list", "--json"]).output() {
         Ok(out) if out.status.success() => {
             if let Ok(text) = String::from_utf8(out.stdout) {
                 if let Ok(parsed) = serde_json::from_str::<Vec<serde_json::Value>>(&text) {
@@ -3760,7 +3845,7 @@ fn read_installed_capabilities() -> Result<serde_json::Value, String> {
 
     // Read plugins (plugins list)
     // Note: plugins list does not support --json in this version; use text output
-    match std::process::Command::new("openclaw").args(["plugins", "list"]).output() {
+    match openclaw_command().args(["plugins", "list"]).output() {
         Ok(out) if out.status.success() => {
             // Parse text output — each line is typically "name  kind  status  source  version  path"
             if let Ok(text) = String::from_utf8(out.stdout) {
@@ -3833,7 +3918,7 @@ fn open_url(url: String) -> Result<(), String> {
 
 #[tauri::command]
 fn open_openclaw_dashboard() -> Result<serde_json::Value, String> {
-    let output = std::process::Command::new("openclaw")
+    let output = openclaw_command()
         .arg("dashboard")
         .output()
         .map_err(|e| format!("无法打开 OpenClaw 控制台，请确认 OpenClaw 已安装并尝试在终端运行 openclaw dashboard。({})", e))?;
@@ -3846,7 +3931,7 @@ fn open_openclaw_dashboard() -> Result<serde_json::Value, String> {
 
 #[tauri::command]
 fn start_openclaw_gateway() -> Result<serde_json::Value, String> {
-    let output = std::process::Command::new("openclaw")
+    let output = openclaw_command()
         .arg("gateway").arg("start")
         .output()
         .map_err(|e| format!("无法启动本地服务，请确认 OpenClaw 已安装，或在终端运行 openclaw gateway start。({})", e))?;
@@ -3857,23 +3942,40 @@ fn start_openclaw_gateway() -> Result<serde_json::Value, String> {
     }
 }
 
-// TASK-066: Detect whether the openclaw CLI is installed and on PATH.
+// TASK-066/068: Detect whether the openclaw CLI is installed. Does NOT rely on
+// the (possibly stale) process PATH — resolve_openclaw_bin() probes known
+// install locations. Also reports `onPath` so the UI can tell the difference
+// between "not installed" and "installed but needs an app restart".
 #[tauri::command]
 async fn check_openclaw_installed() -> Result<serde_json::Value, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let mut cmd = std::process::Command::new("openclaw");
+        // First: does a launcher exist at any known location (or on PATH)?
+        let on_path = {
+            let mut probe = Command::new("openclaw");
+            probe.arg("--version");
+            hide_command_window(&mut probe);
+            probe.output().map(|o| o.status.success()).unwrap_or(false)
+        };
+        let known = openclaw_known_paths().into_iter().find(|p| p.exists());
+        let installed_by_fs = on_path || known.is_some();
+
+        // Try to read the actual version via the resolved binary.
+        let mut cmd = openclaw_command();
         cmd.arg("--version");
         hide_command_window(&mut cmd);
-        match cmd.output() {
+        let version = match cmd.output() {
             Ok(out) if out.status.success() => {
                 let text = String::from_utf8_lossy(&out.stdout);
-                let version = text.split_whitespace()
+                text.split_whitespace()
                     .find(|t| t.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false) && t.contains('.'))
-                    .unwrap_or("").to_string();
-                serde_json::json!({ "installed": true, "version": version })
+                    .unwrap_or("").to_string()
             }
-            _ => serde_json::json!({ "installed": false, "version": "" }),
-        }
+            _ => String::new(),
+        };
+
+        // installed = we can run it OR a launcher file exists on disk.
+        let installed = !version.is_empty() || installed_by_fs;
+        serde_json::json!({ "installed": installed, "version": version, "onPath": on_path })
     }).await.map_err(|e| e.to_string())
 }
 
