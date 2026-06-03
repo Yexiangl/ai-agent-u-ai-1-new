@@ -26,65 +26,113 @@ pub struct UpdateInfo {
 pub async fn check_update(app: AppHandle) -> Result<UpdateInfo, String> {
     let current = app.package_info().version.to_string();
 
+    // We avoid the GitHub REST API (api.github.com) because anonymous requests
+    // are rate-limited to 60/hour per IP — on shared/NAT networks this quickly
+    // returns HTTP 403. Instead we use two endpoints served by the normal
+    // github.com web CDN, which are NOT counted against that API rate limit:
+    //   1. /releases/latest        → 302 redirects to /releases/tag/<tag>
+    //   2. /releases/expanded_assets/<tag> → HTML fragment listing the assets
+    let err_result = |msg: String| UpdateInfo {
+        available: false, current_version: current.clone(), latest_version: None,
+        download_url: None, release_notes: None, error: Some(msg),
+    };
+
+    // Step 1: resolve the latest tag from the redirect Location, WITHOUT
+    // following it (so we can read the header cheaply).
+    let no_redirect = reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(8))
+        .redirect(reqwest::redirect::Policy::none())
+        .user_agent("ai-agent-workspace-updater/0.1")
+        .build()
+        .map_err(|e| format!("HTTP 初始化失败: {}", e))?;
+
+    let latest_url = format!("https://github.com/{}/{}/releases/latest", GITHUB_OWNER, GITHUB_REPO);
+    let resp = match no_redirect.get(&latest_url).timeout(Duration::from_secs(15)).send().await {
+        Ok(r) => r,
+        Err(e) => return Ok(err_result(format!("无法访问 GitHub: {}", e))),
+    };
+
+    // Expect a 3xx with a Location pointing at /releases/tag/<tag>.
+    let location = resp.headers().get(reqwest::header::LOCATION)
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_string);
+    let tag = match location.as_deref().and_then(|loc| loc.rsplit("/tag/").next()) {
+        Some(t) if !t.is_empty() && t.contains(|c: char| c.is_ascii_digit()) => t.to_string(),
+        _ => {
+            // No redirect → likely no releases published yet, or an unexpected response.
+            if resp.status().is_success() {
+                return Ok(err_result("尚未发布任何版本".into()));
+            }
+            return Ok(err_result(format!("检查更新失败：HTTP {}", resp.status().as_u16())));
+        }
+    };
+    let version = tag.trim_start_matches('v').to_string();
+
+    // Step 2: fetch the asset list fragment and pick the platform-appropriate file.
     let client = reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(8))
         .user_agent("ai-agent-workspace-updater/0.1")
         .build()
         .map_err(|e| format!("HTTP 初始化失败: {}", e))?;
 
-    let url = format!("https://api.github.com/repos/{}/{}/releases/latest", GITHUB_OWNER, GITHUB_REPO);
-    let resp = client.get(&url).timeout(Duration::from_secs(15)).send().await
-        .map_err(|e| format!("无法访问 GitHub: {}", e))?;
-
-    if !resp.status().is_success() {
-        return Ok(UpdateInfo {
-            available: false, current_version: current, latest_version: None,
-            download_url: None, release_notes: None,
-            error: Some(format!("GitHub API 返回 HTTP {}", resp.status().as_u16())),
-        });
-    }
-
-    let json: serde_json::Value = resp.json().await.map_err(|e| format!("JSON 解析失败: {}", e))?;
-    let tag = json.get("tag_name").and_then(|v| v.as_str()).unwrap_or("").trim_start_matches('v');
-    let notes = json.get("body").and_then(|v| v.as_str()).map(str::to_string);
-
-    // Pick the platform-appropriate asset. On Windows we prefer the portable
-    // .exe (name contains "portable") so U-disk users get an in-place swap
-    // instead of an installer; fall back to any .exe.
-    let want_ext = if cfg!(target_os = "windows") { ".exe" } else { ".dmg" };
-    let empty = vec![];
-    let assets = json.get("assets").and_then(|v| v.as_array()).unwrap_or(&empty);
-
-    let asset_url = |predicate: &dyn Fn(&str) -> bool| -> Option<String> {
-        assets.iter().find_map(|a| {
-            let name = a.get("name").and_then(|v| v.as_str())?;
-            if predicate(&name.to_lowercase()) {
-                a.get("browser_download_url").and_then(|v| v.as_str()).map(str::to_string)
-            } else { None }
-        })
+    let assets_url = format!("https://github.com/{}/{}/releases/expanded_assets/{}", GITHUB_OWNER, GITHUB_REPO, tag);
+    let assets_html = match client.get(&assets_url).timeout(Duration::from_secs(15)).send().await {
+        Ok(r) => r.text().await.unwrap_or_default(),
+        Err(_) => String::new(),
     };
 
-    let download_url = if cfg!(target_os = "windows") {
-        asset_url(&|n| n.contains("portable") && n.ends_with(".exe"))
-            .or_else(|| asset_url(&|n| n.ends_with(".exe")))
+    // Parse `releases/download/<tag>/<file>` paths out of the HTML (no regex dep).
+    let asset_names = parse_asset_names(&assets_html);
+    let pick = |predicate: &dyn Fn(&str) -> bool| -> Option<String> {
+        asset_names.iter().find(|n| predicate(&n.to_lowercase())).cloned()
+    };
+
+    let chosen = if cfg!(target_os = "windows") {
+        pick(&|n| n.contains("portable") && n.ends_with(".exe"))
+            .or_else(|| pick(&|n| n.ends_with(".exe")))
+    } else if cfg!(target_os = "macos") {
+        pick(&|n| n.ends_with(".dmg"))
     } else {
-        asset_url(&|n| n.ends_with(want_ext))
+        pick(&|n| n.ends_with(".appimage") || n.ends_with(".deb"))
     };
 
-    let newer = !tag.is_empty() && version_gt(tag, &current);
-    // Newer version exists but no matching installer for this OS.
+    let download_url = chosen.as_ref().map(|name|
+        format!("https://github.com/{}/{}/releases/download/{}/{}", GITHUB_OWNER, GITHUB_REPO, tag, name));
+
+    let newer = version_gt(&version, &current);
     let missing_asset = newer && download_url.is_none();
 
     Ok(UpdateInfo {
         available: newer && download_url.is_some(),
         current_version: current,
-        latest_version: if tag.is_empty() { None } else { Some(tag.to_string()) },
+        latest_version: Some(version.clone()),
         download_url,
-        release_notes: notes,
+        release_notes: None,
         error: if missing_asset {
-            Some(format!("发现新版本 {} 但未找到适配当前系统的安装包", tag))
+            Some(format!("发现新版本 {} 但未找到适配当前系统的安装包", version))
         } else { None },
     })
+}
+
+// Extract asset file names from a release's expanded_assets HTML fragment.
+// Looks for substrings like `releases/download/<tag>/<file>` and returns the
+// trailing <file> portion. No external regex dependency needed.
+fn parse_asset_names(html: &str) -> Vec<String> {
+    const MARKER: &str = "releases/download/";
+    let mut out: Vec<String> = Vec::new();
+    for (idx, _) in html.match_indices(MARKER) {
+        let rest = &html[idx + MARKER.len()..];
+        // rest starts with "<tag>/<file>...". Cut at the closing quote/space/angle.
+        let end = rest.find(|c: char| c == '"' || c == '\'' || c == '<' || c == ' ' || c == '\n')
+            .unwrap_or(rest.len());
+        let path = &rest[..end];
+        if let Some(name) = path.rsplit('/').next() {
+            if !name.is_empty() && !out.iter().any(|n| n == name) {
+                out.push(name.to_string());
+            }
+        }
+    }
+    out
 }
 
 // Semver-ish compare: returns true if `a` > `b`. Falls back to false on parse issues.
