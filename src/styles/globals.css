@@ -108,3 +108,23 @@ body {
   content: none;
 }
 
+/* Pet avatar idle animations. */
+@keyframes petBreathe {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.045); }
+}
+.pet-breathe {
+  animation: petBreathe 3.4s ease-in-out infinite;
+  transform-origin: center bottom;
+}
+@keyframes petPop {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.12); }
+  100% { transform: scale(1); }
+}
+.pet-react {
+  animation: petPop 0.35s ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .pet-breathe, .pet-react { animation: none; }
+}

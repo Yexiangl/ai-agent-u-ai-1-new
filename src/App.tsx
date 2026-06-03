@@ -65,9 +65,11 @@ import { readOpenClawConfigSummary, checkOpenClawHttpStatus, applyOpenClawProvid
 import { clawhubBrowse, clawhubSearch, clawhubSkillDetail, openclawSkillsList, clawhubInstallSkill, clawhubUninstallSkill, translateText, type ClawHubSkill, type LocalSkill } from "@/lib/clawhub";
 import { QRCodeSVG } from "qrcode.react";
 import { listOpenClawChannels, addOpenClawChannel, removeOpenClawChannel, restartOpenClawGateway, listPairingRequests, approvePairingRequest, getOpenClawVersion, versionGte, startWeChatLogin, cancelWeChatLogin, type ChannelEntry, type PairingRequest } from "@/lib/openclawChannels";
-// Lazy-loaded: pulls in lottie-react (~380KB), only needed on the 摸鱼中心 page.
+// Lazy-load the pet widget so the main app shell stays fast.
 const PetWidget = lazy(() => import("@/components/PetWidget").then((m) => ({ default: m.PetWidget })));
 import type { PetState } from "@/lib/pet";
+import { migratePet } from "@/lib/pet";
+import { appendUsageRecord, readUsageLog, aggregateUsage, buildBackfillRecords, lifetimeTotalTokens, type UsageRecord } from "@/lib/usage";
 import { type AgentRun, type AgentRunStatus } from "@/lib/agentRunStore";
 import { type ChatProject, loadProjects, saveProjects, createProject, DEFAULT_PROJECT_ID, SYSTEM_PROJECTS } from "@/lib/chatProjects";
 import { cn, getErrorMessage } from "@/lib/utils";
@@ -405,6 +407,28 @@ function messagePreview(messages: UiChatMessage[]) {
 
 function sessionTotalTokens(messages: UiChatMessage[]) {
   return messages.reduce((sum, message) => sum + (message.role === "assistant" ? message.usage?.total_tokens ?? 0 : 0), 0);
+}
+
+// TASK-070: Record a completed turn's token usage into the persistent ledger
+// (usage-log.json), keyed by requestId so it's deduped and never double-counted.
+// This is the single source of truth for usage stats and pet bond — independent
+// of chat history, so deleting chats never erases it.
+function recordTurnUsage(
+  requestId: string,
+  model: string | null | undefined,
+  rawUsage: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } | null | undefined,
+) {
+  if (!rawUsage) return;
+  const total = rawUsage.total_tokens ?? 0;
+  if (total <= 0) return;
+  void appendUsageRecord({
+    id: requestId,
+    ts: Date.now(),
+    model: model ?? null,
+    prompt: rawUsage.prompt_tokens ?? 0,
+    completion: rawUsage.completion_tokens ?? 0,
+    total,
+  });
 }
 
 function createEmptySession(model = "openclaw/default"): ChatSession {
@@ -2099,6 +2123,7 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
         setMessages(finalMessages);
         if (run) { runsRef.current.set(rid, { ...run, status: "completed", finishedAt: Date.now() }); setHasRunningRun(Array.from(runsRef.current.values()).some((r) => r.status === "running")); }
         saveMessagesToSession(finalMessages as UiChatMessage[], targetSessionId, { model: donePayload.model });
+        recordTurnUsage(rid, donePayload.model, donePayload.rawUsage);
       };
       runTypewriter(rid);
       cleanup();
@@ -2819,6 +2844,7 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
           messagesRef.current = finalMessages;
           setMessages(finalMessages);
           void saveCurrentSession(finalMessages, { hermesSessionId: donePayload.sessionId, model: donePayload.model });
+          recordTurnUsage(requestId, donePayload.model, donePayload.rawUsage);
         };
         runTypewriter(requestId);
         cleanupListeners();
@@ -4945,17 +4971,27 @@ function FileCard({ file, onAnalyze, onPreview, onOpenLocation, onDelete }: {
   );
 }
 
-// TASK-044D: 摸鱼中心 iOS widget 风格升级
 function MoyuCenterPage({ setActive, setChatDraft, config, updateConfig }: { setActive: (id: RouteId) => void; setChatDraft: (value: string) => void; config: AppConfig; updateConfig: (next: AppConfig) => Promise<void> }) {
   const jumpToChat = (prompt: string) => {
     setChatDraft(prompt);
     setActive("chat");
   };
 
+  // Cumulative tokens from the persistent usage ledger drive the pet's bond.
+  const [lifetimeTokens, setLifetimeTokens] = useState(0);
+  useEffect(() => {
+    let alive = true;
+    void readUsageLog().then((recs) => { if (alive) setLifetimeTokens(lifetimeTotalTokens(recs)); });
+    return () => { alive = false; };
+  }, []);
+
+  // Migrate a legacy pet (old level/stage model) on read so existing users keep theirs.
+  const currentPet = config.pet ? migratePet(config.pet as unknown as Parameters<typeof migratePet>[0]) : null;
+
   // Persist pet state through the same config storage used everywhere else.
   const handlePetChange = (next: PetState | null) => { void updateConfig({ ...config, pet: next }); };
-  const askPetAI = (petName: string, mood: string, stage: string) => {
-    jumpToChat(`请你扮演我的电子宠物「${petName}」（成长阶段：${stage}，当前心情：${mood}）。用第一人称、可爱俏皮的语气跟我说几句话：\n1. 先打个招呼\n2. 说说你现在的心情和想做的事\n3. 关心一下正在摸鱼的我，给一句轻松的陪伴\n\n注意：保持简短（3-4 句），不要说教。`);
+  const askPetAI = (petName: string, mood: string, title: string) => {
+    jumpToChat(`请你扮演我的办公搭子「${petName}」（亲密度称号：${title}，当前心情：${mood}）。用第一人称、可爱俏皮的语气跟我说几句话：\n1. 先打个招呼\n2. 说说你现在的心情和想做的事\n3. 关心一下正在办公的我，给一句轻松的陪伴\n\n注意：保持简短（3-4 句），不要说教。`);
   };
 
   const randomPrompt = () => {
@@ -5006,7 +5042,7 @@ function MoyuCenterPage({ setActive, setChatDraft, config, updateConfig }: { set
         {/* 养成系桌宠 — Large Widget */}
         <div className="sm:col-span-2">
           <Suspense fallback={<div className="flex h-48 items-center justify-center rounded-3xl border bg-card"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>}>
-            <PetWidget pet={config.pet ?? null} onChange={handlePetChange} onAskAI={askPetAI} />
+            <PetWidget pet={currentPet} lifetimeTokens={lifetimeTokens} onChange={handlePetChange} onAskAI={askPetAI} />
           </Suspense>
         </div>
 
@@ -5252,11 +5288,24 @@ function formatUnixTime(value: string | null) {
 
 function UsagePage() {
   const [sessions, setSessions] = useState<ChatSession[]>([]);
+  const [records, setRecords] = useState<UsageRecord[]>([]);
   const [loading, setLoading] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
-    try { setSessions(await readChatSessions()); } catch { /* ignore */ }
+    try {
+      const sess = await readChatSessions();
+      setSessions(sess);
+      // One-time backfill: migrate historical session usage into the ledger so
+      // existing users keep their totals. Guarded so it runs only once and can
+      // never double-count live-recorded turns.
+      if (!localStorage.getItem("usage-backfilled-v1")) {
+        const backfill = buildBackfillRecords(sess as unknown as Parameters<typeof buildBackfillRecords>[0]);
+        for (const r of backfill) { await appendUsageRecord(r); }
+        localStorage.setItem("usage-backfilled-v1", "1");
+      }
+      setRecords(await readUsageLog());
+    } catch { /* ignore */ }
     finally { setLoading(false); }
   }, []);
 
@@ -5265,37 +5314,28 @@ function UsagePage() {
   const stats = useMemo(() => {
     const usedSessions = sessions.filter((session) => (session.messages || []).length > 0);
     const allMessages = usedSessions.flatMap((session) => session.messages);
-    const assistantMsgs = allMessages.filter((message) => message.role === "assistant");
     const userMsgs = allMessages.filter((message) => message.role === "user");
-    const totalTokens = assistantMsgs.reduce((sum, message) => sum + (message.usage?.total_tokens ?? 0), 0);
-    const promptTokens = assistantMsgs.reduce((sum, message) => sum + (message.usage?.prompt_tokens ?? 0), 0);
-    const completionTokens = assistantMsgs.reduce((sum, message) => sum + (message.usage?.completion_tokens ?? 0), 0);
-    const usageMessageCount = assistantMsgs.filter((message) => message.usage?.total_tokens != null).length;
+
+    // Token numbers come from the persistent ledger (truth), not chat history.
+    const agg = aggregateUsage(records);
+    const totalTokens = agg.total;
+    const promptTokens = agg.prompt;
+    const completionTokens = agg.completion;
+    const usageMessageCount = agg.count;
     const hasTokenUsage = usageMessageCount > 0;
     const avgTokens = usageMessageCount > 0 ? Math.round(totalTokens / usageMessageCount) : 0;
-
-    const now = Date.now();
-    const dayMs = 86400000;
-    const sessionsToday = usedSessions.filter((session) => now - Number(session.updatedAt) * 1000 < dayMs);
-    const sessionsWeek = usedSessions.filter((session) => now - Number(session.updatedAt) * 1000 < 7 * dayMs);
-
-    const todayTokens = sessionsToday.flatMap((session) => session.messages).filter((message) => message.role === "assistant").reduce((sum, message) => sum + (message.usage?.total_tokens ?? 0), 0);
-    const weekTokens = sessionsWeek.flatMap((session) => session.messages).filter((message) => message.role === "assistant").reduce((sum, message) => sum + (message.usage?.total_tokens ?? 0), 0);
-
-    const lastUse = usedSessions.length > 0 ? usedSessions.reduce((latest, session) => Math.max(latest, Number(session.updatedAt) * 1000), 0) : 0;
-
-    const modelMap = new Map<string, number>();
-    assistantMsgs.filter((message) => message.modelName).forEach((message) => {
-      modelMap.set(message.modelName!, (modelMap.get(message.modelName!) ?? 0) + (message.usage?.total_tokens ?? 0));
-    });
+    const todayTokens = agg.today;
+    const weekTokens = agg.week;
+    const lastUse = agg.lastUse;
+    const modelMap = agg.byModel;
 
     const topSessions = [...usedSessions].sort((a, b) => Number(b.updatedAt) - Number(a.updatedAt)).slice(0, 5);
 
     const fmtTokens = (n: number) => n > 10000 ? `${(n / 1000).toFixed(0)}K` : n > 1000 ? `${(n / 1000).toFixed(1)}K` : String(n);
     const fmtTokensOrNA = hasTokenUsage ? (n: number) => (n > 0 ? fmtTokens(n) : "—") : (_n: number) => "暂未提供";
 
-    return { sessions: usedSessions, allMessages, assistantMsgs, userMsgs, totalTokens, promptTokens, completionTokens, avgTokens, todayTokens, weekTokens, lastUse, modelMap, topSessions, fmtTokens, fmtTokensOrNA, hasTokenUsage, usageMessageCount };
-  }, [sessions]);
+    return { sessions: usedSessions, allMessages, userMsgs, totalTokens, promptTokens, completionTokens, avgTokens, todayTokens, weekTokens, lastUse, modelMap, topSessions, fmtTokens, fmtTokensOrNA, hasTokenUsage, usageMessageCount };
+  }, [sessions, records]);
 
   // TASK-032C: de-internalize model names via formatDisplayModel
   const displayModelName = (name?: string | null) => formatDisplayModel(name) || "模型信息待同步";

@@ -302,6 +302,86 @@ fn clear_chat_sessions(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+// ── Persistent usage ledger (TASK-070) ───────────────────────────────────────
+// An append-only record of token usage per completed turn, stored in its OWN
+// file independent of chat-sessions.json. Deleting/clearing chats must NOT
+// affect this, so usage totals reflect true lifetime consumption. Each record
+// carries a unique `id` so the frontend can dedupe and never double-count.
+fn usage_log_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let dir = app_data_root(app)?;
+    Ok(dir.join("usage-log.json"))
+}
+
+#[tauri::command]
+fn read_usage_log(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
+    let path = usage_log_path(&app)?;
+    if path.exists() {
+        let content = fs::read_to_string(&path).map_err(|error| error.to_string())?;
+        if let Ok(value) = serde_json::from_str(&content) {
+            return Ok(value);
+        }
+        eprintln!("usage-log.json parse error, trying backups...");
+    }
+    for i in 1..=3 {
+        let bak = path.parent().unwrap().join(format!("usage-log.json.bak.{}", i));
+        if bak.exists() {
+            if let Ok(content) = fs::read_to_string(&bak) {
+                if let Ok(value) = serde_json::from_str(&content) {
+                    eprintln!("usage-log.json recovered from bak.{}", i);
+                    return Ok(value);
+                }
+            }
+        }
+    }
+    Ok(serde_json::json!([]))
+}
+
+// Append one usage record. Reads current log, pushes, writes atomically with
+// rotating backups. Dedupes by `id` so repeated appends of the same turn are
+// no-ops (defensive against retries / double done-callbacks).
+#[tauri::command]
+fn append_usage_log(app: tauri::AppHandle, record: serde_json::Value) -> Result<(), String> {
+    let path = usage_log_path(&app)?;
+    let mut arr: Vec<serde_json::Value> = match read_usage_log(app.clone())? {
+        serde_json::Value::Array(a) => a,
+        _ => Vec::new(),
+    };
+    if let Some(id) = record.get("id").and_then(|v| v.as_str()) {
+        if arr.iter().any(|r| r.get("id").and_then(|v| v.as_str()) == Some(id)) {
+            return Ok(()); // already recorded
+        }
+    }
+    arr.push(record);
+    let content = serde_json::to_string(&serde_json::Value::Array(arr)).map_err(|e| e.to_string())?;
+    rotate_usage_log_backups(&path)?;
+    let dir = path.parent().unwrap();
+    let tmp_path = dir.join("usage-log.json.tmp");
+    fs::write(&tmp_path, &content).map_err(|error| format!("写入临时文件失败：{}", error))?;
+    std::fs::rename(&tmp_path, &path).map_err(|error| format!("重命名临时文件失败：{}", error))
+}
+
+fn rotate_usage_log_backups(path: &PathBuf) -> Result<(), String> {
+    let dir = path.parent().unwrap();
+    let bak3 = dir.join("usage-log.json.bak.3");
+    if bak3.exists() { fs::remove_file(&bak3).map_err(|e| e.to_string())?; }
+    let bak2 = dir.join("usage-log.json.bak.2");
+    if bak2.exists() { fs::rename(&bak2, &bak3).map_err(|e| e.to_string())?; }
+    let bak1 = dir.join("usage-log.json.bak.1");
+    if bak1.exists() { fs::rename(&bak1, &bak2).map_err(|e| e.to_string())?; }
+    if path.exists() { fs::copy(path, &bak1).map_err(|e| e.to_string())?; }
+    Ok(())
+}
+
+// Explicit reset only — never called from chat deletion paths.
+#[tauri::command]
+fn clear_usage_log(app: tauri::AppHandle) -> Result<(), String> {
+    let path = usage_log_path(&app)?;
+    if path.exists() {
+        fs::remove_file(path).map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
 // ── TASK-028C: chat-projects.json read/write ──
 
 fn chat_projects_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -4047,7 +4127,7 @@ fn build_openclaw_install_command() -> std::process::Command {
 
 fn main() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![read_config, write_config, clear_config, read_chat_sessions, write_chat_sessions, clear_chat_sessions, read_chat_projects, write_chat_projects, portable_data_status, portable_runtime_status, read_installed_capabilities, check_hermes_installed, get_hermes_version, get_hermes_paths, get_hermes_help, check_hermes_api_server, hermes_chat_completion, cancel_hermes_chat_completion, read_hermes_model_config, read_hermes_native_memory, read_openclaw_workspace_memory, apply_hermes_model_config, apply_hermes_reasoning_config, read_hermes_cron_overview, read_hermes_cron_cli_status, ensure_ai_files_dirs, list_ai_files, delete_ai_file, open_ai_file_location, pick_and_upload_file, extract_ai_file_text, save_generated_file, read_openclaw_gateway_auth_for_local_use, get_or_create_openclaw_device_identity, open_url, open_openclaw_dashboard, start_openclaw_gateway, openclaw_http_chat_completion, openclaw_http_chat_completion_stream, cancel_openclaw_chat_completion, openclaw_http_status, openclaw_session_status, openclaw_web_search, openclaw_sessions_list, clawhub_browse, clawhub_search, clawhub_skill_detail, openclaw_skills_list, clawhub_install_skill, clawhub_uninstall_skill, translate_text, read_openclaw_config_summary, read_openclaw_model_provider_summary, apply_openclaw_model_provider_config, list_openclaw_channels, add_openclaw_channel, remove_openclaw_channel, restart_openclaw_gateway, list_pairing_requests, approve_pairing_request, get_openclaw_version, start_wechat_login, cancel_wechat_login, check_openclaw_installed, install_openclaw, update::check_update, update::download_update, update::apply_update])
+        .invoke_handler(tauri::generate_handler![read_config, write_config, clear_config, read_chat_sessions, write_chat_sessions, clear_chat_sessions, read_usage_log, append_usage_log, clear_usage_log, read_chat_projects, write_chat_projects, portable_data_status, portable_runtime_status, read_installed_capabilities, check_hermes_installed, get_hermes_version, get_hermes_paths, get_hermes_help, check_hermes_api_server, hermes_chat_completion, cancel_hermes_chat_completion, read_hermes_model_config, read_hermes_native_memory, read_openclaw_workspace_memory, apply_hermes_model_config, apply_hermes_reasoning_config, read_hermes_cron_overview, read_hermes_cron_cli_status, ensure_ai_files_dirs, list_ai_files, delete_ai_file, open_ai_file_location, pick_and_upload_file, extract_ai_file_text, save_generated_file, read_openclaw_gateway_auth_for_local_use, get_or_create_openclaw_device_identity, open_url, open_openclaw_dashboard, start_openclaw_gateway, openclaw_http_chat_completion, openclaw_http_chat_completion_stream, cancel_openclaw_chat_completion, openclaw_http_status, openclaw_session_status, openclaw_web_search, openclaw_sessions_list, clawhub_browse, clawhub_search, clawhub_skill_detail, openclaw_skills_list, clawhub_install_skill, clawhub_uninstall_skill, translate_text, read_openclaw_config_summary, read_openclaw_model_provider_summary, apply_openclaw_model_provider_config, list_openclaw_channels, add_openclaw_channel, remove_openclaw_channel, restart_openclaw_gateway, list_pairing_requests, approve_pairing_request, get_openclaw_version, start_wechat_login, cancel_wechat_login, check_openclaw_installed, install_openclaw, update::check_update, update::download_update, update::apply_update])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
