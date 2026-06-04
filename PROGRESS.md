@@ -7,7 +7,7 @@
 - **AI Agent Workspace**：Tauri 2 + React 19 + TypeScript + Vite 桌面应用，U 盘便携部署，中文界面。
 - **代码根目录**：`/Users/yourenc/AIcode/ai-agent-u-ai-1-new`
 - **GitHub**：`git@github.com:Yexiangl/ai-agent-u-ai-1-new.git`，单人仓库，直接提交并推送 `main`。
-- **提交规范**：中文，`feat:/fix:/chore: 简述 (TASK-XXX)`。最新 TASK-071，版本 0.1.4。
+- **提交规范**：中文，`feat:/fix:/chore: 简述 (TASK-XXX)`。最新 TASK-073，**已发布 v0.1.5**。
 
 ## 关键技术约定
 
@@ -35,6 +35,20 @@
 - 改用不限流的 `github.com` 网页端点：`releases/latest`（取版本号）+ `expanded_assets`（解析资产名）。
 - 自行解析资产 HTML，不新增 regex 依赖。代价：网页片段无 release notes（前端已做存在性判断，不受影响）。
 
+### `ae6b53f` Windows 黑框 + onPath + AI助手文案 (TASK-072)
+
+- **能力中心弹黑框**：`openclaw_command()`（main.rs）工厂函数统一加 `hide_command_window`，
+  一处覆盖 18 个调用点；另修便携 node/openclaw 版本探测、`open_url` 的 `cmd start`。
+- **onPath 误报**：`check_openclaw_installed` 在 Windows 改用 `cmd /c where openclaw`
+  （`Command::new("openclaw")` 找不到 `.cmd` shim，导致已装却报 onPath:false、装完被误判需重启）。
+- **AI助手文案**：未配置时从"未找到本地配置文件"改为"填写密钥一键启用"，不再误导为未安装。
+
+### `933bf0f` 版本升级 v0.1.5 (TASK-073)
+
+- tauri.conf.json / Cargo.toml / Cargo.lock / package.json → 0.1.5。
+- 修正前端硬编码：侧边栏 v0.1.1、关于页 v0.3.0、网关 client 0.1.1 → 全部 0.1.5。
+- 打 tag `v0.1.5` 触发 CI，**已发布 Release**（三资产：portable.exe / x64-setup.exe / aarch64.dmg）。
+
 ## 关键文件
 
 - **宠物**：`src/lib/pet.ts`、`petAppearance.ts`、`petCompanion.ts`、
@@ -51,28 +65,33 @@
   - 便携模式路径检测 ✅：`<exe上级>/data/portable.json` 存在且 `data/app` 可写才进便携模式，
     数据落 `data/app/`；否则回退 `%APPDATA%`。两种情况都验证正确。
   - 用量持久化 ✅：文件级实测，删除 chat-sessions.json 后 usage-log.json 不受影响。
-  - 检查更新 ✅：curl 实测 releases/latest + expanded_assets 不报 403，返回"已是最新版"。
+  - 检查更新 ✅：curl 实测 releases/latest + expanded_assets 不报 403。
   - 热替换 bat、服务路径探测（%APPDATA%\npm、.cmd shim、CREATE_NO_WINDOW）逻辑确认。
-- **仍缺**：Windows 下宠物 GUI 的真机截图验收（SVG 渲染、气泡、用量页删会话前后数字）
-  之前主要是代码/接口验证，未真正点开 app 交互截图。需补。
+  - TASK-072 修复后复测 ✅：黑框消失、onPath:false→true、配置写入+`openclaw config validate`（exit 0）、
+    AI助手文案已更新。"一键启用"按钮 disabled 是 CDP 假象（直接设 value 不触发 React onChange），非 bug。
+- **仍缺**：v0.1.5 安装包级的真机回归（之前多在 win-test 本地构建/CDP 验证），
+  尤其检查更新→便携 exe 热替换的完整真机流程、宠物 GUI 截图。
 
-## 跨平台打包现状（重要）
+## 跨平台打包现状（重要，已据 v0.1.5 实际发布修正）
 
-- 打包走 GitHub Actions（`.github/workflows/release.yml`），push `v*` tag 触发：
-  - `windows-latest` 原生出 x86_64 Windows 包（setup.exe + portable.exe）
-  - `macos-latest` 原生出 macOS 包，**但只有 x86_64-apple-darwin（Intel）**
-  - `ubuntu` 汇总上传。**Mac 不能交叉编译 Windows 包**，各平台原生构建。
-- **两个待修的发布缺口**：
-  1. CI 的 macOS 只出 Intel 包，作者机器是 Apple Silicon、用户也多为 ARM →
-     建议给 release.yml 加 `aarch64-apple-darwin`（+ 可选 arm64 Windows）。
-  2. 版本号不一致：`tauri.conf.json` 是 0.1.4，部分 `docs/` 写 v0.3.0，发布以 0.1.4 为准。
+- 打包走 GitHub Actions（`.github/workflows/release.yml`），push `v*` tag 触发，各平台原生构建：
+  - `windows-latest` → x86_64 Windows 包（`x64-setup.exe` + `portable.exe`）
+  - `macos-latest` → macOS 包。**实测产物是 `aarch64`（Apple Silicon）**：workflow 里虽写
+    `x86_64-apple-darwin`，但 `npm run tauri:build` 忽略该 target、按 runner 自身架构出包，
+    而 GitHub macos-latest 现为 M 系列 → 实际只出 ARM 包。
+  - `ubuntu` 汇总发 Release。**Mac 不能交叉编译 Windows 包**。
+- **当前发布的架构覆盖缺口**：
+  - macOS：只有 aarch64（ARM），**没有 Intel 包** → Intel Mac 用户装不了。
+  - Windows：只有 x86_64，没有 arm64（ARM Windows 上靠兼容层跑 x64）。
+  - 如要全覆盖，需在 release.yml 显式加 target 矩阵（aarch64-apple-darwin + x86_64-apple-darwin
+    分别出包，Windows 同理）。当前若用户都是新机器（ARM Mac / x64 Win）则够用。
 
 ## 待办（按优先级）
 
-1. Windows 宠物 GUI 真机截图验收（见上）。
-2. CI 补 Apple Silicon（aarch64-apple-darwin）macOS 包。
-3. 统一版本号。
-4. 可选：检查更新拿不到 release notes，如需保留要单独补带降级的 API 调用。
+1. **v0.1.5 Windows 真机全面回归**（进行中）：宠物 GUI 截图、检查更新→便携 exe 热替换全流程。
+2. CI 多架构补全（Intel Mac / ARM Windows），按需。
+3. 可选：检查更新拿不到 release notes，如需保留要单独补带降级的 API 调用。
+4. 可选：前端版本号改为动态读取 Tauri 版本，避免每次发版手改硬编码。
 
 ## 协作 / 环境备注
 
