@@ -238,8 +238,16 @@ pub fn apply_update(app: AppHandle, installer_path: String) -> Result<(), String
             // console window, where `timeout` (needs stdin) would fail.
             // `(goto) 2>nul & del "%~f0"` is the canonical self-delete that avoids
             // the "找不到批处理文件 / batch file cannot be found" error.
+            //
+            // `chcp 65001` switches the console to UTF-8 BEFORE any path is used:
+            // we write this .bat as UTF-8, but cmd.exe parses .bat files using the
+            // system ANSI code page (GBK/936 on Chinese Windows) by default. Without
+            // the switch, non-ASCII paths (e.g. an install dir containing 中文) get
+            // mangled and `move`/`start` fail with "找不到文件". Redirect chcp's
+            // output to nul so nothing prints.
             let script = format!(
                 "@echo off\r\n\
+chcp 65001 >nul\r\n\
 ping 127.0.0.1 -n 4 >nul\r\n\
 move /y \"{cur}\" \"{bak}\" >nul 2>&1\r\n\
 move /y \"{new}\" \"{cur}\" >nul 2>&1\r\n\
