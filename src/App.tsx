@@ -1078,7 +1078,7 @@ function App() {
         </nav>
         <div className="border-t p-4 text-xs text-muted-foreground">
           <div className="flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-emerald-500" /> 本地桌面 App</div>
-          <div className="mt-1 text-[10px] opacity-70">AI Agent Workspace v0.1.1</div>
+          <div className="mt-1 text-[10px] opacity-70">AI Agent Workspace v0.1.5</div>
         </div>
       </aside>
 
@@ -5709,7 +5709,7 @@ function AboutPage({ config, updateConfig }: { config: AppConfig; updateConfig: 
         <h2 className="text-2xl font-bold tracking-tight">AI Agent 工作台</h2>
         <p className="text-sm text-muted-foreground">面向普通用户的本地 AI 助手入口。可用于 AI 对话、能力扩展、本地用量查看和助手记忆管理。</p>
         <div className="flex flex-wrap gap-2 pt-1">
-          <span className="rounded-full border border-border bg-muted/40 px-3 py-1 text-xs text-muted-foreground">v0.3.0 内部测试版</span>
+          <span className="rounded-full border border-border bg-muted/40 px-3 py-1 text-xs text-muted-foreground">v0.1.5 内部测试版</span>
         </div>
       </div>
 

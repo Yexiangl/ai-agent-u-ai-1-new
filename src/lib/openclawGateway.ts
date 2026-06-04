@@ -329,10 +329,10 @@ export class OpenClawGatewayClient {
       type: "req", id: connectId, method: "connect",
       params: {
         minProtocol: 4, maxProtocol: 4,
-        client: { id: "gateway-client", displayName: "AI Agent Workspace", version: "0.1.1", platform: "unknown", mode: "backend" },
+        client: { id: "gateway-client", displayName: "AI Agent Workspace", version: "0.1.5", platform: "unknown", mode: "backend" },
         role, scopes, caps: [], commands: [], permissions: {},
         auth: { token: this.gatewayToken },
-        locale: "en-US", userAgent: "ai-agent-workspace/0.1.1",
+        locale: "en-US", userAgent: "ai-agent-workspace/0.1.5",
         device: { id: id.deviceId, publicKey: base64UrlEncode(id.publicKeyRaw), signature: signPayload(id.privateKey, payload), signedAt: signedAtMs, nonce },
       },
     };
