@@ -1054,7 +1054,10 @@ fn hermes_chat_completion(app: tauri::AppHandle, request_id: String, model: Stri
         let request_body = serde_json::json!({
             "model": mdl,
             "messages": messages,
-            "stream": true
+            "stream": true,
+            // Ask for a final usage chunk so the usage ledger (TASK-070) can
+            // record token counts on streaming turns.
+            "stream_options": { "include_usage": true }
         });
         let request_summary = request_messages_summary(request_body.get("messages").unwrap_or(&serde_json::Value::Null));
         println!("[stream-debug] request requestId={} url={} model={} stream={} timeout=connect-only messages={}", rid, url, request_body.get("model").and_then(|v| v.as_str()).unwrap_or(""), request_body.get("stream").and_then(|v| v.as_bool()).unwrap_or(false), request_summary);
@@ -2651,7 +2654,13 @@ fn openclaw_http_chat_completion_stream(
             Ok(c) => c,
             Err(e) => { emit_openclaw_error(&app, &rid, &format!("创建 HTTP client 失败: {}", e), None, None); return; }
         };
-        let request_body = serde_json::json!({ "model": mdl, "messages": messages, "stream": true });
+        // include_usage asks the OpenAI-compatible gateway to emit a final
+        // usage chunk in the SSE stream; without it, streaming responses carry
+        // no token counts and the usage ledger (TASK-070) never records a turn.
+        let request_body = serde_json::json!({
+            "model": mdl, "messages": messages, "stream": true,
+            "stream_options": { "include_usage": true }
+        });
         let response = match client
             .post(url)
             .header("Accept", "text/event-stream")
