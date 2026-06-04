@@ -48,11 +48,19 @@ fn resolve_openclaw_bin() -> String {
     }
 
     // 1) Try a plain PATH lookup first (works when PATH is already fresh).
-    let mut probe = Command::new("openclaw");
-    probe.arg("--version");
-    hide_command_window(&mut probe);
-    if probe.output().map(|o| o.status.success()).unwrap_or(false) {
-        return CACHE.get_or_init(|| "openclaw".to_string()).clone();
+    //    Skipped on Windows: `Command::new("openclaw")` cannot resolve nor run
+    //    the npm `.cmd` shim, so a bare-name hit here would be cached and then
+    //    fail at actual invocation. On Windows we rely on the known_paths probe
+    //    below, which returns the full `.cmd` path that openclaw_command() runs
+    //    through `cmd /c`.
+    #[cfg(not(windows))]
+    {
+        let mut probe = Command::new("openclaw");
+        probe.arg("--version");
+        hide_command_window(&mut probe);
+        if probe.output().map(|o| o.status.success()).unwrap_or(false) {
+            return CACHE.get_or_init(|| "openclaw".to_string()).clone();
+        }
     }
 
     // 2) Probe known install locations that the official installer uses.
@@ -104,6 +112,10 @@ fn dirs_home() -> Option<PathBuf> {
 // works even when the process PATH is stale (post-install, before restart).
 // On Windows a `.cmd` shim must be launched through `cmd /c` rather than
 // executed directly, so handle that case.
+//
+// Every returned Command has hide_command_window applied so no black console
+// window flashes on Windows — this covers all ~18 call sites in one place
+// (能力中心 / 技能列表 / clawhub all shell out through here).
 fn openclaw_command() -> Command {
     let bin = resolve_openclaw_bin();
     #[cfg(windows)]
@@ -111,10 +123,13 @@ fn openclaw_command() -> Command {
         if bin.to_lowercase().ends_with(".cmd") || bin.to_lowercase().ends_with(".bat") {
             let mut c = Command::new("cmd");
             c.arg("/c").arg(&bin);
+            hide_command_window(&mut c);
             return c;
         }
     }
-    Command::new(bin)
+    let mut c = Command::new(bin);
+    hide_command_window(&mut c);
+    c
 }
 
 fn cancel_map() -> &'static CancelMap {
@@ -459,7 +474,10 @@ fn portable_runtime_status() -> Result<serde_json::Value, String> {
             if path.is_file() { Some(path) } else { None }
         });
         if let Some(bin) = node_bin {
-            if let Ok(out) = std::process::Command::new(&bin).arg("--version").output() {
+            let mut probe = std::process::Command::new(&bin);
+            probe.arg("--version");
+            hide_command_window(&mut probe);
+            if let Ok(out) = probe.output() {
                 if out.status.success() {
                     node_version = String::from_utf8(out.stdout).ok().map(|s| s.trim().to_string());
                 }
@@ -482,7 +500,10 @@ fn portable_runtime_status() -> Result<serde_json::Value, String> {
             if path.is_file() { Some(path) } else { None }
         });
         if let Some(bin) = oc_bin {
-            if let Ok(out) = std::process::Command::new(&bin).arg("--version").output() {
+            let mut probe = std::process::Command::new(&bin);
+            probe.arg("--version");
+            hide_command_window(&mut probe);
+            if let Ok(out) = probe.output() {
                 if out.status.success() {
                     oc_version = String::from_utf8(out.stdout).ok().map(|s| s.trim().to_string());
                 }
@@ -3992,7 +4013,12 @@ fn open_url(url: String) -> Result<(), String> {
     #[cfg(target_os = "linux")]
     { std::process::Command::new("xdg-open").arg(&url).spawn().map_err(|e| format!("无法打开链接: {}", e))?; }
     #[cfg(target_os = "windows")]
-    { std::process::Command::new("cmd").args(["/c", "start", "", &url]).spawn().map_err(|e| format!("无法打开链接: {}", e))?; }
+    {
+        let mut cmd = std::process::Command::new("cmd");
+        cmd.args(["/c", "start", "", &url]);
+        hide_command_window(&mut cmd);
+        cmd.spawn().map_err(|e| format!("无法打开链接: {}", e))?;
+    }
     Ok(())
 }
 
@@ -4030,9 +4056,22 @@ fn start_openclaw_gateway() -> Result<serde_json::Value, String> {
 async fn check_openclaw_installed() -> Result<serde_json::Value, String> {
     tauri::async_runtime::spawn_blocking(move || {
         // First: does a launcher exist at any known location (or on PATH)?
+        // On Windows, `Command::new("openclaw")` does NOT resolve the `.cmd`
+        // shim that npm installs, so a bare probe wrongly reports false even
+        // when `where openclaw` succeeds. Use `cmd /c where` there instead.
         let on_path = {
-            let mut probe = Command::new("openclaw");
-            probe.arg("--version");
+            #[cfg(windows)]
+            let mut probe = {
+                let mut c = Command::new("cmd");
+                c.args(["/c", "where", "openclaw"]);
+                c
+            };
+            #[cfg(not(windows))]
+            let mut probe = {
+                let mut c = Command::new("openclaw");
+                c.arg("--version");
+                c
+            };
             hide_command_window(&mut probe);
             probe.output().map(|o| o.status.success()).unwrap_or(false)
         };

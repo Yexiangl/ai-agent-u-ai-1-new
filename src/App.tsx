@@ -1565,8 +1565,8 @@ function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelCo
     <div className="space-y-4">
       {/* 1. AI 助手状态 — TASK-042B/C/F: StatusHero + ActionCluster + adaptive */}
       <StatusHero
-        title={ocReady ? "AI 助手已连接" : ocChecked && ocConfig?.configExists ? "AI 助手需要启动" : ocChecked ? "AI 助手需要检查" : "正在检查 AI 助手"}
-        subtitle={ocReady ? "可以开始对话和处理任务。" : ocChecked && ocConfig?.configExists ? "点击启动本地服务，完成后会自动重新检查。" : ocChecked ? "请检查配置或重新检查本地服务状态。" : "正在确认本地服务和模型连接状态。"}
+        title={ocReady ? "AI 助手已连接" : ocChecked && ocConfig?.configExists ? "AI 助手需要启动" : ocChecked ? "AI 助手待启用" : "正在检查 AI 助手"}
+        subtitle={ocReady ? "可以开始对话和处理任务。" : ocChecked && ocConfig?.configExists ? "点击启动本地服务，完成后会自动重新检查。" : ocChecked ? "填写模型访问密钥即可一键启用。" : "正在确认本地服务和模型连接状态。"}
         statusLabel={ocReady ? "已连接" : ocChecked ? "需要检查" : "检查中"}
         statusTone={ocReady ? "success" : ocChecked ? "warning" : "muted"}
         modelLabel={ocReady ? formatDisplayModel(chatState.ocPrimaryModel) || displayModel : displayModel}
@@ -1604,7 +1604,7 @@ function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelCo
                 )}
               </>
             ) : (
-              <><p className="font-medium">需要检查</p><p>未找到本地配置文件。请确认 AI 助手已安装并初始化。</p></>
+              <><p className="font-medium">还差最后一步</p><p>本地服务已就绪，请在下方填写模型访问密钥并点击「一键启用 AI 助手」完成初始化。若尚未安装本地服务，请先用上方卡片一键安装。</p></>
             )}
           </div>
         )}
