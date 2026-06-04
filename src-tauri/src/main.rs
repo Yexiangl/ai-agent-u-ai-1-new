@@ -207,14 +207,28 @@ fn chat_sessions_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(dir.join("chat-sessions.json"))
 }
 
+// Strip a leading UTF-8 BOM (0xEF 0xBB 0xBF) if present. Files written by our
+// own app via fs::write never have one, but external files do: openclaw.json is
+// written by the OpenClaw CLI, and users may hand-edit configs with editors
+// (e.g. Notepad on Chinese Windows) that prepend a BOM. serde_json::from_str
+// rejects a BOM, so strip it before parsing.
+fn strip_bom(s: &str) -> &str {
+    s.strip_prefix('\u{feff}').unwrap_or(s)
+}
+
+// Read a UTF-8 file and parse it as JSON, tolerating a leading BOM.
+fn read_json_file(path: &std::path::Path) -> Result<serde_json::Value, String> {
+    let content = fs::read_to_string(path).map_err(|error| error.to_string())?;
+    serde_json::from_str(strip_bom(&content)).map_err(|error| error.to_string())
+}
+
 #[tauri::command]
 fn read_config(app: tauri::AppHandle) -> Result<Option<serde_json::Value>, String> {
     let path = config_path(&app)?;
     if !path.exists() {
         return Ok(None);
     }
-    let content = fs::read_to_string(path).map_err(|error| error.to_string())?;
-    let value = serde_json::from_str(&content).map_err(|error| error.to_string())?;
+    let value = read_json_file(&path)?;
     Ok(Some(value))
 }
 
@@ -241,7 +255,7 @@ fn read_chat_sessions(app: tauri::AppHandle) -> Result<serde_json::Value, String
     // Try reading main file first
     if path.exists() {
         let content = fs::read_to_string(&path).map_err(|error| error.to_string())?;
-        if let Ok(value) = serde_json::from_str(&content) {
+        if let Ok(value) = serde_json::from_str(strip_bom(&content)) {
             return Ok(value);
         }
         eprintln!("chat-sessions.json parse error, trying backups...");
@@ -252,7 +266,7 @@ fn read_chat_sessions(app: tauri::AppHandle) -> Result<serde_json::Value, String
         let bak = path.parent().unwrap().join(format!("chat-sessions.json.bak.{}", i));
         if bak.exists() {
             if let Ok(content) = fs::read_to_string(&bak) {
-                if let Ok(value) = serde_json::from_str(&content) {
+                if let Ok(value) = serde_json::from_str(strip_bom(&content)) {
                     eprintln!("chat-sessions.json recovered from bak.{}", i);
                     return Ok(value);
                 }
@@ -332,7 +346,7 @@ fn read_usage_log(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
     let path = usage_log_path(&app)?;
     if path.exists() {
         let content = fs::read_to_string(&path).map_err(|error| error.to_string())?;
-        if let Ok(value) = serde_json::from_str(&content) {
+        if let Ok(value) = serde_json::from_str(strip_bom(&content)) {
             return Ok(value);
         }
         eprintln!("usage-log.json parse error, trying backups...");
@@ -341,7 +355,7 @@ fn read_usage_log(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
         let bak = path.parent().unwrap().join(format!("usage-log.json.bak.{}", i));
         if bak.exists() {
             if let Ok(content) = fs::read_to_string(&bak) {
-                if let Ok(value) = serde_json::from_str(&content) {
+                if let Ok(value) = serde_json::from_str(strip_bom(&content)) {
                     eprintln!("usage-log.json recovered from bak.{}", i);
                     return Ok(value);
                 }
@@ -411,7 +425,7 @@ fn read_chat_projects(app: tauri::AppHandle) -> Result<serde_json::Value, String
         return Ok(serde_json::json!([]));
     }
     let content = fs::read_to_string(&path).map_err(|error| error.to_string())?;
-    let parsed: serde_json::Value = serde_json::from_str(&content).map_err(|error| format!("JSON parse error: {}", error))?;
+    let parsed: serde_json::Value = serde_json::from_str(strip_bom(&content)).map_err(|error| format!("JSON parse error: {}", error))?;
     Ok(parsed)
 }
 
@@ -2402,7 +2416,7 @@ fn read_openclaw_gateway_auth_for_local_use() -> Result<serde_json::Value, Strin
         return Ok(serde_json::json!({ "tokenPresent": false, "error": "config not found" }));
     }
     let content = fs::read_to_string(&config_path).map_err(|e| e.to_string())?;
-    let cfg: serde_json::Value = serde_json::from_str(&content).map_err(|e| e.to_string())?;
+    let cfg: serde_json::Value = serde_json::from_str(strip_bom(&content)).map_err(|e| e.to_string())?;
     let auth = cfg.get("gateway").and_then(|g| g.get("auth"));
     let mode = auth.and_then(|a| a.get("mode")).and_then(|m| m.as_str()).unwrap_or("unknown");
     let token = auth.and_then(|a| a.get("token")).and_then(|t| t.as_str()).unwrap_or("");
@@ -2435,7 +2449,7 @@ fn get_or_create_openclaw_device_identity(app: tauri::AppHandle) -> Result<serde
     // Try to load existing identity
     if path.exists() {
         let content = fs::read_to_string(&path).map_err(|e| e.to_string())?;
-        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&content) {
+        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(strip_bom(&content)) {
             let pk_bytes = parsed.get("privateKeyHex").and_then(|v| v.as_str());
             let pub_bytes = parsed.get("publicKeyHex").and_then(|v| v.as_str());
             let device_id = parsed.get("deviceId").and_then(|v| v.as_str());
@@ -2502,7 +2516,7 @@ fn load_openclaw_gateway_token() -> Result<String, String> {
         return Err("OpenClaw 配置文件不存在".to_string());
     }
     let content = fs::read_to_string(&config_path).map_err(|e| e.to_string())?;
-    let cfg: serde_json::Value = serde_json::from_str(&content).map_err(|e| e.to_string())?;
+    let cfg: serde_json::Value = serde_json::from_str(strip_bom(&content)).map_err(|e| e.to_string())?;
     let token = cfg.get("gateway")
         .and_then(|g| g.get("auth"))
         .and_then(|a| a.get("token"))
@@ -2812,7 +2826,7 @@ fn read_openclaw_config_summary() -> Result<serde_json::Value, String> {
     }
 
     let content = fs::read_to_string(&config_path).map_err(|e| e.to_string())?;
-    let cfg: serde_json::Value = serde_json::from_str(&content).map_err(|e| e.to_string())?;
+    let cfg: serde_json::Value = serde_json::from_str(strip_bom(&content)).map_err(|e| e.to_string())?;
 
     let gateway = cfg.get("gateway");
     let auth = gateway.and_then(|g| g.get("auth"));
@@ -3732,7 +3746,7 @@ fn read_model_proxy_creds() -> Result<(String, String), String> {
     let config_path = home.join(".openclaw").join("openclaw.json");
     if !config_path.exists() { return Err("未找到模型配置，请先在「AI 助手」中配置模型".into()); }
     let content = fs::read_to_string(&config_path).map_err(|e| e.to_string())?;
-    let cfg: serde_json::Value = serde_json::from_str(&content).map_err(|e| e.to_string())?;
+    let cfg: serde_json::Value = serde_json::from_str(strip_bom(&content)).map_err(|e| e.to_string())?;
     let proxy = cfg.get("models").and_then(|m| m.get("providers")).and_then(|p| p.get(MODEL_PROXY_PROVIDER_ID));
     let key = proxy.and_then(|p| p.get("apiKey")).and_then(|k| k.as_str()).filter(|s| !s.is_empty())
         .ok_or("未配置模型密钥，请先在「AI 助手」中完成模型配置")?;
@@ -3796,7 +3810,7 @@ fn read_openclaw_model_provider_summary() -> Result<serde_json::Value, String> {
         return Ok(serde_json::json!({ "providerConfigured": false, "errors": ["config not found"] }));
     }
     let content = fs::read_to_string(&config_path).map_err(|e| e.to_string())?;
-    let cfg: serde_json::Value = serde_json::from_str(&content).map_err(|e| e.to_string())?;
+    let cfg: serde_json::Value = serde_json::from_str(strip_bom(&content)).map_err(|e| e.to_string())?;
     let providers = cfg.get("models").and_then(|m| m.get("providers"));
     let proxy = providers.and_then(|p| p.get(MODEL_PROXY_PROVIDER_ID));
     let has_key = proxy.and_then(|p| p.get("apiKey")).and_then(|k| k.as_str()).map(|s| !s.is_empty()).unwrap_or(false);
@@ -3838,7 +3852,7 @@ fn apply_openclaw_model_provider_config(token: String, model_preset: String) -> 
     }
     let mut cfg: serde_json::Value = if config_path.exists() {
         let content = fs::read_to_string(&config_path).map_err(|e| e.to_string())?;
-        serde_json::from_str(&content).map_err(|e| format!("JSON parse: {}", e))?
+        serde_json::from_str(strip_bom(&content)).map_err(|e| format!("JSON parse: {}", e))?
     } else { serde_json::json!({}) };
     // Merge provider (never log token)
     if cfg.get("models").is_none() { cfg["models"] = serde_json::json!({}); }
@@ -4001,7 +4015,7 @@ fn skill_records_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 
 fn load_skill_records(app: &tauri::AppHandle) -> Vec<serde_json::Value> {
     let path = match skill_records_path(app) { Ok(p) => p, Err(_) => return vec![] };
-    match fs::read_to_string(&path).ok().and_then(|s| serde_json::from_str(&s).ok()) {
+    match fs::read_to_string(&path).ok().and_then(|s| serde_json::from_str(strip_bom(&s)).ok()) {
         Some(v) => v,
         None => vec![],
     }
