@@ -5,8 +5,7 @@
 ## 项目速览
 
 - **AI Agent Workspace**：Tauri 2 + React 19 + TypeScript + Vite 桌面应用，U 盘便携部署，中文界面。
-- **代码根目录**：`/Users/yourenc/Code/Codex/2026-05-20/ai-agent-u-ai-1-new`
-  （注意：`/Users/yourenc/Documents/...` 同名目录只有截图，不是代码）
+- **代码根目录**：`/Users/yourenc/AIcode/ai-agent-u-ai-1-new`
 - **GitHub**：`git@github.com:Yexiangl/ai-agent-u-ai-1-new.git`，单人仓库，直接提交并推送 `main`。
 - **提交规范**：中文，`feat:/fix:/chore: 简述 (TASK-XXX)`。最新 TASK-071，版本 0.1.4。
 
