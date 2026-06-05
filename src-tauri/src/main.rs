@@ -4058,6 +4058,81 @@ fn open_openclaw_dashboard() -> Result<serde_json::Value, String> {
     }
 }
 
+// Resolve node.exe path on Windows (for the VBS gateway wrapper that hides
+// the Node.js console window). Uses `where node` to get the full path because
+// `Command::new("node")` cannot resolve npm-installed Node from a Tauri app.
+#[cfg(windows)]
+fn resolve_node_exe() -> Result<String, String> {
+    let mut cmd = Command::new("cmd");
+    cmd.args(["/c", "where", "node"]);
+    hide_command_window(&mut cmd);
+    let out = cmd.output().map_err(|e| format!("无法定位 node.exe: {}", e))?;
+    if !out.status.success() {
+        return Err("node.exe 未找到，请确认 Node.js 已安装".to_string());
+    }
+    let text = String::from_utf8_lossy(&out.stdout);
+    text.lines()
+        .next()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| "node.exe 未找到".to_string())
+}
+
+// Resolve openclaw's dist/index.js entry point on Windows.
+// Parses the CLI path from `openclaw gateway status` output (the "CLI version:"
+// line includes the openclaw.mjs path inside parentheses), then derives
+// node_modules/openclaw/dist/index.js. Falls back to %APPDATA%\npm\...\dist\index.js.
+#[cfg(windows)]
+fn resolve_openclaw_dist_js() -> Result<String, String> {
+    let mut cmd = openclaw_command();
+    cmd.args(["gateway", "status"]);
+    let out = cmd.output().ok();
+    if let Some(out) = out {
+        if out.status.success() {
+            let text = String::from_utf8_lossy(&out.stdout);
+            for line in text.lines() {
+                if line.contains("CLI version:") {
+                    if let (Some(start), Some(end)) = (line.find('('), line.rfind(')')) {
+                        let mjs_path = &line[start + 1..end];
+                        if let Some(parent) = std::path::Path::new(mjs_path).parent() {
+                            let index_js = parent.join("dist").join("index.js");
+                            if index_js.exists() {
+                                return Ok(index_js.to_string_lossy().to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if let Ok(appdata) = std::env::var("APPDATA") {
+        let cand = std::path::PathBuf::from(&appdata)
+            .join("npm").join("node_modules").join("openclaw").join("dist").join("index.js");
+        if cand.exists() {
+            return Ok(cand.to_string_lossy().to_string());
+        }
+    }
+    Err("无法定位 OpenClaw 入口 (dist/index.js)，请确认 openclaw 已安装。".to_string())
+}
+
+// Generate the VBS wrapper script that hides the Node.js console window.
+// The Windows scheduled task runs: gateway.cmd → wrapper.vbs → node.exe index.js
+// WshShell.Run(cmd, 0, False) → 0 = SW_HIDE (no window).
+#[cfg(windows)]
+fn generate_gateway_wrapper_vbs(node_exe: &str, index_js: &str) -> String {
+    format!(
+        "Set WshShell = CreateObject(\"WScript.Shell\")\r\n\
+         Dim cmd, i\r\n\
+         cmd = \"\"\"{}\"\"\" & \" \" & \"\"\"{}\"\"\"\r\n\
+         For i = 0 To WScript.Arguments.Count - 1\r\n\
+             cmd = cmd & \" \" & WScript.Arguments(i)\r\n\
+         Next\r\n\
+         WshShell.Run cmd, 0, False\r\n\
+         Set WshShell = Nothing\r\n",
+        node_exe, index_js,
+    )
+}
+
 #[tauri::command]
 fn start_openclaw_gateway() -> Result<serde_json::Value, String> {
     let output = openclaw_command()
@@ -4069,6 +4144,53 @@ fn start_openclaw_gateway() -> Result<serde_json::Value, String> {
     } else {
         Err("无法启动本地服务，请确认 OpenClaw 已安装，或在终端运行 openclaw gateway start。".to_string())
     }
+}
+
+// Install the OpenClaw gateway as a system service (scheduled task on Windows,
+// launchd/systemd on macOS/Linux) so it auto-starts on login. On Windows this
+// also generates a VBS wrapper to hide the Node.js console window. Uses --force
+// for idempotency: safe to call repeatedly (e.g. every app launch).
+#[tauri::command]
+async fn install_gateway_service() -> Result<serde_json::Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        #[cfg(windows)]
+        {
+            let node_exe = resolve_node_exe()?;
+            let index_js = resolve_openclaw_dist_js()?;
+            let home = home_dir().ok_or("无法定位用户主目录".to_string())?;
+            let dir = home.join(".openclaw");
+            fs::create_dir_all(&dir)
+                .map_err(|e| format!("无法创建 .openclaw 目录: {}", e))?;
+            let vbs_path = dir.join("gateway-wrapper.vbs");
+            let vbs = generate_gateway_wrapper_vbs(&node_exe, &index_js);
+            fs::write(&vbs_path, vbs.as_bytes())
+                .map_err(|e| format!("无法写入包装脚本: {}", e))?;
+            let out = openclaw_command()
+                .args(["gateway", "install", "--force", "--port", "18789", "--wrapper"])
+                .arg(vbs_path.to_string_lossy().to_string())
+                .output()
+                .map_err(|e| format!("安装网关服务失败: {}", e))?;
+            if !out.status.success() {
+                return Err(format!("安装网关服务失败: {}",
+                    String::from_utf8_lossy(&out.stderr).trim()));
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            let out = openclaw_command()
+                .args(["gateway", "install", "--force", "--port", "18789"])
+                .output()
+                .map_err(|e| format!("安装网关服务失败: {}", e))?;
+            if !out.status.success() {
+                return Err(format!("安装网关服务失败: {}",
+                    String::from_utf8_lossy(&out.stderr).trim()));
+            }
+        }
+        let _ = openclaw_command()
+            .args(["gateway", "start"])
+            .output();
+        Ok(serde_json::json!({ "ok": true }))
+    }).await.map_err(|e| e.to_string())?
 }
 
 // TASK-066/068: Detect whether the openclaw CLI is installed. Does NOT rely on
@@ -4261,7 +4383,7 @@ fn build_openclaw_uninstall_command() -> std::process::Command {
 
 fn main() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![read_config, write_config, clear_config, read_chat_sessions, write_chat_sessions, clear_chat_sessions, read_usage_log, append_usage_log, clear_usage_log, read_chat_projects, write_chat_projects, portable_data_status, portable_runtime_status, read_installed_capabilities, check_hermes_installed, get_hermes_version, get_hermes_paths, get_hermes_help, check_hermes_api_server, hermes_chat_completion, cancel_hermes_chat_completion, read_hermes_model_config, read_hermes_native_memory, read_openclaw_workspace_memory, apply_hermes_model_config, apply_hermes_reasoning_config, read_hermes_cron_overview, read_hermes_cron_cli_status, ensure_ai_files_dirs, list_ai_files, delete_ai_file, open_ai_file_location, pick_and_upload_file, extract_ai_file_text, save_generated_file, read_openclaw_gateway_auth_for_local_use, get_or_create_openclaw_device_identity, open_url, open_openclaw_dashboard, start_openclaw_gateway, openclaw_http_chat_completion, openclaw_http_chat_completion_stream, cancel_openclaw_chat_completion, openclaw_http_status, openclaw_session_status, openclaw_web_search, openclaw_sessions_list, clawhub_browse, clawhub_search, clawhub_skill_detail, openclaw_skills_list, clawhub_install_skill, clawhub_uninstall_skill, translate_text, read_openclaw_config_summary, read_openclaw_model_provider_summary, apply_openclaw_model_provider_config, list_openclaw_channels, add_openclaw_channel, remove_openclaw_channel, restart_openclaw_gateway, list_pairing_requests, approve_pairing_request, get_openclaw_version, start_wechat_login, cancel_wechat_login, check_openclaw_installed, install_openclaw, uninstall_openclaw, update::check_update, update::download_update, update::apply_update])
+        .invoke_handler(tauri::generate_handler![read_config, write_config, clear_config, read_chat_sessions, write_chat_sessions, clear_chat_sessions, read_usage_log, append_usage_log, clear_usage_log, read_chat_projects, write_chat_projects, portable_data_status, portable_runtime_status, read_installed_capabilities, check_hermes_installed, get_hermes_version, get_hermes_paths, get_hermes_help, check_hermes_api_server, hermes_chat_completion, cancel_hermes_chat_completion, read_hermes_model_config, read_hermes_native_memory, read_openclaw_workspace_memory, apply_hermes_model_config, apply_hermes_reasoning_config, read_hermes_cron_overview, read_hermes_cron_cli_status, ensure_ai_files_dirs, list_ai_files, delete_ai_file, open_ai_file_location, pick_and_upload_file, extract_ai_file_text, save_generated_file, read_openclaw_gateway_auth_for_local_use, get_or_create_openclaw_device_identity, open_url, open_openclaw_dashboard, start_openclaw_gateway, install_gateway_service, openclaw_http_chat_completion, openclaw_http_chat_completion_stream, cancel_openclaw_chat_completion, openclaw_http_status, openclaw_session_status, openclaw_web_search, openclaw_sessions_list, clawhub_browse, clawhub_search, clawhub_skill_detail, openclaw_skills_list, clawhub_install_skill, clawhub_uninstall_skill, translate_text, read_openclaw_config_summary, read_openclaw_model_provider_summary, apply_openclaw_model_provider_config, list_openclaw_channels, add_openclaw_channel, remove_openclaw_channel, restart_openclaw_gateway, list_pairing_requests, approve_pairing_request, get_openclaw_version, start_wechat_login, cancel_wechat_login, check_openclaw_installed, install_openclaw, uninstall_openclaw, update::check_update, update::download_update, update::apply_update])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

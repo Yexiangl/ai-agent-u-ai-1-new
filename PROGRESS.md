@@ -83,36 +83,34 @@
   ②Windows 敏感文件无 0600 等价（main.rs:1841/2496/3880，单用户机风险低）；
   ③which_hermes 在 Win 缺 known-paths 兜底（main.rs:1930，hermes 是否必装待定）。
 
-## 进行中：gateway 服务化改造（解决"要手动点启动 + 黑框常驻"，未写代码）
+## gateway 服务化改造 — 已实现，待真机验收
 
-**用户痛点**：Windows 上要手动点"启动本地服务"才"已连接"，且启动后有命令行窗口常驻，体验拉胯。
+**用户痛点**：Windows 上要手动点"启动本地服务"才"已连接"，且启动后有命令行窗口常驻。
 
-**已查清的根因（Mac + Win 实测）**：
-- gateway 是后台系统服务（Mac=launchd / Win=schtasks 计划任务「OpenClaw Gateway」，LogonTrigger 登录自启）。
-- `openclaw gateway start`=启动服务、`run`=前台运行、`install`=注册自启服务、`stop/status` 齐全。
-- 当前 app 代码（`start_openclaw_gateway` main.rs:4062）只做临时 `start`，**从没调 `install`**，
-  且一键启用流程（App.tsx:1627-1655 quickSetup、1442 handleStartGateway）只 start 不 install →
-  所以不自启、每次要手点。
-- **黑框根因**：Win 计划任务 `LogonType=Interactive` + Action 是 `gateway.cmd` 批处理 → 在交互桌面拉起 cmd→node，弹窗口常驻。
-- **`Hidden=true` 解决不了**（那只控制任务在管理器里是否列出，与程序窗口无关）。
-- **S4U 方案被否**：`Set-ScheduledTask -LogonType S4U` 需管理员，非管理员报 0x80070005 拒绝访问。
+**方案**：`openclaw gateway install --force --port 18789 --wrapper <VBS>`（VBS 用 `WshShell.Run cmd, 0, False` 隐藏窗口）。
 
-**确定可行方案（虚拟机实测验证）**：`openclaw gateway install --wrapper <VBS>`
-- 用 VBS 包装器（`WshShell.Run cmd, 0, False` → 隐藏窗口启动 node），实测：node 无窗口、
-  health 通、`openclaw gateway status/stop/start` **完全兼容无警告**、不需管理员。
-- 次选（有配置警告，不推荐）：直接改 gateway.cmd 用 `powershell -WindowStyle Hidden`。
+**已实现（待 commit，TASK-080）**：
 
-**改造前还差最后一轮调研（提示词已发给虚拟机，待回执）**：
-1. `--wrapper` 生成的 `gateway.cmd` 确切内容 + 任务 Action 的 Execute/Arguments。
-2. **关键：node.exe 和 openclaw dist/index.js 路径不能写死**（换机/换用户/便携模式会变），
-   需确认如何动态解析（`openclaw gateway status` 的 `Command:` 行含这两个路径，或让 openclaw 自己用 --wrapper 填路径）。
-3. 登录自启是否仍闪一下 cmd 窗口（VBS 隐藏的是 node 层，cmd 层可能仍闪）。
-4. `install --force` 是否幂等（app 会反复调）。
+### Rust 侧（main.rs）
+- `resolve_node_exe()` (Windows)：`cmd /c where node` → 返回 node.exe 完整路径。
+- `resolve_openclaw_dist_js()` (Windows)：解析 `openclaw gateway status` 输出中 "CLI version:" 行里的 openclaw.mjs 路径 → 推导 `dist/index.js`；兜底 `%APPDATA%\npm\node_modules\openclaw\dist\index.js`。
+- `generate_gateway_wrapper_vbs()` (Windows)：生成 VBS 模板 — `WshShell.Run(cmd, 0, False)`，路径用 `"""..."""` VBS 范式包装，换机/便携不写死（每次 install 时动态解析）。
+- `install_gateway_service` (跨平台)：Windows 路径 → 生成 VBS → `openclaw gateway install --force --port 18789 --wrapper <vbs>` → start；macOS/Linux 无 VBS，直接 install → start。幂等（`--force`），安全重复调用。
 
-**改造计划（拿到调研后实施）**：
-- 新增/改造：app「一键启用」流程从「存配置→start」改为「存配置→生成通用 VBS（不含写死路径）→
-  `openclaw gateway install --force --port 18789 --token <token> --wrapper <vbs>`→start」。
-- app 启动时自动检测：已配置但 gateway 没连上 → 自动拉起，去掉"手动点启动"。
+### 前端侧（App.tsx）
+- `handleStartGateway`：`start_openclaw_gateway` → `install_gateway_service`。
+- `quickSetup` 一键启用流程：Phase 2 从 `start_openclaw_gateway` → `install_gateway_service`。
+- **启动自检**：新增 `useEffect` — 初次检测完成后，若 `configExists && tokenPresent && !ready` 则自动 `invoke("install_gateway_service")`，去掉“手动点启动”。用 `useRef` 标志防重复触发。
+
+### 验证状态
+- Mac 端：`cargo check` ✅、`tsc --noEmit` ✅、`npm run build` ✅。
+- **待虚拟机真机验收**：
+  1. 全新安装 app → 一键启用 → 服务是否自动安装并连接（无需手动点"启动"）。
+  2. 重启 Windows / 注销再登录 → 服务是否自启、自动连接、无 cmd 窗口闪现。
+  3. 重复点"一键启用"/"启动本地服务" → 是否幂等不报错。
+  4. 便携 U 盘换机 → 服务重新安装是否正常。
+
+
 - token 来源见 `load_openclaw_gateway_token`（main.rs:2510）。
 - 兜底 plan B：若 VBS 仍闪窗，用 openclaw `install --wrapper` 指定隐藏启动器的其他形态。
 
@@ -155,9 +153,9 @@
 
 ## 待办（按优先级）
 
-1. **gateway 服务化改造**（进行中，见上「进行中」章节）：解决 Windows 手动点启动 + 黑框常驻。
-   等虚拟机最后一轮调研回执（gateway.cmd 内容 / 路径动态解析 / 闪窗 / 幂等）后写代码。
-2. **发 v0.1.7**：把 TASK-078（一键卸载）+ TASK-079 发出去；若 gateway 改造完成则一并发。
+1. **gateway 服务化改造真机验收**（代码已完成，见上「gateway 服务化改造」章节）：
+   需虚拟机在 Windows 真机验证 4 项（全新安装 → 登录自启 → 闪窗 → 便携换机）。
+2. **发 v0.1.7**：把 TASK-078（一键卸载）+ TASK-079 + TASK-080（gateway 服务化改造）一并发出去。
    发版流程：升版本号（tauri.conf.json/Cargo.toml/Cargo.lock/package.json + 前端 App.tsx 2 处、
    openclawGateway.ts 2 处）→ commit → 打 tag `v0.1.7` → push tag 触发 CI → gh 确认 Release。
 3. 卸载功能真机验收（需 v0.1.7 包）：维护卡片仅已装时显示、确认框文案、卸载后 ~/.openclaw 保留、重装恢复、无黑框。

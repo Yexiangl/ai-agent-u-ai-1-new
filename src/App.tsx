@@ -1438,13 +1438,14 @@ function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelCo
   const [refreshing, setRefreshing] = useState(false);
   const [startingGateway, setStartingGateway] = useState(false);
   const [gatewayStartError, setGatewayStartError] = useState("");
+  const hasAutoInstalledGateway = useRef(false);
 
   const handleStartGateway = async () => {
     setStartingGateway(true);
     setGatewayStartError("");
     try {
-      await invoke("start_openclaw_gateway");
-      showToast("本地服务已启动", "success");
+      await invoke("install_gateway_service");
+      showToast("本地服务已安装并启动", "success");
       await refreshAll();
     } catch {
       setGatewayStartError("无法启动本地服务，请确认 AI 助手已安装，或点击重试。");
@@ -1522,6 +1523,16 @@ function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelCo
   };
 
   useEffect(() => { refreshOpenClawStatus(); }, []);
+
+  // Auto-install gateway service on launch when config exists but service isn't running.
+  useEffect(() => {
+    if (!ocChecked) return;
+    if (hasAutoInstalledGateway.current) return;
+    if (!ocConfig?.configExists || !ocConfig?.gatewayTokenPresent) return;
+    if (ocReady) return;
+    hasAutoInstalledGateway.current = true;
+    invoke("install_gateway_service").then(() => refreshOpenClawStatus()).catch(() => {});
+  }, [ocChecked, ocConfig?.configExists, ocConfig?.gatewayTokenPresent, ocReady]);
 
   const refreshAll = async () => {
     setRefreshing(true);
@@ -1634,10 +1645,10 @@ function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelCo
                 await applyOpenClawProviderConfig(quickSetupToken, "quality");
                 setQuickSetupToken("");
                 setQuickSetupPhase("starting");
-                // Phase 2: start gateway
+                // Phase 2: install & start gateway service
                 try {
-                  await invoke("start_openclaw_gateway");
-                } catch { /* if already running or start fails, still try to check */ }
+                  await invoke("install_gateway_service");
+                } catch { /* if already running still try to check */ }
                 setQuickSetupPhase("checking");
                 // Phase 3: check status
                 await refreshAll();
