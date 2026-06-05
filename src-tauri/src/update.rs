@@ -227,45 +227,48 @@ pub fn apply_update(app: AppHandle, installer_path: String) -> Result<(), String
         let is_portable_exe = path.extension().and_then(|e| e.to_str()) == Some("exe")
             && path.file_name().and_then(|n| n.to_str()).map(|n| n.contains("portable")).unwrap_or(false);
         if is_portable_exe {
-            // Portable swap: generate a .bat that waits for this process to exit,
-            // renames the running exe to .bak, drops the new exe in place,
-            // relaunches, cleans up the .bak, then deletes itself.
+            // Portable swap: generate a PowerShell script that waits for this
+            // process to exit, renames the running exe to .bak, drops the new exe
+            // in place, relaunches, cleans up the .bak, then deletes itself.
             let current_exe = std::env::current_exe().map_err(|e| format!("获取当前程序路径失败: {}", e))?;
             let backup = current_exe.with_file_name(format!("{}.bak", current_exe.file_name().unwrap().to_string_lossy()));
-            let bat_path = current_exe.with_file_name("_update.bat");
+            let ps1_path = current_exe.with_file_name("_update.ps1");
 
-            // ping is used instead of `timeout` because the script runs with no
-            // console window, where `timeout` (needs stdin) would fail.
-            // `(goto) 2>nul & del "%~f0"` is the canonical self-delete that avoids
-            // the "找不到批处理文件 / batch file cannot be found" error.
-            //
-            // `chcp 65001` switches the console to UTF-8 BEFORE any path is used:
-            // we write this .bat as UTF-8, but cmd.exe parses .bat files using the
-            // system ANSI code page (GBK/936 on Chinese Windows) by default. Without
-            // the switch, non-ASCII paths (e.g. an install dir containing 中文) get
-            // mangled and `move`/`start` fail with "找不到文件". Redirect chcp's
-            // output to nul so nothing prints.
+            // Escape single quotes for PowerShell single-quoted string literals.
+            let esc = |p: &std::path::Path| p.to_string_lossy().replace('\'', "''");
+            let cur = esc(&current_exe);
+            let bak = esc(&backup);
+            let new = esc(&path);
+
+            // Use PowerShell (not a .bat) for the in-place swap. cmd.exe parses .bat
+            // files with the system ANSI code page (GBK on Chinese Windows): a Chinese
+            // char's UTF-8 bytes get paired as GBK double-bytes and EAT the following
+            // ASCII byte (\=0x5C and .=0x2E are valid GBK trailing bytes) — producing
+            // errors like "C:\Usersyourenc\...娴孀疾?exe" (lost backslash + dot + 乱码).
+            // `chcp 65001` could not fix it because the detached script has no console.
+            // PowerShell reads a UTF-8 BOM script as Unicode and -LiteralPath handles
+            // spaces/中文/brackets safely.
             let script = format!(
-                "@echo off\r\n\
-chcp 65001 >nul\r\n\
-ping 127.0.0.1 -n 4 >nul\r\n\
-move /y \"{cur}\" \"{bak}\" >nul 2>&1\r\n\
-move /y \"{new}\" \"{cur}\" >nul 2>&1\r\n\
-start \"\" \"{cur}\"\r\n\
-ping 127.0.0.1 -n 3 >nul\r\n\
-del /q \"{bak}\" >nul 2>&1\r\n\
-(goto) 2>nul & del \"%~f0\"\r\n",
-                cur = current_exe.display(),
-                bak = backup.display(),
-                new = path.display(),
+                "Start-Sleep -Seconds 3\r\n\
+                 Move-Item -LiteralPath '{cur}' -Destination '{bak}' -Force\r\n\
+                 Move-Item -LiteralPath '{new}' -Destination '{cur}' -Force\r\n\
+                 Start-Process -FilePath '{cur}'\r\n\
+                 Start-Sleep -Seconds 2\r\n\
+                 Remove-Item -LiteralPath '{bak}' -Force -ErrorAction SilentlyContinue\r\n\
+                 Remove-Item -LiteralPath $MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyContinue\r\n",
+                cur = cur, bak = bak, new = new,
             );
 
-            fs::write(&bat_path, script).map_err(|e| format!("生成更新脚本失败: {}", e))?;
+            // Write with a UTF-8 BOM so Windows PowerShell 5.1 parses it as UTF-8.
+            let mut bytes = vec![0xEF_u8, 0xBB, 0xBF];
+            bytes.extend_from_slice(script.as_bytes());
+            fs::write(&ps1_path, bytes).map_err(|e| format!("生成更新脚本失败: {}", e))?;
 
-            // Launch the script hidden and detached so no console window appears
-            // and it survives this process exiting.
-            std::process::Command::new("cmd")
-                .args(["/c", &bat_path.to_string_lossy()])
+            // Launch hidden + detached so no console window appears and the script
+            // survives this process exiting.
+            std::process::Command::new("powershell")
+                .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File"])
+                .arg(ps1_path.to_string_lossy().to_string())
                 .creation_flags(CREATE_NO_WINDOW | DETACHED_PROCESS)
                 .spawn()
                 .map_err(|e| format!("启动更新脚本失败: {}", e))?;
