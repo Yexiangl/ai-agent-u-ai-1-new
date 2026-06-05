@@ -154,7 +154,7 @@ pub(crate) fn workspace_root() -> Option<PathBuf> {
 
     // macOS: inside .app bundle → go up to .app's parent
     if let Some(s) = current.to_str() {
-        if s.contains(".app/Contents/MacOS") || s.contains(".app/Contents/MacOS") {
+        if s.contains(".app/Contents/MacOS") {
             // current = .../Contents/MacOS
             // go up: MacOS -> Contents -> .app -> .app parent (workspace root)
             return Some(current.parent()?.parent()?.parent()?.to_path_buf());
