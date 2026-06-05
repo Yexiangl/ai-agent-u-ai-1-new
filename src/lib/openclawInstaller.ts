@@ -12,7 +12,7 @@ export interface OpenClawInstallStatus {
   onPath?: boolean;
 }
 
-export type InstallPhase = "idle" | "installing" | "done" | "failed";
+export type InstallPhase = "idle" | "installing" | "done" | "failed" | "uninstalling" | "uninstalled";
 
 interface InstallState {
   phase: InstallPhase;
@@ -40,6 +40,11 @@ async function ensureListeners() {
   await listen<{ line: string }>("openclaw-install-log", (e) => pushLog(e.payload.line));
   await listen<{ success: boolean }>("openclaw-install-done", (e) => {
     state.phase = e.payload.success ? "done" : "failed";
+    emit();
+  });
+  // Uninstall reuses the same log event but has its own done event.
+  await listen<{ success: boolean }>("openclaw-uninstall-done", (e) => {
+    state.phase = e.payload.success ? "uninstalled" : "failed";
     emit();
   });
 }
@@ -74,4 +79,27 @@ export async function startInstall(): Promise<void> {
     state.phase = "failed";
     pushLog(typeof err === "string" ? err : "安装启动失败");
   }
+}
+
+// Kick off uninstall. Removes the openclaw CLI program only; user data in
+// ~/.openclaw is intentionally preserved. Logs/phase flow into the same store.
+export async function startUninstall(): Promise<void> {
+  if (state.phase === "uninstalling" || state.phase === "installing") return;
+  await ensureListeners();
+  state.phase = "uninstalling";
+  state.logs = [];
+  emit();
+  try {
+    await invoke("uninstall_openclaw");
+  } catch (err) {
+    state.phase = "failed";
+    pushLog(typeof err === "string" ? err : "卸载启动失败");
+  }
+}
+
+// Reset the store back to idle (e.g. after the user dismisses a result panel).
+export function resetInstallState(): void {
+  state.phase = "idle";
+  state.logs = [];
+  emit();
 }

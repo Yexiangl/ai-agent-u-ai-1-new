@@ -74,7 +74,7 @@ import { type AgentRun, type AgentRunStatus } from "@/lib/agentRunStore";
 import { type ChatProject, loadProjects, saveProjects, createProject, DEFAULT_PROJECT_ID, SYSTEM_PROJECTS } from "@/lib/chatProjects";
 import { cn, getErrorMessage } from "@/lib/utils";
 import { checkUpdate, downloadUpdate, applyUpdate, onDownloadProgress, type UpdateInfo } from "@/lib/updater";
-import { checkOpenClawInstalled, startInstall, subscribeInstall, getInstallState } from "@/lib/openclawInstaller";
+import { checkOpenClawInstalled, startInstall, startUninstall, resetInstallState, subscribeInstall, getInstallState } from "@/lib/openclawInstaller";
 import { invoke } from "@tauri-apps/api/core";  // TASK-027C-D: install/uninstall
 import { officialSkills, type OfficialSkill } from "@/data/skills";
 import { tutorials } from "@/data/tutorials";
@@ -1786,6 +1786,9 @@ function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelCo
         } />
       </SettingGroup>
       )}
+
+      {/* Maintenance: uninstall the local service (openclaw). TASK-078 */}
+      <OpenClawMaintenanceCard onChanged={refreshAll} />
 
       {/* Diagnostic popup */}
     </div>
@@ -5588,6 +5591,103 @@ function OpenClawInstallCardView({ phase, logs, logEndRef, onInstall }: {
         )}
       </CardContent>
     </Card>
+  );
+}
+
+// TASK-078: Uninstall the local service (openclaw). Removes the CLI program only;
+// user data in ~/.openclaw is preserved. Only renders when openclaw is detected.
+function OpenClawMaintenanceCard({ onChanged }: { onChanged?: () => void }) {
+  const [detected, setDetected] = useState<"checking" | "missing" | "installed">("checking");
+  const [confirming, setConfirming] = useState(false);
+  const [, forceRender] = useState(0);
+  const logEndRef = useRef<HTMLDivElement | null>(null);
+  const prevPhaseRef = useRef(getInstallState().phase);
+
+  useEffect(() => {
+    const unsub = subscribeInstall(() => forceRender((n) => n + 1));
+    return unsub;
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+    checkOpenClawInstalled()
+      .then((s) => { if (alive) setDetected(s.installed ? "installed" : "missing"); })
+      .catch(() => { if (alive) setDetected("missing"); });
+    return () => { alive = false; };
+  }, []);
+
+  const store = getInstallState();
+
+  // When an uninstall finishes, re-check and notify the parent to refresh.
+  useEffect(() => {
+    if (prevPhaseRef.current !== "uninstalled" && store.phase === "uninstalled") {
+      checkOpenClawInstalled()
+        .then((s) => setDetected(s.installed ? "installed" : "missing"))
+        .catch(() => setDetected("missing"));
+      onChanged?.();
+    }
+    prevPhaseRef.current = store.phase;
+  }, [store.phase, onChanged]);
+
+  useEffect(() => { logEndRef.current?.scrollIntoView({ block: "end" }); }, [store.logs.length]);
+
+  // Hide while installing/just-installed, or when openclaw isn't present.
+  if (detected !== "installed") return null;
+  if (store.phase === "installing" || store.phase === "done") return null;
+
+  const uninstalling = store.phase === "uninstalling";
+
+  return (
+    <>
+      <SettingGroup title="维护" description="管理本地 AI 服务的安装。卸载只移除程序，保留你的配置、密钥和已装技能。">
+        <SettingRow
+          label="卸载本地服务"
+          description="从本机移除 openclaw 程序。你的配置与数据（~/.openclaw）会保留，重新安装后可继续使用。"
+          action={
+            <Button variant="outline" size="sm" className="text-rose-600 hover:text-rose-700 dark:text-rose-400"
+              onClick={() => setConfirming(true)} disabled={uninstalling}>
+              {uninstalling ? <><Loader2 className="h-4 w-4 animate-spin" />正在卸载…</> : <><Trash2 className="h-4 w-4" />卸载本地服务</>}
+            </Button>
+          }
+        />
+        {store.phase === "uninstalled" && (
+          <SettingRow label="" tone="success"
+            description="本地服务已卸载。你的配置和数据已保留，重新安装即可恢复。" />
+        )}
+        {store.phase === "failed" && store.logs.length > 0 && (
+          <SettingRow label="" tone="danger"
+            description="卸载未成功，请查看下方日志或稍后重试。" />
+        )}
+        {(uninstalling || (store.phase === "uninstalled" && store.logs.length > 0) || (store.phase === "failed" && store.logs.length > 0)) && (
+          <div className="max-h-48 overflow-auto rounded-lg border border-border/60 bg-muted/40 p-2 font-mono text-[11px] leading-relaxed text-muted-foreground">
+            {store.logs.length === 0 ? <div className="opacity-60">处理中…</div> : store.logs.map((l, i) => <div key={i} className="whitespace-pre-wrap break-all">{l}</div>)}
+            <div ref={logEndRef} />
+          </div>
+        )}
+      </SettingGroup>
+
+      {confirming && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setConfirming(false)}>
+          <Card className="w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+            <CardHeader>
+              <CardTitle className="text-lg">确认卸载本地服务</CardTitle>
+              <CardDescription>将运行 npm uninstall -g openclaw 移除程序。你的配置、密钥、工作区和已装技能（~/.openclaw）不会被删除。</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3 text-sm">
+              <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-amber-700 dark:text-amber-400">
+                卸载后 AI 助手将无法对话，直到你重新安装本地服务。此操作需要联网。
+              </div>
+              <div className="flex gap-2 pt-1">
+                <Button className="flex-1" variant="outline" onClick={() => { setConfirming(false); void startUninstall(); }}>
+                  确认卸载
+                </Button>
+                <Button variant="ghost" onClick={() => setConfirming(false)}>取消</Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+    </>
   );
 }
 
