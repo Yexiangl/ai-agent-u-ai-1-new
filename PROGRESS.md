@@ -7,7 +7,7 @@
 - **AI Agent Workspace**：Tauri 2 + React 19 + TypeScript + Vite 桌面应用，U 盘便携部署，中文界面。
 - **代码根目录**：`/Users/yourenc/AIcode/ai-agent-u-ai-1-new`
 - **GitHub**：`git@github.com:Yexiangl/ai-agent-u-ai-1-new.git`，单人仓库，直接提交并推送 `main`。
-- **提交规范**：中文，`feat:/fix:/chore: 简述 (TASK-XXX)`。最新 TASK-073，**已发布 v0.1.5**。
+- **提交规范**：中文，`feat:/fix:/chore: 简述 (TASK-XXX)`。最新 TASK-077，**已发布 v0.1.6**。
 
 ## 关键技术约定
 
@@ -49,6 +49,17 @@
 - 修正前端硬编码：侧边栏 v0.1.1、关于页 v0.3.0、网关 client 0.1.1 → 全部 0.1.5。
 - 打 tag `v0.1.5` 触发 CI，**已发布 Release**（三资产：portable.exe / x64-setup.exe / aarch64.dmg）。
 
+### `1ac1081` v0.1.6 三项修复 + 发版 (TASK-074~077)
+
+- **TASK-074 用量统计**：OpenClaw/Hermes 流式请求体补 `stream_options.include_usage`
+  （main.rs:1054/2654）。原来流式响应不返回 usage → rawUsage=null → 前端 recordTurnUsage
+  因 total<=0 提前 return → 用量永不入账。**真机验证**：用量页显示真实 token、删会话不归零。
+- **TASK-075 中文路径升级**：`_update.bat` 第二行加 `chcp 65001`（update.rs）。原来 bat 以 UTF-8
+  写盘但 cmd 用 GBK 解析，中文路径变乱码("找不到文件 娴爾")。**真机验证** C:\我的软件\app 升级正常。
+- **TASK-076 BOM 容错**：新增 `strip_bom`/`read_json_file`，所有【文件读取】的 JSON 解析去 BOM
+  （openclaw.json 由 CLI 写、用户记事本另存可能带 BOM）。网络/CLI stdout 解析不变。
+- **TASK-077**：版本号 → 0.1.6，前端硬编码同步。打 tag `v0.1.6` 已发布 Release。
+
 ## 关键文件
 
 - **宠物**：`src/lib/pet.ts`、`petAppearance.ts`、`petCompanion.ts`、
@@ -88,10 +99,12 @@
 
 ## 待办（按优先级）
 
-1. **v0.1.5 Windows 真机全面回归**（进行中）：宠物 GUI 截图、检查更新→便携 exe 热替换全流程。
-2. CI 多架构补全（Intel Mac / ARM Windows），按需。
-3. 可选：检查更新拿不到 release notes，如需保留要单独补带降级的 API 调用。
-4. 可选：前端版本号改为动态读取 Tauri 版本，避免每次发版手改硬编码。
+1. ✅ 已完成：v0.1.6 Windows 真机回归（用量端到端、中文路径升级、BOM）均通过并发版。
+2. 可选：v0.1.5→v0.1.6 端到端"检查更新→便携 exe 热替换"完整 UI 流程仍未在真机跑过
+   （此前 v0.1.4 有 403 无法触发；v0.1.5 起检查更新已修，可从 v0.1.5 升 v0.1.6 实测一次）。
+3. CI 多架构补全（Intel Mac / ARM Windows），按需。
+4. 可选：检查更新拿不到 release notes，如需保留要单独补带降级的 API 调用。
+5. 可选：前端版本号改为动态读取 Tauri 版本，避免每次发版手改硬编码。
 
 ## 协作 / 环境备注
 
