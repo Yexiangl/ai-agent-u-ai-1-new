@@ -73,6 +73,27 @@
 
 - 两端一致性核查发现 main.rs:157 的 `||` 两边完全相同（笔误），清理。不影响功能。
 
+### `df5b66c` gateway 服务化改造 (TASK-080) — 已在 main，**未发版**
+
+- 解决 Windows「要手动点启动 + 黑框常驻」。新增 `install_gateway_service`（main.rs）：
+  Win 动态解析 node.exe（`where node`）+ openclaw dist/index.js（解析 `gateway status` 的 CLI 路径，
+  兜底 `%APPDATA%\npm\...\dist\index.js`）→ 生成隐藏窗口 VBS（`WshShell.Run cmd,0,False`）→
+  `gateway install --force --port 18789 --wrapper <vbs>` → start；Mac/Linux 无 VBS 直接 install→start。幂等。
+- 前端：`handleStartGateway` + quickSetup 改调 `install_gateway_service`；
+  新增启动自检 `useEffect`（configExists && tokenPresent && !ready → 自动拉起，去掉手动点）。
+- **真机验收（虚拟机）**：路径动态解析正确、health 通、无 cmd/wscript 残留、幂等、自动拉起均 ✅。
+  **唯一未验**：登录自启瞬间是否闪 cmd 窗口（RDP 看不了，需物理桌面注销/登录肉眼确认）。
+
+### `05eb4a7` 便携升级中文路径乱码根治 (TASK-081) — 已在 main，**未发版**
+
+- 症状：中文路径升级报 `C:\Usersyourenc\...娴孀疾?exe`（吞反斜杠 + 乱码）。
+- 根因：`_update.bat` UTF-8 写盘但 cmd 用 GBK 解析，中文 UTF-8 字节被当 GBK 双字节吞掉紧跟的
+  ASCII（`\`=0x5C、`.`=0x2E 是合法 GBK 尾字节）；TASK-075 的 `chcp` 因脚本 DETACHED 无控制台而失效。
+- 修法：便携热替换脚本 `_update.bat`(cmd/GBK) → `_update.ps1`(PowerShell + UTF-8 BOM)，
+  `Move-Item -LiteralPath '...'` 单引号字面量。彻底根治，**取代 TASK-075 的 chcp 方案**。
+- **真机验收（虚拟机）**：中文目录 + 含空格 exe 名升级成功、无乱码、无 .ps1/.bak/_new.exe 残留、新进程拉起 ✅。
+  窗口理论无（`-WindowStyle Hidden` + `CREATE_NO_WINDOW + DETACHED_PROCESS` 双保险）。
+
 ## 两端一致性核查结论（已做，TASK-079 那轮）
 
 核查 23 处平台分支。核心功能（openclaw 命令/安装/卸载、open_url、dashboard、known_paths、
@@ -83,36 +104,17 @@
   ②Windows 敏感文件无 0600 等价（main.rs:1841/2496/3880，单用户机风险低）；
   ③which_hermes 在 Win 缺 known-paths 兜底（main.rs:1930，hermes 是否必装待定）。
 
-## gateway 服务化改造 — 已实现，待真机验收
+## 唯一悬而未决：gateway 登录自启闪窗（TASK-080 收尾项）
 
-**用户痛点**：Windows 上要手动点"启动本地服务"才"已连接"，且启动后有命令行窗口常驻。
-
-**方案**：`openclaw gateway install --force --port 18789 --wrapper <VBS>`（VBS 用 `WshShell.Run cmd, 0, False` 隐藏窗口）。
-
-**已实现（待 commit，TASK-080）**：
-
-### Rust 侧（main.rs）
-- `resolve_node_exe()` (Windows)：`cmd /c where node` → 返回 node.exe 完整路径。
-- `resolve_openclaw_dist_js()` (Windows)：解析 `openclaw gateway status` 输出中 "CLI version:" 行里的 openclaw.mjs 路径 → 推导 `dist/index.js`；兜底 `%APPDATA%\npm\node_modules\openclaw\dist\index.js`。
-- `generate_gateway_wrapper_vbs()` (Windows)：生成 VBS 模板 — `WshShell.Run(cmd, 0, False)`，路径用 `"""..."""` VBS 范式包装，换机/便携不写死（每次 install 时动态解析）。
-- `install_gateway_service` (跨平台)：Windows 路径 → 生成 VBS → `openclaw gateway install --force --port 18789 --wrapper <vbs>` → start；macOS/Linux 无 VBS，直接 install → start。幂等（`--force`），安全重复调用。
-
-### 前端侧（App.tsx）
-- `handleStartGateway`：`start_openclaw_gateway` → `install_gateway_service`。
-- `quickSetup` 一键启用流程：Phase 2 从 `start_openclaw_gateway` → `install_gateway_service`。
-- **启动自检**：新增 `useEffect` — 初次检测完成后，若 `configExists && tokenPresent && !ready` 则自动 `invoke("install_gateway_service")`，去掉“手动点启动”。用 `useRef` 标志防重复触发。
-
-### 验证状态
-- Mac 端：`cargo check` ✅、`tsc --noEmit` ✅、`npm run build` ✅。
-- **待虚拟机真机验收**：
-  1. 全新安装 app → 一键启用 → 服务是否自动安装并连接（无需手动点"启动"）。
-  2. 重启 Windows / 注销再登录 → 服务是否自启、自动连接、无 cmd 窗口闪现。
-  3. 重复点"一键启用"/"启动本地服务" → 是否幂等不报错。
-  4. 便携 U 盘换机 → 服务重新安装是否正常。
-
-
+代码与功能已验收通过（见上 `df5b66c` TASK-080）。**唯一没验的**是 Windows 登录瞬间是否闪一下 cmd 窗口：
+- 链路 `计划任务 → gateway.cmd(批处理) → wrapper.vbs → node(隐藏)`。VBS 只隐藏 node 层；
+  Task Scheduler 在交互会话跑 `.cmd` 时由 `cmd.exe`(console 子系统)解释 → **登录瞬间可能闪一下控制台**（<0.5s）。
+- 进程快照抓不到（一闪即退），**必须真机物理桌面（非 RDP）注销→重新登录肉眼观察**。
+- **若确认明显闪窗的兜底方案**（未实施，待确认后再动）：install 后用 PowerShell 把任务 Action 从
+  `gateway.cmd` 改为 `wscript.exe //B //Nologo <wrapper.vbs>`，并把 gateway.cmd 里那 8 个 `OPENCLAW_*`
+  环境变量塞进任务环境或写进 VBS，彻底跳过 cmd 层。代价：篡改 openclaw 管理的任务，跨版本可能脆。
 - token 来源见 `load_openclaw_gateway_token`（main.rs:2510）。
-- 兜底 plan B：若 VBS 仍闪窗，用 openclaw `install --wrapper` 指定隐藏启动器的其他形态。
+
 
 ## 关键文件
 
@@ -153,9 +155,9 @@
 
 ## 待办（按优先级）
 
-1. **gateway 服务化改造真机验收**（代码已完成，见上「gateway 服务化改造」章节）：
-   需虚拟机在 Windows 真机验证 4 项（全新安装 → 登录自启 → 闪窗 → 便携换机）。
-2. **发 v0.1.7**：把 TASK-078（一键卸载）+ TASK-079 + TASK-080（gateway 服务化改造）一并发出去。
+1. **gateway 登录自启闪窗确认**（TASK-080 唯一收尾项，见上「唯一悬而未决」章节）：
+   需物理桌面（非 RDP）注销→重新登录肉眼看登录瞬间是否闪 cmd 窗。其余功能已验收通过。
+2. **发 v0.1.7**：把 TASK-078（一键卸载）+ TASK-079 + TASK-080（gateway 服务化）+ TASK-081（中文路径升级）一并发。
    发版流程：升版本号（tauri.conf.json/Cargo.toml/Cargo.lock/package.json + 前端 App.tsx 2 处、
    openclawGateway.ts 2 处）→ commit → 打 tag `v0.1.7` → push tag 触发 CI → gh 确认 Release。
 3. 卸载功能真机验收（需 v0.1.7 包）：维护卡片仅已装时显示、确认框文案、卸载后 ~/.openclaw 保留、重装恢复、无黑框。
