@@ -7,7 +7,7 @@
 - **AI Agent Workspace**：Tauri 2 + React 19 + TypeScript + Vite 桌面应用，U 盘便携部署，中文界面。
 - **代码根目录**：`/Users/yourenc/AIcode/ai-agent-u-ai-1-new`
 - **GitHub**：`git@github.com:Yexiangl/ai-agent-u-ai-1-new.git`，单人仓库，直接提交并推送 `main`。
-- **提交规范**：中文，`feat:/fix:/chore: 简述 (TASK-XXX)`。最新 TASK-077，**已发布 v0.1.6**。
+- **提交规范**：中文，`feat:/fix:/chore: 简述 (TASK-XXX)`。最新 TASK-079，**已发布 v0.1.6**；main 上有 TASK-078/079 未发版。
 
 ## 关键技术约定
 
@@ -60,6 +60,62 @@
   （openclaw.json 由 CLI 写、用户记事本另存可能带 BOM）。网络/CLI stdout 解析不变。
 - **TASK-077**：版本号 → 0.1.6，前端硬编码同步。打 tag `v0.1.6` 已发布 Release。
 
+### `9475b15` 一键卸载本地服务 (TASK-078) — 已在 main，**未发版**
+
+- 后端 `uninstall_openclaw`（main.rs，install 命令附近）：跑 `npm uninstall -g openclaw`，
+  镜像 install 的流式日志（复用 `openclaw-install-log` 事件 + 新增 `openclaw-uninstall-done`）。
+  清理残留启动器 shim，但**保留 `~/.openclaw`**（配置/密钥/工作区/技能）。npm 非0退出但启动器已不存在也判成功（幂等）。
+- 前端 `openclawInstaller.ts`：新增 `uninstalling`/`uninstalled` 状态、`startUninstall`、`resetInstallState`。
+- AI 助手页（EnginesPage）新增「维护」卡片 `OpenClawMaintenanceCard`：仅在已安装时显示，
+  卸载前弹确认框（说明保留数据），流式日志展示。**产品决策：只卸程序、保留数据。**
+
+### `d30b004` workspace_root 去重复条件 (TASK-079) — 已在 main，**未发版**
+
+- 两端一致性核查发现 main.rs:157 的 `||` 两边完全相同（笔误），清理。不影响功能。
+
+## 两端一致性核查结论（已做，TASK-079 那轮）
+
+核查 23 处平台分支。核心功能（openclaw 命令/安装/卸载、open_url、dashboard、known_paths、
+便携数据探测）**两端对等**。差异分类：
+- 已修：workspace_root 重复条件（TASK-079）。
+- 无影响：`stopMacos` 脚本检测缺失（前端没用这些字段，死数据）；`hide_command_window` mac no-op（合理）。
+- **待用户决策，未改**：①mac 自动更新无热替换（update.rs:284，只 open dmg 手动装，业界标准，建议保持）；
+  ②Windows 敏感文件无 0600 等价（main.rs:1841/2496/3880，单用户机风险低）；
+  ③which_hermes 在 Win 缺 known-paths 兜底（main.rs:1930，hermes 是否必装待定）。
+
+## 进行中：gateway 服务化改造（解决"要手动点启动 + 黑框常驻"，未写代码）
+
+**用户痛点**：Windows 上要手动点"启动本地服务"才"已连接"，且启动后有命令行窗口常驻，体验拉胯。
+
+**已查清的根因（Mac + Win 实测）**：
+- gateway 是后台系统服务（Mac=launchd / Win=schtasks 计划任务「OpenClaw Gateway」，LogonTrigger 登录自启）。
+- `openclaw gateway start`=启动服务、`run`=前台运行、`install`=注册自启服务、`stop/status` 齐全。
+- 当前 app 代码（`start_openclaw_gateway` main.rs:4062）只做临时 `start`，**从没调 `install`**，
+  且一键启用流程（App.tsx:1627-1655 quickSetup、1442 handleStartGateway）只 start 不 install →
+  所以不自启、每次要手点。
+- **黑框根因**：Win 计划任务 `LogonType=Interactive` + Action 是 `gateway.cmd` 批处理 → 在交互桌面拉起 cmd→node，弹窗口常驻。
+- **`Hidden=true` 解决不了**（那只控制任务在管理器里是否列出，与程序窗口无关）。
+- **S4U 方案被否**：`Set-ScheduledTask -LogonType S4U` 需管理员，非管理员报 0x80070005 拒绝访问。
+
+**确定可行方案（虚拟机实测验证）**：`openclaw gateway install --wrapper <VBS>`
+- 用 VBS 包装器（`WshShell.Run cmd, 0, False` → 隐藏窗口启动 node），实测：node 无窗口、
+  health 通、`openclaw gateway status/stop/start` **完全兼容无警告**、不需管理员。
+- 次选（有配置警告，不推荐）：直接改 gateway.cmd 用 `powershell -WindowStyle Hidden`。
+
+**改造前还差最后一轮调研（提示词已发给虚拟机，待回执）**：
+1. `--wrapper` 生成的 `gateway.cmd` 确切内容 + 任务 Action 的 Execute/Arguments。
+2. **关键：node.exe 和 openclaw dist/index.js 路径不能写死**（换机/换用户/便携模式会变），
+   需确认如何动态解析（`openclaw gateway status` 的 `Command:` 行含这两个路径，或让 openclaw 自己用 --wrapper 填路径）。
+3. 登录自启是否仍闪一下 cmd 窗口（VBS 隐藏的是 node 层，cmd 层可能仍闪）。
+4. `install --force` 是否幂等（app 会反复调）。
+
+**改造计划（拿到调研后实施）**：
+- 新增/改造：app「一键启用」流程从「存配置→start」改为「存配置→生成通用 VBS（不含写死路径）→
+  `openclaw gateway install --force --port 18789 --token <token> --wrapper <vbs>`→start」。
+- app 启动时自动检测：已配置但 gateway 没连上 → 自动拉起，去掉"手动点启动"。
+- token 来源见 `load_openclaw_gateway_token`（main.rs:2510）。
+- 兜底 plan B：若 VBS 仍闪窗，用 openclaw `install --wrapper` 指定隐藏启动器的其他形态。
+
 ## 关键文件
 
 - **宠物**：`src/lib/pet.ts`、`petAppearance.ts`、`petCompanion.ts`、
@@ -99,12 +155,16 @@
 
 ## 待办（按优先级）
 
-1. ✅ 已完成：v0.1.6 Windows 真机回归（用量端到端、中文路径升级、BOM）均通过并发版。
-2. 可选：v0.1.5→v0.1.6 端到端"检查更新→便携 exe 热替换"完整 UI 流程仍未在真机跑过
-   （此前 v0.1.4 有 403 无法触发；v0.1.5 起检查更新已修，可从 v0.1.5 升 v0.1.6 实测一次）。
-3. CI 多架构补全（Intel Mac / ARM Windows），按需。
-4. 可选：检查更新拿不到 release notes，如需保留要单独补带降级的 API 调用。
-5. 可选：前端版本号改为动态读取 Tauri 版本，避免每次发版手改硬编码。
+1. **gateway 服务化改造**（进行中，见上「进行中」章节）：解决 Windows 手动点启动 + 黑框常驻。
+   等虚拟机最后一轮调研回执（gateway.cmd 内容 / 路径动态解析 / 闪窗 / 幂等）后写代码。
+2. **发 v0.1.7**：把 TASK-078（一键卸载）+ TASK-079 发出去；若 gateway 改造完成则一并发。
+   发版流程：升版本号（tauri.conf.json/Cargo.toml/Cargo.lock/package.json + 前端 App.tsx 2 处、
+   openclawGateway.ts 2 处）→ commit → 打 tag `v0.1.7` → push tag 触发 CI → gh 确认 Release。
+3. 卸载功能真机验收（需 v0.1.7 包）：维护卡片仅已装时显示、确认框文案、卸载后 ~/.openclaw 保留、重装恢复、无黑框。
+4. 可选：v0.1.6 端到端"检查更新→便携 exe 热替换"完整 UI 流程真机验证。
+5. 待用户决策的两端一致性问题（见上一致性核查章节，默认不动）。
+6. CI 多架构补全（Intel Mac / ARM Windows），按需。
+7. 可选：前端版本号改为动态读取 Tauri 版本，避免每次发版手改硬编码。
 
 ## 协作 / 环境备注
 
