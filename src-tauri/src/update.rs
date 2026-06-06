@@ -4,6 +4,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::Duration;
 use futures_util::StreamExt;
+use sha2::{Sha256, Digest};
 use tauri::{AppHandle, Emitter};
 
 const GITHUB_OWNER: &str = "Yexiangl";
@@ -168,9 +169,20 @@ pub async fn download_update(app: AppHandle, url: String, version: String) -> Re
         .map(str::to_string)
         .unwrap_or_else(|| format!("AI-Agent-Workspace-{}.{}", version, ext));
     let dest = update_dir()?.join(&file_name);
+    // Stage to a .tmp first so a corrupt / interrupted / tampered download never
+    // lands at the final path (apply_update would otherwise run a bad exe).
+    let tmp = update_dir()?.join(format!("{}.part", file_name));
+
+    // Fetch the expected SHA256 (published as <asset>.sha256 alongside the
+    // release) BEFORE downloading. If it's missing (older release without
+    // checksums), we degrade gracefully and skip verification rather than fail.
+    let expected_sha = fetch_expected_sha256(&url).await;
 
     let client = reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(10))
+        // Overall read timeout: without this a stalled server would hang forever
+        // (only connect_timeout was set before).
+        .timeout(Duration::from_secs(300))
         .user_agent("ai-agent-workspace-updater/0.1")
         .build()
         .map_err(|e| format!("HTTP 初始化失败: {}", e))?;
@@ -184,13 +196,15 @@ pub async fn download_update(app: AppHandle, url: String, version: String) -> Re
     let total = resp.content_length().unwrap_or(0);
     let mut downloaded: u64 = 0;
     let mut last_pct: i64 = -1;
-    let mut file = fs::File::create(&dest).map_err(|e| format!("无法写入文件: {}", e))?;
+    let mut file = fs::File::create(&tmp).map_err(|e| format!("无法写入文件: {}", e))?;
     let mut stream = resp.bytes_stream();
+    let mut hasher = Sha256::new();
 
     use std::io::Write;
     while let Some(chunk) = stream.next().await {
         let bytes = chunk.map_err(|e| format!("下载中断: {}", e))?;
         file.write_all(&bytes).map_err(|e| format!("写入失败: {}", e))?;
+        hasher.update(&bytes);
         downloaded += bytes.len() as u64;
         let pct = if total > 0 { (downloaded * 100 / total) as i64 } else { -1 };
         if pct != last_pct {
@@ -201,8 +215,53 @@ pub async fn download_update(app: AppHandle, url: String, version: String) -> Re
         }
     }
     file.flush().map_err(|e| format!("保存失败: {}", e))?;
+    drop(file);
+
+    // Integrity check: compare the computed digest against the published one.
+    if let Some(expected) = expected_sha {
+        let actual = hex::encode(hasher.finalize());
+        if !actual.eq_ignore_ascii_case(&expected) {
+            let _ = fs::remove_file(&tmp);
+            return Err(format!(
+                "更新包校验失败（SHA256 不匹配，文件可能损坏或被篡改）。\n期望: {}\n实际: {}",
+                expected, actual
+            ));
+        }
+    }
+
+    // Verified (or no checksum available) → promote the staged file to its final
+    // name. Remove any stale dest first so rename can't fail on Windows.
+    let _ = fs::remove_file(&dest);
+    fs::rename(&tmp, &dest).map_err(|e| format!("保存更新包失败: {}", e))?;
 
     Ok(dest.to_string_lossy().to_string())
+}
+
+// Fetch the expected SHA256 hex digest for a release asset. By convention the CI
+// publishes a sibling "<asset-url>.sha256" file whose body is just the digest.
+// Returns None if it can't be retrieved (older releases without checksums), in
+// which case the caller skips verification instead of failing the update.
+async fn fetch_expected_sha256(asset_url: &str) -> Option<String> {
+    let sha_url = format!("{}.sha256", asset_url);
+    let client = reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(8))
+        .timeout(Duration::from_secs(20))
+        .user_agent("ai-agent-workspace-updater/0.1")
+        .build()
+        .ok()?;
+    let resp = client.get(&sha_url).send().await.ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let text = resp.text().await.ok()?;
+    // The file may be "<hash>" or "<hash>  <filename>"; take the first token and
+    // sanity-check it looks like a 64-char hex SHA256.
+    let token = text.split_whitespace().next().unwrap_or("").trim().to_string();
+    if token.len() == 64 && token.chars().all(|c| c.is_ascii_hexdigit()) {
+        Some(token)
+    } else {
+        None
+    }
 }
 
 // ── apply_update: Launch installer OR swap the portable exe in place ──────
