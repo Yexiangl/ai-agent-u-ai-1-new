@@ -108,7 +108,37 @@
 - **真机验收（虚拟机 + 用户物理桌面）通过**：①点能力中心**实测无黑框**（用户物理桌面确认）；
   ②回归——skills list / --version / gateway status / plugins list 新旧方式输出 SHA256 全匹配，
   功能无损；③边界——.mjs 不存在时正确回退 `cmd /c`。
-  注：clawhub 在线市场走纯 HTTP（main.rs:3308），不经 openclaw CLI，不受本改影响。
+   注：clawhub 在线市场走纯 HTTP（main.rs:3308），不经 openclaw CLI，不受本改影响。
+
+## v0.1.7 已发布（`gh release v0.1.7`，含 078/079/080/081/082）
+
+CI 三 job 全绿，Win 便携版 + Win 安装版 + Mac(arm64)dmg 已出。中文 release notes 已填。
+遗留：CI 矩阵写 x64 但 macos-latest 实出 aarch64（Mac 双架构待修）；Node20 action 弃用警告（待升级 action 版本）。
+
+### `c557039` Windows 体验优化 P1-P5 (TASK-083) — 已在 main，**未发版（>0.1.7）**
+
+- P1 启动卡顿根治：`check_hermes_installed`/`get_hermes_paths`/`read_installed_capabilities`
+  改 `spawn_blocking`（原同步阻塞，启动/进能力中心冻 UI 数秒）。
+- P2 前端 `detect()` 三连串行 → `Promise.all`。
+- P3 深色模式持久化：AppConfig 加 `dark` 字段，`toggleDark` 持久化，启动恢复。
+- P4 窗口大小/位置持久化：引入 `tauri-plugin-window-state`（注册即生效，状态存 AppData，
+  便携换机不跟随属可接受）。
+- P5 中文字体栈：body 声明跨平台中文字体（Win 微软雅黑 / Mac 苹方优先）。
+- **真机验收（虚拟机自构建 arm64 + 用户物理桌面）**：冷启动实测 ~1.05s 无卡顿、能力中心异步不冻、
+  深色/窗口记忆、功能回归全过。注：虚拟机出的是 arm64 包（仅验逻辑），x64 实包等发版 CI 出。
+
+### `2a3b7ef` Windows 稳定性硬化 P6-P9 (TASK-084) — 已在 main，**未发版**
+
+- P6 `write_config` 原子写（tmp+rename）+ `.bak` 备份；`read_config` 主文件损坏回退 .bak。
+  （原裸 `fs::write`，是唯一没做原子写的，sessions/usage 早有）。
+- P7 `install_gateway_service` 的 `gateway start` 改用 **TCP 端口探测**（127.0.0.1:18789，
+  最多重试 5s）判定真实状态，不再 `let _ =` 静默吞错；**保留幂等**（已运行端口也在监听，不误报）。
+- P8 `.env` 读失败返回错误而非 `unwrap_or_default()` 静默清空（避免覆盖写丢用户其它 env 变量）。
+- P9 `resolve_node_exe`/`resolve_openclaw_dist_js` 加 `OnceLock` 缓存（减少 `where node` /
+  `gateway status` 重复冷启动）。
+- 验证：cargo check ✅、tsc ✅、build ✅、Windows-only 缓存逻辑独立 stub 校验 ✅。
+- **待虚拟机验收**：①P7 故意占用 18789 端口看是否正确报错 + 正常是否仍幂等成功；
+  ②P6 写 config 时强杀进程看是否损坏/能否从 .bak 恢复。
 
 ## 两端一致性核查结论（已做，TASK-079 那轮）
 
