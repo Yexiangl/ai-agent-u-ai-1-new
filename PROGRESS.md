@@ -94,6 +94,20 @@
 - **真机验收（虚拟机）**：中文目录 + 含空格 exe 名升级成功、无乱码、无 .ps1/.bak/_new.exe 残留、新进程拉起 ✅。
   窗口理论无（`-WindowStyle Hidden` + `CREATE_NO_WINDOW + DETACHED_PROCESS` 双保险）。
 
+### `cd0f303` openclaw 命令黑框根治 (TASK-082) — 已在 main，**未发版**
+
+- 症状：点"能力中心"（以及任何 openclaw CLI 调用）弹一下黑框又关。
+- 根因（虚拟机 procmon + MSDN 证实）：`cmd /c openclaw.cmd` 链路里 cmd 无 console（已 CREATE_NO_WINDOW），
+  但 cmd 内部 spawn `node.exe`(console 子系统)不带 flag → Windows 给 node **新分配可见控制台**。
+  `CREATE_NO_WINDOW` 不传递子/孙进程、且被子进程 CREATE_NEW_CONSOLE 覆盖，所以拦不住。与 gateway 黑框同源。
+- 修法：`openclaw_command()`(main.rs:119) Windows 分支改为**直接跑 `node.exe openclaw.mjs`**（从 .cmd
+  同级 `node_modules/openclaw/openclaw.mjs` 解析；node 优先用 shim 旁 bundled，否则 `where node`），
+  node 自身加 CREATE_NO_WINDOW → 无控制台。跳过 cmd 中间层。解析失败回退原 `cmd /c`。
+  新增 `resolve_openclaw_node_invocation()`。**一处改根治全部 ~18 个 openclaw 调用点。**
+- 验证：`cargo check` ✅；Windows-only 函数体用独立 stub 单独类型校验 ✅。
+- **待虚拟机验收**：①点能力中心无黑框；②回归——能力/技能列表、频道列表、一键启用、版本检查等
+  功能仍正常（执行方式从 `cmd /c .cmd` 变 `node .mjs`，需确认输出解析无差异）。
+
 ## 两端一致性核查结论（已做，TASK-079 那轮）
 
 核查 23 处平台分支。核心功能（openclaw 命令/安装/卸载、open_url、dashboard、known_paths、
@@ -157,7 +171,7 @@
 
 1. **gateway 登录自启闪窗确认**（TASK-080 唯一收尾项，见上「唯一悬而未决」章节）：
    需物理桌面（非 RDP）注销→重新登录肉眼看登录瞬间是否闪 cmd 窗。其余功能已验收通过。
-2. **发 v0.1.7**：把 TASK-078（一键卸载）+ TASK-079 + TASK-080（gateway 服务化）+ TASK-081（中文路径升级）一并发。
+2. **发 v0.1.7**：把 TASK-078（一键卸载）+ TASK-079 + TASK-080（gateway 服务化）+ TASK-081（中文路径升级）+ TASK-082（命令黑框根治）一并发。
    发版流程：升版本号（tauri.conf.json/Cargo.toml/Cargo.lock/package.json + 前端 App.tsx 2 处、
    openclawGateway.ts 2 处）→ commit → 打 tag `v0.1.7` → push tag 触发 CI → gh 确认 Release。
 3. 卸载功能真机验收（需 v0.1.7 包）：维护卡片仅已装时显示、确认框文案、卸载后 ~/.openclaw 保留、重装恢复、无黑框。
