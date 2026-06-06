@@ -916,7 +916,7 @@ function App() {
 
   useEffect(() => {
     loadConfig()
-      .then(setConfig)
+      .then((cfg) => { setConfig(cfg); setDark(cfg.dark); })
       .finally(() => setReady(true));
   }, []);
 
@@ -928,18 +928,19 @@ function App() {
     if (!ready) return;
     let cancelled = false;
     const detect = async () => {
-      try {
-        const cli = await hermesLegacyBackend.checkHermesInstalled();
-        if (!cancelled) setHermesCli(cli);
-      } catch { /* ignore */ }
-      try {
-        const api = await hermesLegacyBackend.checkHermesApiServer();
-        if (!cancelled) setHermesApi(api);
-      } catch { /* ignore */ }
-      try {
-        const modelConfig = await readHermesModelConfig();
-        if (!cancelled) setHermesModelConfig(modelConfig);
-      } catch { /* ignore */ }
+      // These three probes are independent — run them in parallel so startup
+      // isn't blocked by serial CLI cold-starts (each can take ~1s on Windows).
+      await Promise.all([
+        hermesLegacyBackend.checkHermesInstalled()
+          .then((cli) => { if (!cancelled) setHermesCli(cli); })
+          .catch(() => { /* ignore */ }),
+        hermesLegacyBackend.checkHermesApiServer()
+          .then((api) => { if (!cancelled) setHermesApi(api); })
+          .catch(() => { /* ignore */ }),
+        readHermesModelConfig()
+          .then((modelConfig) => { if (!cancelled) setHermesModelConfig(modelConfig); })
+          .catch(() => { /* ignore */ }),
+      ]);
     };
     detect();
     const interval = window.setInterval(async () => {
@@ -1025,6 +1026,13 @@ function App() {
     await saveConfig(next);
   };
 
+  // Toggle dark mode and persist to config so it survives restarts.
+  const toggleDark = () => {
+    const next = !dark;
+    setDark(next);
+    void updateConfig({ ...config, dark: next });
+  };
+
   const refreshHermesApi = async () => {
     const status = await hermesLegacyBackend.checkHermesApiServer();
     setHermesApi(status);
@@ -1096,7 +1104,7 @@ function App() {
             <h1 className="text-lg font-semibold">{current.label}</h1>
             </div>
           </div>
-          <Button variant="outline" size="icon" onClick={() => setDark(!dark)} title="切换深色模式">
+          <Button variant="outline" size="icon" onClick={toggleDark} title="切换深色模式">
             {dark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
           </Button>
         </header>

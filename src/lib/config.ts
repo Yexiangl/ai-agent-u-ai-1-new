@@ -17,6 +17,7 @@ export interface AppConfig {
   enabledSkills: string[];
   tasks: SavedTask[];
   showReasoning: boolean;
+  dark: boolean;
   pet?: PetState | null;
 }
 
@@ -51,5 +52,6 @@ export const DEFAULT_CONFIG: AppConfig = {
   enabledSkills: [],
   tasks: [],
   showReasoning: true,
+  dark: false,
   pet: null
 };

@@ -902,8 +902,12 @@ fn probe_hermes_api(host: &str) -> Result<serde_json::Value, String> {
 }
 
 #[tauri::command]
-fn check_hermes_installed() -> Result<serde_json::Value, String> {
-    Ok(hermes_status())
+async fn check_hermes_installed() -> Result<serde_json::Value, String> {
+    // hermes_status() shells out (`where hermes` + `hermes --version`, up to 5s
+    // each). Run off the main thread so the WebView doesn't freeze on startup.
+    tauri::async_runtime::spawn_blocking(hermes_status)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -912,8 +916,10 @@ fn get_hermes_version() -> Result<Option<String>, String> {
 }
 
 #[tauri::command]
-fn get_hermes_paths() -> Result<serde_json::Value, String> {
-    Ok(hermes_status())
+async fn get_hermes_paths() -> Result<serde_json::Value, String> {
+    tauri::async_runtime::spawn_blocking(hermes_status)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -3955,7 +3961,10 @@ fn apply_openclaw_model_provider_config(token: String, model_preset: String) -> 
 
 // TASK-027C-C: Read-only list of installed skills/plugins via OpenClaw CLI
 #[tauri::command]
-fn read_installed_capabilities() -> Result<serde_json::Value, String> {
+async fn read_installed_capabilities() -> Result<serde_json::Value, String> {
+    // Runs the openclaw CLI up to 3x (cold start ~0.9s each). Must run off the
+    // main thread, otherwise the WebView freezes for ~2.7s when this page opens.
+    tauri::async_runtime::spawn_blocking(move || {
     let mut warnings: Vec<String> = Vec::new();
     let mut skills: Vec<serde_json::Value> = Vec::new();
     let mut plugins: Vec<serde_json::Value> = Vec::new();
@@ -4040,6 +4049,7 @@ fn read_installed_capabilities() -> Result<serde_json::Value, String> {
         "plugins": plugins,
         "warnings": warnings,
     }))
+    }).await.map_err(|e| e.to_string())?
 }
 
 // TASK-027C-D/E: Install/uninstall records path
@@ -4418,6 +4428,9 @@ fn build_openclaw_uninstall_command() -> std::process::Command {
 
 fn main() {
     tauri::Builder::default()
+        // Persist & restore window size/position across launches (Windows users
+        // lose their adjusted window otherwise). Rust-side registration is enough.
+        .plugin(tauri_plugin_window_state::Builder::default().build())
         .invoke_handler(tauri::generate_handler![read_config, write_config, clear_config, read_chat_sessions, write_chat_sessions, clear_chat_sessions, read_usage_log, append_usage_log, clear_usage_log, read_chat_projects, write_chat_projects, portable_data_status, portable_runtime_status, read_installed_capabilities, check_hermes_installed, get_hermes_version, get_hermes_paths, get_hermes_help, check_hermes_api_server, hermes_chat_completion, cancel_hermes_chat_completion, read_hermes_model_config, read_hermes_native_memory, read_openclaw_workspace_memory, apply_hermes_model_config, apply_hermes_reasoning_config, read_hermes_cron_overview, read_hermes_cron_cli_status, ensure_ai_files_dirs, list_ai_files, delete_ai_file, open_ai_file_location, pick_and_upload_file, extract_ai_file_text, save_generated_file, read_openclaw_gateway_auth_for_local_use, get_or_create_openclaw_device_identity, open_url, open_openclaw_dashboard, start_openclaw_gateway, install_gateway_service, openclaw_http_chat_completion, openclaw_http_chat_completion_stream, cancel_openclaw_chat_completion, openclaw_http_status, openclaw_session_status, openclaw_web_search, openclaw_sessions_list, clawhub_browse, clawhub_search, clawhub_skill_detail, openclaw_skills_list, clawhub_install_skill, clawhub_uninstall_skill, translate_text, read_openclaw_config_summary, read_openclaw_model_provider_summary, apply_openclaw_model_provider_config, list_openclaw_channels, add_openclaw_channel, remove_openclaw_channel, restart_openclaw_gateway, list_pairing_requests, approve_pairing_request, get_openclaw_version, start_wechat_login, cancel_wechat_login, check_openclaw_installed, install_openclaw, uninstall_openclaw, update::check_update, update::download_update, update::apply_update])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
