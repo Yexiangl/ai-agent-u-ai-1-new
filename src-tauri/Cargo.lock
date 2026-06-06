@@ -30,7 +30,7 @@ dependencies = [
 
 [[package]]
 name = "ai-agent-workspace"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "calamine",
  "csv",
