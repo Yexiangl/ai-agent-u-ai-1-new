@@ -121,6 +121,18 @@ fn openclaw_command() -> Command {
     #[cfg(windows)]
     {
         if bin.to_lowercase().ends_with(".cmd") || bin.to_lowercase().ends_with(".bat") {
+            // Prefer running node + openclaw.mjs DIRECTLY instead of `cmd /c openclaw.cmd`.
+            // The .cmd shim has no console (we set CREATE_NO_WINDOW on cmd), so when it
+            // internally spawns node.exe (a console subsystem app) with no flags, Windows
+            // allocates a NEW visible console for node → a black window flashes for the
+            // duration of the CLI call. Launching node ourselves with CREATE_NO_WINDOW
+            // keeps node console-less. Falls back to `cmd /c` if the .mjs can't be found.
+            if let Some((node, mjs)) = resolve_openclaw_node_invocation(&bin) {
+                let mut c = Command::new(node);
+                c.arg(mjs);
+                hide_command_window(&mut c);
+                return c;
+            }
             let mut c = Command::new("cmd");
             c.arg("/c").arg(&bin);
             hide_command_window(&mut c);
@@ -130,6 +142,29 @@ fn openclaw_command() -> Command {
     let mut c = Command::new(bin);
     hide_command_window(&mut c);
     c
+}
+
+// Windows: given the resolved openclaw `.cmd` shim path, derive (node_exe, openclaw.mjs)
+// so we can run the CLI directly without the cmd→node console allocation that flashes
+// a black window. The npm shim lives next to `node_modules/openclaw/openclaw.mjs`; node
+// is either bundled beside the shim (`<dir>\node.exe`) or resolved via `where node`.
+#[cfg(windows)]
+fn resolve_openclaw_node_invocation(cmd_path: &str) -> Option<(String, String)> {
+    let dir = std::path::Path::new(cmd_path).parent()?;
+    let mjs = dir.join("node_modules").join("openclaw").join("openclaw.mjs");
+    if !mjs.exists() {
+        return None;
+    }
+    // Prefer a node.exe bundled alongside the shim (matches the shim's own IF EXIST check).
+    let bundled = dir.join("node.exe");
+    let node = if bundled.exists() {
+        bundled.to_string_lossy().to_string()
+    } else {
+        // `node` is a real .exe (not a shim), so Command::new("node") + CREATE_NO_WINDOW
+        // launches it window-less. resolve_node_exe() gives a full path when available.
+        resolve_node_exe().unwrap_or_else(|_| "node".to_string())
+    };
+    Some((node, mjs.to_string_lossy().to_string()))
 }
 
 fn cancel_map() -> &'static CancelMap {
