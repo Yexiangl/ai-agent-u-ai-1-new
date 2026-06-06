@@ -105,8 +105,10 @@
   node 自身加 CREATE_NO_WINDOW → 无控制台。跳过 cmd 中间层。解析失败回退原 `cmd /c`。
   新增 `resolve_openclaw_node_invocation()`。**一处改根治全部 ~18 个 openclaw 调用点。**
 - 验证：`cargo check` ✅；Windows-only 函数体用独立 stub 单独类型校验 ✅。
-- **待虚拟机验收**：①点能力中心无黑框；②回归——能力/技能列表、频道列表、一键启用、版本检查等
-  功能仍正常（执行方式从 `cmd /c .cmd` 变 `node .mjs`，需确认输出解析无差异）。
+- **真机验收（虚拟机 + 用户物理桌面）通过**：①点能力中心**实测无黑框**（用户物理桌面确认）；
+  ②回归——skills list / --version / gateway status / plugins list 新旧方式输出 SHA256 全匹配，
+  功能无损；③边界——.mjs 不存在时正确回退 `cmd /c`。
+  注：clawhub 在线市场走纯 HTTP（main.rs:3308），不经 openclaw CLI，不受本改影响。
 
 ## 两端一致性核查结论（已做，TASK-079 那轮）
 
