@@ -2578,6 +2578,37 @@ fn get_or_create_openclaw_device_identity(app: tauri::AppHandle) -> Result<serde
     }))
 }
 
+// Blocking probe: is the OpenClaw gateway actually live on :18789? Unlike a bare
+// TCP connect (which any program occupying the port would satisfy), this hits the
+// gateway-specific GET /health endpoint and checks for its {"status":"live"} /
+// {"ok":true} marker — so a port conflict can't masquerade as a running gateway.
+fn probe_gateway_health_blocking() -> bool {
+    let client = match reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(2))
+        .build()
+    {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+    // Auth is optional for /health; include it when available, ignore otherwise.
+    let mut req = client.get("http://127.0.0.1:18789/health");
+    if let Ok(token) = load_openclaw_gateway_token() {
+        req = req.header("Authorization", format!("Bearer {}", token));
+    }
+    match req.send() {
+        Ok(resp) if resp.status().is_success() => {
+            match resp.json::<serde_json::Value>() {
+                Ok(j) => {
+                    j.get("status").and_then(|v| v.as_str()) == Some("live")
+                        || j.get("ok").and_then(|v| v.as_bool()) == Some(true)
+                }
+                Err(_) => false,
+            }
+        }
+        _ => false,
+    }
+}
+
 fn load_openclaw_gateway_token() -> Result<String, String> {
     let Some(home) = home_dir() else {
         return Err("无法定位用户主目录".to_string());
@@ -4280,25 +4311,25 @@ async fn install_gateway_service() -> Result<serde_json::Value, String> {
         }
         // Start the service. Its exit code is NOT trusted: `gateway start` can
         // return non-zero when the service is already running, and this command
-        // is intentionally idempotent (called on every launch). Instead we verify
-        // the real outcome by probing whether the gateway port is listening — a
-        // genuine start failure (port conflict, task perms) is surfaced while a
-        // no-op restart of an already-running service isn't.
+        // is intentionally idempotent (called on every launch). We verify the real
+        // outcome by hitting the gateway-specific GET /health endpoint — a genuine
+        // failure (port conflict, task perms) is surfaced, while a no-op restart of
+        // an already-running service still succeeds. /health (not a bare TCP probe)
+        // ensures another program occupying :18789 can't be mistaken for the gateway.
         let _ = openclaw_command().args(["gateway", "start"]).output();
 
-        // The service can take a moment to bind the port after start; retry briefly.
-        let addr = "127.0.0.1:18789".parse::<SocketAddr>()
-            .map_err(|e| e.to_string())?;
-        let mut listening = false;
-        for _ in 0..10 {
-            if TcpStream::connect_timeout(&addr, Duration::from_millis(500)).is_ok() {
-                listening = true;
+        // The service can take a moment to come up after start; retry briefly.
+        // Worst case (genuine failure): 6 × (2s health timeout + 0.5s) ≈ 15s.
+        let mut live = false;
+        for _ in 0..6 {
+            if probe_gateway_health_blocking() {
+                live = true;
                 break;
             }
             std::thread::sleep(Duration::from_millis(500));
         }
-        if !listening {
-            return Err("网关服务已安装但未能启动（端口 18789 未监听），请稍后在本页点击「启动本地服务」重试。".to_string());
+        if !live {
+            return Err("网关服务已安装但未能启动（/health 未响应，端口可能被占用），请稍后在本页点击「启动本地服务」重试。".to_string());
         }
         Ok(serde_json::json!({ "ok": true }))
     }).await.map_err(|e| e.to_string())?
