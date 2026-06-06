@@ -260,18 +260,44 @@ fn read_json_file(path: &std::path::Path) -> Result<serde_json::Value, String> {
 #[tauri::command]
 fn read_config(app: tauri::AppHandle) -> Result<Option<serde_json::Value>, String> {
     let path = config_path(&app)?;
-    if !path.exists() {
-        return Ok(None);
+    if path.exists() {
+        match read_json_file(&path) {
+            Ok(value) => return Ok(Some(value)),
+            Err(_) => {
+                // Main file corrupt (e.g. truncated by an old non-atomic write).
+                // Fall back to the last good backup written by write_config.
+                eprintln!("config.json parse error, trying backup...");
+            }
+        }
     }
-    let value = read_json_file(&path)?;
-    Ok(Some(value))
+    let bak = path.with_extension("json.bak");
+    if bak.exists() {
+        if let Ok(value) = read_json_file(&bak) {
+            eprintln!("config.json recovered from backup");
+            return Ok(Some(value));
+        }
+    }
+    Ok(None)
 }
 
 #[tauri::command]
 fn write_config(app: tauri::AppHandle, config: serde_json::Value) -> Result<(), String> {
     let path = config_path(&app)?;
     let content = serde_json::to_string_pretty(&config).map_err(|error| error.to_string())?;
-    fs::write(path, content).map_err(|error| error.to_string())
+
+    // Atomic write so a crash / power loss / U-disk pull mid-write can't leave a
+    // truncated config.json (chat-sessions & usage-log already do this; config
+    // was the last unprotected one). Keep one .bak of the previous good copy.
+    let dir = path.parent()
+        .ok_or_else(|| "无法定位配置目录".to_string())?;
+    if path.exists() {
+        let bak = path.with_extension("json.bak");
+        // Best-effort backup; don't fail the whole write if the copy fails.
+        let _ = fs::copy(&path, &bak);
+    }
+    let tmp_path = dir.join("config.json.tmp");
+    fs::write(&tmp_path, &content).map_err(|error| format!("写入临时文件失败：{}", error))?;
+    std::fs::rename(&tmp_path, &path).map_err(|error| format!("重命名临时文件失败：{}", error))
 }
 
 #[tauri::command]
@@ -1852,7 +1878,11 @@ fn apply_hermes_model_config(token: String, model: String) -> Result<serde_json:
     let token_keys = ["DEEPSEEK_API_KEY", "KIMI_API_KEY"];
     let env_path = hermes_dir.join(".env");
     let mut env_content = if env_path.exists() {
-        fs::read_to_string(&env_path).unwrap_or_default()
+        // Do NOT swallow a read error into an empty string: the file is rewritten
+        // below, so a transient lock/permission failure would otherwise wipe any
+        // other variables the user has in .env. Surface it instead.
+        fs::read_to_string(&env_path)
+            .map_err(|e| format!("读取 .env 失败（请关闭占用该文件的程序后重试）：{}", e))?
     } else {
         String::new()
     };
@@ -4108,6 +4138,14 @@ fn open_openclaw_dashboard() -> Result<serde_json::Value, String> {
 // `Command::new("node")` cannot resolve npm-installed Node from a Tauri app.
 #[cfg(windows)]
 fn resolve_node_exe() -> Result<String, String> {
+    // Cache the resolved path: `where node` is a CLI cold-start and this is called
+    // on every gateway install. Only successful results are cached (and re-validated).
+    static CACHE: OnceLock<String> = OnceLock::new();
+    if let Some(found) = CACHE.get() {
+        if std::path::Path::new(found).exists() {
+            return Ok(found.clone());
+        }
+    }
     let mut cmd = Command::new("cmd");
     cmd.args(["/c", "where", "node"]);
     hide_command_window(&mut cmd);
@@ -4116,11 +4154,12 @@ fn resolve_node_exe() -> Result<String, String> {
         return Err("node.exe 未找到，请确认 Node.js 已安装".to_string());
     }
     let text = String::from_utf8_lossy(&out.stdout);
-    text.lines()
+    let found = text.lines()
         .next()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
-        .ok_or_else(|| "node.exe 未找到".to_string())
+        .ok_or_else(|| "node.exe 未找到".to_string())?;
+    Ok(CACHE.get_or_init(|| found).clone())
 }
 
 // Resolve openclaw's dist/index.js entry point on Windows.
@@ -4129,6 +4168,14 @@ fn resolve_node_exe() -> Result<String, String> {
 // node_modules/openclaw/dist/index.js. Falls back to %APPDATA%\npm\...\dist\index.js.
 #[cfg(windows)]
 fn resolve_openclaw_dist_js() -> Result<String, String> {
+    // Cache: this shells out `openclaw gateway status` (CLI cold start ~0.9s) and
+    // runs on every gateway install. Re-validate the cached path still exists.
+    static CACHE: OnceLock<String> = OnceLock::new();
+    if let Some(found) = CACHE.get() {
+        if std::path::Path::new(found).exists() {
+            return Ok(found.clone());
+        }
+    }
     let mut cmd = openclaw_command();
     cmd.args(["gateway", "status"]);
     let out = cmd.output().ok();
@@ -4142,7 +4189,7 @@ fn resolve_openclaw_dist_js() -> Result<String, String> {
                         if let Some(parent) = std::path::Path::new(mjs_path).parent() {
                             let index_js = parent.join("dist").join("index.js");
                             if index_js.exists() {
-                                return Ok(index_js.to_string_lossy().to_string());
+                                return Ok(CACHE.get_or_init(|| index_js.to_string_lossy().to_string()).clone());
                             }
                         }
                     }
@@ -4154,7 +4201,7 @@ fn resolve_openclaw_dist_js() -> Result<String, String> {
         let cand = std::path::PathBuf::from(&appdata)
             .join("npm").join("node_modules").join("openclaw").join("dist").join("index.js");
         if cand.exists() {
-            return Ok(cand.to_string_lossy().to_string());
+            return Ok(CACHE.get_or_init(|| cand.to_string_lossy().to_string()).clone());
         }
     }
     Err("无法定位 OpenClaw 入口 (dist/index.js)，请确认 openclaw 已安装。".to_string())
@@ -4231,9 +4278,28 @@ async fn install_gateway_service() -> Result<serde_json::Value, String> {
                     String::from_utf8_lossy(&out.stderr).trim()));
             }
         }
-        let _ = openclaw_command()
-            .args(["gateway", "start"])
-            .output();
+        // Start the service. Its exit code is NOT trusted: `gateway start` can
+        // return non-zero when the service is already running, and this command
+        // is intentionally idempotent (called on every launch). Instead we verify
+        // the real outcome by probing whether the gateway port is listening — a
+        // genuine start failure (port conflict, task perms) is surfaced while a
+        // no-op restart of an already-running service isn't.
+        let _ = openclaw_command().args(["gateway", "start"]).output();
+
+        // The service can take a moment to bind the port after start; retry briefly.
+        let addr = "127.0.0.1:18789".parse::<SocketAddr>()
+            .map_err(|e| e.to_string())?;
+        let mut listening = false;
+        for _ in 0..10 {
+            if TcpStream::connect_timeout(&addr, Duration::from_millis(500)).is_ok() {
+                listening = true;
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(500));
+        }
+        if !listening {
+            return Err("网关服务已安装但未能启动（端口 18789 未监听），请稍后在本页点击「启动本地服务」重试。".to_string());
+        }
         Ok(serde_json::json!({ "ok": true }))
     }).await.map_err(|e| e.to_string())?
 }
