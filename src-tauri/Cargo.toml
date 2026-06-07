@@ -1,6 +1,6 @@
 [package]
 name = "ai-agent-workspace"
-version = "0.1.8"
+version = "0.1.9"
 description = "AI Agent Workspace"
 authors = ["AI Agent Workspace"]
 license = ""
