@@ -749,6 +749,13 @@ fn collect_memory_file(files: &mut Vec<serde_json::Value>, hermes_root: &std::pa
 fn run_command_timeout(command: &str, args: &[&str], timeout: Duration) -> Result<String, String> {
     let mut cmd = Command::new(command);
     hide_command_window(&mut cmd);
+    run_built_command_timeout(cmd, args, timeout)
+}
+
+// Run an already-built (and already window-hidden) Command with a timeout.
+// Lets callers route hermes shims through hermes_command_from() to avoid the
+// node-console flash while reusing the same wait/timeout logic.
+fn run_built_command_timeout(mut cmd: Command, args: &[&str], timeout: Duration) -> Result<String, String> {
     let mut child = cmd
         .args(args)
         .stdout(Stdio::piped())
@@ -778,9 +785,35 @@ fn run_command_timeout(command: &str, args: &[&str], timeout: Duration) -> Resul
     }
 }
 
-fn run_command_capture_timeout(command: &str, args: &[&str], timeout: Duration) -> serde_json::Value {
-    let mut cmd = Command::new(command);
-    hide_command_window(&mut cmd);
+// Resolve the hermes binary and run it window-less (shim-aware) with a timeout.
+fn run_hermes_timeout(args: &[&str], timeout: Duration) -> Result<String, String> {
+    let bin = resolve_hermes_bin().ok_or_else(|| "未找到可执行的 Hermes 程序".to_string())?;
+    run_built_command_timeout(hermes_command_from(&bin), args, timeout)
+}
+
+// Resolve a usable hermes path: prefer which_hermes() (validated), else fall back
+// to `where/which hermes` raw output (which also matches .cmd/.bat shims that
+// which_hermes()'s executable check rejects on Windows). Mirrors how hermes_status
+// detects installation, so the runner doesn't disagree with detection.
+fn resolve_hermes_bin() -> Option<String> {
+    if let Some(bin) = which_hermes() {
+        return Some(bin);
+    }
+    hermes_binary_path().ok().filter(|p| !p.is_empty())
+}
+
+// Hermes shim-aware variant of run_command_capture_timeout (avoids node flash).
+fn run_hermes_capture_timeout(args: &[&str], timeout: Duration) -> serde_json::Value {
+    match resolve_hermes_bin() {
+        Some(bin) => run_built_command_capture_timeout(hermes_command_from(&bin), args, timeout),
+        None => serde_json::json!({
+            "ok": false, "stdout": "", "stderr": "未找到可执行的 Hermes 程序",
+            "error": "未找到可执行的 Hermes 程序"
+        }),
+    }
+}
+
+fn run_built_command_capture_timeout(mut cmd: Command, args: &[&str], timeout: Duration) -> serde_json::Value {
     let mut child = match cmd
         .args(args)
         .stdout(Stdio::piped())
@@ -864,7 +897,7 @@ fn hermes_status() -> serde_json::Value {
     let binary = hermes_binary_path();
     let installed = binary.as_ref().map(|path| !path.is_empty()).unwrap_or(false);
     let version = if installed {
-        run_command_timeout("hermes", &["--version"], Duration::from_secs(5)).ok()
+        run_hermes_timeout(&["--version"], Duration::from_secs(5)).ok()
     } else {
         None
     };
@@ -938,7 +971,7 @@ async fn check_hermes_installed() -> Result<serde_json::Value, String> {
 
 #[tauri::command]
 fn get_hermes_version() -> Result<Option<String>, String> {
-    Ok(run_command_timeout("hermes", &["--version"], Duration::from_secs(5)).ok())
+    Ok(run_hermes_timeout(&["--version"], Duration::from_secs(5)).ok())
 }
 
 #[tauri::command]
@@ -950,7 +983,7 @@ async fn get_hermes_paths() -> Result<serde_json::Value, String> {
 
 #[tauri::command]
 fn get_hermes_help() -> Result<serde_json::Value, String> {
-    Ok(run_command_capture_timeout("hermes", &["--help"], Duration::from_secs(5)))
+    Ok(run_hermes_capture_timeout(&["--help"], Duration::from_secs(5)))
 }
 
 #[tauri::command]
@@ -1857,8 +1890,7 @@ fn apply_hermes_model_config(token: String, model: String) -> Result<serde_json:
     ];
 
     for (key, value) in &config_commands {
-        let mut command = Command::new(&hermes_bin);
-        hide_command_window(&mut command);
+        let mut command = hermes_command_from(&hermes_bin);
         let output = command
             .args(["config", "set", key, value])
             .output();
@@ -1954,8 +1986,7 @@ async fn apply_hermes_reasoning_config(effort: String) -> Result<serde_json::Val
             let bak = home.join(".hermes").join(format!("config.yaml.bak-reasoning-{}", chrono_timestamp()));
             let _ = fs::copy(&config_path, &bak);
         }
-        let mut command = Command::new(&bin);
-        hide_command_window(&mut command);
+        let mut command = hermes_command_from(&bin);
         let output = command
             .args(["config", "set", "agent.reasoning_effort", &effort])
             .output();
@@ -2036,6 +2067,63 @@ fn is_executable_hermes(path: &str) -> bool {
     }
 }
 
+// Windows: npm installs a CLI as a `.cmd`/`.bat` shim that internally launches
+// `node.exe <script>` with NO window flags — so even when we set CREATE_NO_WINDOW
+// on the shim itself, node still gets a fresh *visible* console (the black flash).
+// This is the same problem TASK-082 fixed for openclaw, but the hermes probes
+// (`hermes --version`, `config set`, `cron status/list`) were never routed through
+// it. Mirror that fix: when hermes resolves to such a shim, parse out the node
+// script it targets and launch `node <script>` ourselves (window-less). Anything
+// that can't be resolved falls back to running the shim directly, so detection
+// never regresses — worst case is the pre-existing cosmetic flash.
+#[cfg(windows)]
+fn resolve_node_shim_target(cmd_path: &str) -> Option<(String, String)> {
+    let p = std::path::Path::new(cmd_path);
+    let ext = p.extension().and_then(|e| e.to_str()).unwrap_or_default();
+    if !ext.eq_ignore_ascii_case("cmd") && !ext.eq_ignore_ascii_case("bat") {
+        return None;
+    }
+    let dir = p.parent()?;
+    let content = std::fs::read_to_string(p).ok()?;
+    // npm shims reference the script as "...\node_modules\<pkg>\<entry>". Grab the
+    // node_modules-relative path and resolve it against the shim's own directory.
+    let marker = content.find("node_modules")?;
+    let tail = &content[marker..];
+    let end = tail.find('"').unwrap_or(tail.len());
+    let rel = tail[..end].replace('/', "\\");
+    let script = dir.join(&rel);
+    if !script.exists() {
+        return None;
+    }
+    // Prefer a node.exe bundled beside the shim, else resolve via `where node`.
+    let bundled = dir.join("node.exe");
+    let node = if bundled.exists() {
+        bundled.to_string_lossy().to_string()
+    } else {
+        resolve_node_exe().unwrap_or_else(|_| "node".to_string())
+    };
+    Some((node, script.to_string_lossy().to_string()))
+}
+
+// Build a window-less Command for a resolved hermes binary path. On Windows a
+// `.cmd`/`.bat` shim is redirected to `node <script>` (see resolve_node_shim_target);
+// everything else (and all non-Windows) runs the binary directly. Always applies
+// CREATE_NO_WINDOW.
+fn hermes_command_from(bin: &str) -> Command {
+    #[cfg(windows)]
+    {
+        if let Some((node, script)) = resolve_node_shim_target(bin) {
+            let mut c = Command::new(node);
+            c.arg(script);
+            hide_command_window(&mut c);
+            return c;
+        }
+    }
+    let mut c = Command::new(bin);
+    hide_command_window(&mut c);
+    c
+}
+
 #[cfg(unix)]
 fn has_executable_permission(path: &std::path::Path) -> bool {
     use std::os::unix::fs::PermissionsExt;
@@ -2105,8 +2193,7 @@ async fn read_hermes_cron_cli_status() -> Result<serde_json::Value, String> {
 
         let mut scheduler_running = false;
         let mut status_text = String::new();
-        let mut status_cmd = Command::new(&bin);
-        hide_command_window(&mut status_cmd);
+        let mut status_cmd = hermes_command_from(&bin);
         let child = status_cmd.args(["cron", "status"]).stdout(Stdio::piped()).stderr(Stdio::null()).spawn();
         if let Ok(mut child) = child {
             let started = std::time::Instant::now();
@@ -2131,8 +2218,7 @@ async fn read_hermes_cron_cli_status() -> Result<serde_json::Value, String> {
         }
 
         let mut jobs: Vec<serde_json::Value> = Vec::new();
-        let mut list_cmd = Command::new(&bin);
-        hide_command_window(&mut list_cmd);
+        let mut list_cmd = hermes_command_from(&bin);
         let child = list_cmd.args(["cron", "list"]).stdout(Stdio::piped()).stderr(Stdio::null()).spawn();
         if let Ok(mut child) = child {
             let started = std::time::Instant::now();
