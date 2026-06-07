@@ -924,38 +924,6 @@ function App() {
     document.documentElement.classList.toggle("dark", dark);
   }, [dark]);
 
-  useEffect(() => {
-    if (!ready) return;
-    let cancelled = false;
-    const detect = async () => {
-      // These three probes are independent — run them in parallel so startup
-      // isn't blocked by serial CLI cold-starts (each can take ~1s on Windows).
-      await Promise.all([
-        hermesLegacyBackend.checkHermesInstalled()
-          .then((cli) => { if (!cancelled) setHermesCli(cli); })
-          .catch(() => { /* ignore */ }),
-        hermesLegacyBackend.checkHermesApiServer()
-          .then((api) => { if (!cancelled) setHermesApi(api); })
-          .catch(() => { /* ignore */ }),
-        readHermesModelConfig()
-          .then((modelConfig) => { if (!cancelled) setHermesModelConfig(modelConfig); })
-          .catch(() => { /* ignore */ }),
-      ]);
-    };
-    detect();
-    const interval = window.setInterval(async () => {
-      if (cancelled) return;
-      try {
-          const api = await hermesLegacyBackend.checkHermesApiServer();
-        if (!cancelled) setHermesApi(api);
-      } catch { /* ignore */ }
-    }, 30_000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-    };
-  }, [ready]);
-
   // TASK-021C fix: Preload OpenClaw HTTP status at App mount
   useEffect(() => {
     if (!ready) return;
@@ -1296,7 +1264,7 @@ function formatToolItem(item: OpenClawToolItem): string {
 }
 
 function HomePage({ config, updateConfig, setActive, hermesCli, hermesApi, hermesModelConfig, chatState }: { config: AppConfig; updateConfig: (next: AppConfig) => Promise<void>; setActive: (id: RouteId) => void; hermesCli: HermesStatus | null; hermesApi: HermesApiServerStatus | null; hermesModelConfig: HermesModelConfig | null; chatState: ChatPageState }) {
-  const agentConnected = hermesApi?.running || chatState.openclawConnected;
+  const agentConnected = chatState.openclawConnected;
   const recentSessions = sortSessions(chatState.chatSessions).slice(0, 3);
   const runsRef = chatState.runsRef;
   const displayModel = formatDisplayModel(chatState.ocPrimaryModel) || "需要检查";
@@ -1544,9 +1512,6 @@ function EnginesPage({ config, updateConfig, hermesCli, hermesApi, hermesModelCo
 
   const refreshAll = async () => {
     setRefreshing(true);
-    try { await refreshHermesCli(); } catch { /* ignore */ }
-    try { await refreshHermesApi(); } catch { /* ignore */ }
-    try { const data = await readHermesModelConfig(); setHermesModelConfig(data); } catch { /* ignore */ }
     await refreshOpenClawStatus();
     setRefreshing(false);
   };
@@ -2477,8 +2442,6 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
     setShowMoveMenu(null);
   };
 
-  const hermesInstalled = hermesCli?.installed;
-  const hermesConnected = Boolean(hermesInstalled && hermesApi?.running);
   const hermesModelName = "hermes-agent";
   const [openclawStatus, setOpenclawStatus] = useState<{
     cliInstalled: boolean;
@@ -2579,10 +2542,6 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
   const send = async () => {
     if (!input.trim() || loading) return;
     if (hasRunningRun) { setError("AI Agent 正在处理上一条消息，请等待完成后再发送。"); return; }
-    if (!USE_OPENCLAW_BACKEND && !hermesConnected) {
-      setError("AI 助手未运行。");
-      return;
-    }
     setError("");
     setErrorDetail(null);
     setShowErrorDetail(false);
@@ -3476,8 +3435,8 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
                 onCompositionStart={() => { setIsComposing(true); isComposingRef.current = true; }}
                 onCompositionEnd={() => { setIsComposing(false); isComposingRef.current = false; }}
                 onKeyDown={handleKeyDown}
-                placeholder={openclawConnected || hermesConnected ? "向 AI Agent 发送消息..." : "AI 助手未连接"}
-                disabled={(!openclawConnected && !hermesConnected) || loading}
+                placeholder={openclawConnected ? "向 AI Agent 发送消息..." : "AI 助手未连接"}
+                disabled={!openclawConnected || loading}
               />
               <div className="flex items-center justify-between px-2 pb-1">
                 <span className="flex items-center gap-2">
@@ -3545,7 +3504,7 @@ function ChatPage({ config, hermesCli, hermesApi, refreshHermesApi, setActive, i
                     <Square className="h-4 w-4" />
                   </Button>
                 ) : (
-                  <Button size="icon" className="h-9 w-9 rounded-full shadow-[0_2px_8px_-2px_rgba(59,130,246,0.5)] transition-all active:scale-95 disabled:opacity-40 disabled:shadow-none" disabled={(!openclawConnected && !hermesConnected) || !input.trim()} onClick={send} title="发送" aria-label="发送">
+                  <Button size="icon" className="h-9 w-9 rounded-full shadow-[0_2px_8px_-2px_rgba(59,130,246,0.5)] transition-all active:scale-95 disabled:opacity-40 disabled:shadow-none" disabled={!openclawConnected || !input.trim()} onClick={send} title="发送" aria-label="发送">
                     <ArrowUp className="h-4 w-4" />
                   </Button>
                 )}
