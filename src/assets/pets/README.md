@@ -1,9 +1,8 @@
 # Pet avatar art
 
-The SVG files in this folder come from **Microsoft Fluent Emoji**
-(https://github.com/microsoft/fluentui-emoji), licensed under the **MIT License**.
+`cat.png`, `dog.png`, `dino.png` are custom chibi pet artwork (transparent
+background, 512×512) used for the office-companion widget.
 
-They were fetched (Flat variant) and renamed by `scripts/fetch-pets.sh`.
-Re-run that script to refresh or add species.
-
-MIT License — Copyright (c) Microsoft Corporation.
+They are processed (cropped to content, centered, padded) before being placed
+here. Replace a file with same name + size to swap a species' look; the species
+list lives in `src/lib/petAppearance.ts`.

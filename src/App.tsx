@@ -4855,138 +4855,70 @@ function MoyuCenterPage({ setActive, setChatDraft, config, updateConfig }: { set
     jumpToChat(prompts[Math.floor(Math.random() * prompts.length)]);
   };
 
+  // Quick "change your brain" actions — each just drops a preset prompt into the
+  // chat composer and jumps there. Icon + short label, shown as a compact row.
+  const quickActions = [
+    { icon: Coffee, label: "快速放松", hint: "3 分钟健康休息", tone: "text-amber-600 dark:text-amber-400", bg: "bg-amber-500/10",
+      prompt: "请给我一个 3 分钟以内可以完成的健康休息任务。要求：\n1. 不刷短视频\n2. 不沉迷\n3. 不影响正事\n4. 最好能放松眼睛、肩颈或情绪\n\n请输出：\n- 任务步骤\n- 预计用时\n- 为什么有用\n- 一句吐槽" },
+    { icon: Zap, label: "今日状态", hint: "起个状态名", tone: "text-sky-600 dark:text-sky-400", bg: "bg-sky-500/10",
+      prompt: "请用轻松幽默的方式帮我生成一个今日工作状态卡。请包含：\n1. 状态名称\n2. 状态描述\n3. 适合做的事\n4. 不适合做的事\n5. 一个 10 分钟收尾建议\n6. 一句轻松吐槽\n\n注意：这是娱乐化状态总结，不是医学或心理诊断。" },
+    { icon: Lightbulb, label: "随机冷知识", hint: "30 秒反常识", tone: "text-emerald-600 dark:text-emerald-400", bg: "bg-emerald-500/10",
+      prompt: "请给我一个 30 秒内能看完的有趣冷知识。要求：\n1. 有一点反常识\n2. 不要太长\n3. 适合工作间隙看一眼\n\n请输出：\n- 标题\n- 冷知识内容\n- 为什么有趣\n- 一句吐槽" },
+    { icon: Trophy, label: "今日成就", hint: "生成成就徽章", tone: "text-rose-600 dark:text-rose-400", bg: "bg-rose-500/10",
+      prompt: "请根据我今天完成的事情，帮我生成 3 个有趣的成就徽章。请先让我补充\"今天完成了什么\"，如果我已经提供内容，请直接生成。\n\n每个徽章请包含：\n1. 徽章名\n2. 稀有度\n3. 获得条件\n4. 吐槽说明\n\n风格轻松幽默，不要太夸张。" },
+  ];
+
   return (
-    <div className="mx-auto max-w-4xl space-y-5 py-4">
-      {/* Lightweight Hero */}
-      <div className="rounded-3xl border bg-gradient-to-br from-sky-50/60 via-background to-amber-50/40 p-6 shadow-sm">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-          <div className="space-y-2">
-            <div className="flex items-center gap-2.5">
-              <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-primary/10">
-                <Sparkles className="h-4 w-4 text-primary" />
-              </div>
-              <div>
-                <h1 className="text-lg font-bold tracking-tight">摸鱼中心</h1>
-              </div>
-              <span className="rounded-full bg-emerald-500/10 px-2.5 py-0.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
-                轻量休息
-              </span>
-            </div>
-            <p className="text-sm text-muted-foreground leading-relaxed">
-              短暂休息一下，让 AI 帮你换个脑子。
-            </p>
-          </div>
-          <div className="flex shrink-0 gap-2">
-            <Button variant="outline" size="sm" className="gap-1.5" onClick={randomPrompt}>
-              <Shuffle className="h-3.5 w-3.5" />
-              随机来一个
-            </Button>
-            <Button size="sm" className="gap-1.5" onClick={() => setActive("chat")}>
-              <MessageSquare className="h-3.5 w-3.5" />
-              去 AI 对话
-            </Button>
-          </div>
+    <div className="mx-auto max-w-3xl space-y-4 py-4">
+      {/* Compact title row */}
+      <div className="flex items-center gap-2.5">
+        <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-primary/10">
+          <Sparkles className="h-4 w-4 text-primary" />
+        </div>
+        <h1 className="text-lg font-bold tracking-tight">摸鱼中心</h1>
+        <span className="rounded-full bg-emerald-500/10 px-2.5 py-0.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
+          轻量休息
+        </span>
+        <div className="ml-auto flex gap-2">
+          <Button variant="outline" size="sm" className="gap-1.5" onClick={randomPrompt}>
+            <Shuffle className="h-3.5 w-3.5" />
+            随机来一个
+          </Button>
+          <Button size="sm" className="gap-1.5" onClick={() => setActive("chat")}>
+            <MessageSquare className="h-3.5 w-3.5" />
+            去 AI 对话
+          </Button>
         </div>
       </div>
 
-      {/* Widget Grid */}
-      <div className="grid gap-3 sm:grid-cols-3">
-        {/* 养成系桌宠 — Large Widget */}
-        <div className="sm:col-span-2">
-          <Suspense fallback={<div className="flex h-48 items-center justify-center rounded-3xl border bg-card"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>}>
-            <PetWidget pet={currentPet} lifetimeTokens={lifetimeTokens} onChange={handlePetChange} onAskAI={askPetAI} />
-          </Suspense>
-        </div>
+      {/* Pet — hero of the page */}
+      <Suspense fallback={<div className="flex h-48 items-center justify-center rounded-3xl border bg-card"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>}>
+        <PetWidget pet={currentPet} lifetimeTokens={lifetimeTokens} onChange={handlePetChange} onAskAI={askPetAI} />
+      </Suspense>
 
-        {/* 今日休息任务 — Medium Widget */}
-        <div
-          className="group relative rounded-3xl border bg-gradient-to-br from-amber-50/60 via-background to-background p-5 shadow-sm transition-all hover:shadow-md hover:-translate-y-0.5 cursor-pointer"
-          onClick={() => jumpToChat("请给我一个 3 分钟以内可以完成的健康休息任务。要求：\n1. 不刷短视频\n2. 不沉迷\n3. 不影响正事\n4. 最好能放松眼睛、肩颈或情绪\n\n请输出：\n- 任务步骤\n- 预计用时\n- 为什么有用\n- 一句吐槽")}
-        >
-          <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-amber-500/10 mb-3">
-            <Coffee className="h-5 w-5 text-amber-600 dark:text-amber-400" />
-          </div>
-          <h3 className="text-base font-semibold">快速放松</h3>
-          <p className="mt-1 text-sm text-muted-foreground leading-relaxed">
-            不刷短视频，不沉迷，不影响正事。
-          </p>
-          <div className="mt-3 space-y-1.5 text-xs text-muted-foreground">
-            <div className="flex items-center gap-2">
-              <span className="h-1.5 w-1.5 rounded-full bg-amber-400/60" />
-              30 秒闭眼休息
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="h-1.5 w-1.5 rounded-full bg-amber-400/60" />
-              1 分钟活动肩颈
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="h-1.5 w-1.5 rounded-full bg-amber-400/60" />
-              1 分钟整理桌面
-            </div>
-          </div>
-        </div>
-
-        {/* 今日状态 — Small Widget */}
-        <div
-          className="group relative rounded-3xl border bg-gradient-to-br from-sky-50/60 via-background to-background p-4 shadow-sm transition-all hover:shadow-md hover:-translate-y-0.5 cursor-pointer"
-          onClick={() => jumpToChat("请用轻松幽默的方式帮我生成一个今日工作状态卡。请包含：\n1. 状态名称\n2. 状态描述\n3. 适合做的事\n4. 不适合做的事\n5. 一个 10 分钟收尾建议\n6. 一句轻松吐槽\n\n注意：这是娱乐化状态总结，不是医学或心理诊断。")}
-        >
-          <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-sky-500/10 mb-2.5">
-            <Zap className="h-4 w-4 text-sky-600 dark:text-sky-400" />
-          </div>
-          <h3 className="text-sm font-semibold">今日状态</h3>
-          <p className="mt-0.5 text-xs text-muted-foreground leading-relaxed">
-            给今天的状态起个轻松但准确的名字。
-          </p>
-          <div className="mt-2.5">
-            <span className="inline-flex items-center rounded-lg bg-sky-500/10 px-2 py-1 text-[11px] font-medium text-sky-600 dark:text-sky-400">
-              生成状态
-            </span>
-          </div>
-        </div>
-
-        {/* 随机冷知识 — Small Widget */}
-        <div
-          className="group relative rounded-3xl border bg-gradient-to-br from-emerald-50/60 via-background to-background p-4 shadow-sm transition-all hover:shadow-md hover:-translate-y-0.5 cursor-pointer"
-          onClick={() => jumpToChat("请给我一个 30 秒内能看完的有趣冷知识。要求：\n1. 有一点反常识\n2. 不要太长\n3. 适合工作间隙看一眼\n\n请输出：\n- 标题\n- 冷知识内容\n- 为什么有趣\n- 一句轻松吐槽")}
-        >
-          <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-emerald-500/10 mb-2.5">
-            <Lightbulb className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
-          </div>
-          <h3 className="text-sm font-semibold">随机冷知识</h3>
-          <p className="mt-0.5 text-xs text-muted-foreground leading-relaxed">
-            30 秒看完一个反常识小知识。
-          </p>
-          <div className="mt-2.5">
-            <span className="inline-flex items-center rounded-lg bg-emerald-500/10 px-2 py-1 text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
-              换一个
-            </span>
-          </div>
-        </div>
-
-        {/* 今日成就 — Small Widget */}
-        <div
-          className="group relative rounded-3xl border bg-gradient-to-br from-rose-50/60 via-background to-background p-4 shadow-sm transition-all hover:shadow-md hover:-translate-y-0.5 cursor-pointer"
-          onClick={() => jumpToChat("请根据我今天完成的事情，帮我生成 3 个有趣的成就徽章。请先让我补充\"今天完成了什么\"，如果我已经提供内容，请直接生成。\n\n每个徽章请包含：\n1. 徽章名\n2. 稀有度\n3. 获得条件\n4. 吐槽说明\n\n风格轻松幽默，不要太夸张。")}
-        >
-          <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-rose-500/10 mb-2.5">
-            <Trophy className="h-4 w-4 text-rose-600 dark:text-rose-400" />
-          </div>
-          <h3 className="text-sm font-semibold">今日成就</h3>
-          <p className="mt-0.5 text-xs text-muted-foreground leading-relaxed">
-            把今天的小进展变成一枚成就徽章。
-          </p>
-          <div className="mt-2.5">
-            <span className="inline-flex items-center rounded-lg bg-rose-500/10 px-2 py-1 text-[11px] font-medium text-rose-600 dark:text-rose-400">
-              生成徽章
-            </span>
-          </div>
+      {/* Quick actions — "change your brain" shortcuts */}
+      <div>
+        <h2 className="mb-2 px-1 text-xs font-medium text-muted-foreground">换个脑子</h2>
+        <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+          {quickActions.map((a) => (
+            <button
+              key={a.label}
+              onClick={() => jumpToChat(a.prompt)}
+              className="group flex flex-col items-start gap-2 rounded-2xl border bg-card p-3.5 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-md"
+            >
+              <span className={cn("flex h-9 w-9 items-center justify-center rounded-xl", a.bg)}>
+                <a.icon className={cn("h-4 w-4", a.tone)} />
+              </span>
+              <span className="text-sm font-semibold">{a.label}</span>
+              <span className="text-[11px] leading-tight text-muted-foreground">{a.hint}</span>
+            </button>
+          ))}
         </div>
       </div>
 
       {/* Safety disclaimer — soft */}
-      <div className="rounded-2xl border border-muted/60 bg-muted/30 px-4 py-3 text-center text-xs text-muted-foreground">
-        所有内容仅为轻松娱乐，不是医学或心理诊断。点击按钮后只会填入 AI 对话输入框，不会自动发送，也不会读取文件或隐私数据。
+      <div className="rounded-2xl border border-muted/60 bg-muted/30 px-4 py-2.5 text-center text-[11px] text-muted-foreground">
+        所有内容仅为轻松娱乐，不是医学或心理诊断。点击后只会填入对话输入框，不会自动发送，也不会读取文件或隐私数据。
       </div>
     </div>
   );
